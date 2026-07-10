@@ -1,0 +1,71 @@
+# Doxygen yapılandırması — altium-monkey (viewer.py + gui.py)
+# Üretmek için:  doxygen Doxyfile   →  docs/html/index.html
+# (Kurulum: Windows için doxygen.nl/download.html, Linux: apt install doxygen)
+
+#---------------------------------------------------------------------------
+# Proje
+#---------------------------------------------------------------------------
+PROJECT_NAME           = "Altium Görselleştirme & Veri"
+PROJECT_NUMBER         = 2.9.27
+PROJECT_BRIEF          = "Altium projelerini interaktif HTML / 3B / Excel / JSON'a dönüştürür"
+OUTPUT_DIRECTORY       = docs
+OUTPUT_LANGUAGE        = Turkish
+CREATE_SUBDIRS         = NO
+
+#---------------------------------------------------------------------------
+# Girdi
+#---------------------------------------------------------------------------
+INPUT                  = viewer.py gui.py mainpage.dox
+FILE_PATTERNS          = *.py *.dox
+RECURSIVE              = NO
+INPUT_ENCODING         = UTF-8
+
+#---------------------------------------------------------------------------
+# Python ayarları (KRİTİK)
+#---------------------------------------------------------------------------
+# Python için Java benzeri çıktı önerilir
+OPTIMIZE_OUTPUT_JAVA   = YES
+# Docstring'lerdeki @brief/@param/@return komutlarının YORUMLANMASI için NO olmalı
+PYTHON_DOCSTRING       = NO
+# @brief yoksa ilk cümleyi özet say
+JAVADOC_AUTOBRIEF      = YES
+
+#---------------------------------------------------------------------------
+# Çıkarım (her şeyi belgele)
+#---------------------------------------------------------------------------
+EXTRACT_ALL            = YES
+EXTRACT_PRIVATE        = YES
+EXTRACT_STATIC         = YES
+EXTRACT_LOCAL_METHODS  = YES
+HIDE_UNDOC_MEMBERS     = NO
+SORT_MEMBER_DOCS       = NO
+SORT_BRIEF_DOCS        = NO
+
+#---------------------------------------------------------------------------
+# Uyarılar
+#---------------------------------------------------------------------------
+QUIET                  = YES
+WARNINGS               = YES
+WARN_IF_UNDOCUMENTED   = NO
+
+#---------------------------------------------------------------------------
+# HTML çıktı
+#---------------------------------------------------------------------------
+GENERATE_HTML          = YES
+HTML_OUTPUT            = html
+GENERATE_TREEVIEW      = YES
+DISABLE_INDEX          = NO
+SEARCHENGINE           = YES
+SOURCE_BROWSER         = YES
+INLINE_SOURCES         = NO
+
+#---------------------------------------------------------------------------
+# Kapatılanlar
+#---------------------------------------------------------------------------
+GENERATE_LATEX         = NO
+GENERATE_XML           = NO
+
+#---------------------------------------------------------------------------
+# Diyagramlar (Graphviz/dot kuruluysa açabilirsiniz)
+#---------------------------------------------------------------------------
+HAVE_DOT               = NO

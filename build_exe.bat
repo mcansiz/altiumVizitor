@@ -1,0 +1,38 @@
+@echo off
+chcp 65001 >nul
+title SchematicViz - EXE Paketleme
+cd /d "D:\pythonProjeler\altium-monley"
+
+echo ============================================================
+echo   SchematicViz - EXE paketleniyor (PyInstaller)
+echo ============================================================
+echo.
+
+REM PyInstaller kurulu mu? Degilse Python 3.12'ye kur.
+py -3.12 -m PyInstaller --version >nul 2>&1
+if errorlevel 1 (
+  echo PyInstaller bulunamadi - kuruluyor...
+  py -3.12 -m pip install pyinstaller
+  echo.
+)
+
+REM Derleme ayarlari SchematicViz.spec dosyasinda (collect-all listesi,
+REM PyQt6 haric tutma, kullanilmayan Qt DLL'lerini kirpan _DROP filtresi).
+REM PyQt5 icin collect-all YOK: QML/Designer/ceviriler ~50MB gomuyordu;
+REM PyInstaller'in PyQt5 hook'u gerekli cekirdegi zaten toplar.
+py -3.12 -m PyInstaller --noconfirm "D:\pythonProjeler\altium-monley\SchematicViz.spec"
+
+echo.
+if errorlevel 1 (
+  echo ############################################################
+  echo   HATA! Paketleme basarisiz oldu. Yukaridaki ciktiya bak.
+  echo ############################################################
+) else (
+  echo ============================================================
+  echo   BASARILI!  Cikti:  dist\SchematicViz.exe
+  echo ============================================================
+)
+
+echo.
+echo Pencereyi kapatmak icin bir tusa basin...
+pause >nul

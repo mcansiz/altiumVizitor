@@ -1,0 +1,22 @@
+# Python
+__pycache__/
+*.pyc
+
+# PyInstaller çıktıları
+build/
+dist/
+
+# Doxygen çıktısı
+docs/
+
+# Üretilen viewer çıktıları (30-50 MB HTML'ler)
+*.html
+*.json
+*.csv
+
+# Test Altium projeleri (şirket kart tasarımları — repo'ya girmesin)
+altium_prj/
+AltiumBasic/
+
+# Örnek/çalışma Excel dosyaları
+*.xlsx

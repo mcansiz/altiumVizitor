@@ -1,0 +1,47 @@
+/**
+@mainpage Altium Görselleştirme & Veri
+
+@section intro Genel Bakış
+
+Bu araç Altium şematik (.SchDoc) ve PCB (.PcbDoc) dosyalarını okuyup **tek-dosya,
+çevrimdışı çalışan** HTML görüntüleyiciler ve veri dosyaları üretir.
+
+@section modules Modüller
+
+- @ref viewer.py "viewer.py" — Çekirdek üretim mantığı. Şematik/PCB okuma, SVG render,
+  3B board (gerçek STEP modelleri + bakır/silkscreen dokusu), BOM/Pick&Place (CSV),
+  IC haritası / MCU pin listesi (Excel) ve AI/LLM için JSON.
+- @ref gui.py "gui.py" — viewer.py için PyQt5 masaüstü arayüzü.
+
+@section outputs Üretilen Çıktılar
+
+Görüntüleyiciler (HTML, bağımsız):
+  - Şematik viewer — interaktif şematik, komponent highlight.
+  - PCB görüntüleyici — Altium benzeri, tüm katmanlar seçilebilir.
+  - Şematik + PCB + 3B birleşik — üç yönlü cross-probe (birinde tıkla, diğerlerinde göster).
+
+Veri:
+  - BOM (CSV), Pick&Place (CSV)
+  - IC Bağlantı Haritası (Excel), MCU Pin Listesi (Excel)
+  - Kompakt JSON (AI/LLM analizi için)
+
+@section api Hızlı Başlangıç (API)
+
+@code{.py}
+import viewer
+viewer.generate_combined_viewer(
+    "proje/MyBoard.PrjPcb", "MyBoard_viz.html")
+@endcode
+
+@section deps Bağımlılıklar
+
+- Zorunlu: altium-monkey, (GUI için) PyQt5
+- Opsiyonel: cascadio + trimesh (3B'de gerçek STEP modelleri; yoksa basit bloklar)
+
+@section build Bu Dokümanı Üretmek
+
+@code{.sh}
+doxygen Doxyfile
+# çıktı: docs/html/index.html
+@endcode
+*/

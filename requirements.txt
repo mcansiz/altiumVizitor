@@ -1,0 +1,22 @@
+# Schematic Viz Generator bağımlılıkları (Python 3.12)
+# Kurulum (Windows):  py -3.12 -m pip install -r requirements.txt
+# Kurulum (Linux):    python3 -m pip install -r requirements.txt
+#
+# LINUX NOTU: altium-monkey'nin bağımlılığı wn-geometer yalnızca
+# manylinux_2_39 wheel'i dağıtıyor -> glibc >= 2.39 gerekir
+# (Ubuntu 24.04+ / Debian 13+). Ubuntu 22.04 ve öncesinde pip
+# "ResolutionImpossible: wn-geometer==2026.6.10" hatası verir.
+# Python >= 3.10 da şart.
+
+# --- Çekirdek (GUI + üretim) ---
+PyQt5>=5.15.11
+altium-monkey>=2026.6.21   # minimum önerilen sürüm (dikey pin adı düzeltmesi bu sürümde)
+openpyxl>=3.1              # Excel çıktıları (IC haritası, MCU pin listesi)
+
+# --- 3D STEP modelleri (birleşik Şematik+PCB+3D görünüm için ZORUNLU) ---
+cascadio>=0.0.17
+trimesh>=4.12
+numpy>=2.0
+
+# --- Paketleme (opsiyonel, exe üretimi için) ---
+# pyinstaller>=6.21

@@ -5,7 +5,7 @@ Wavenumber'ın ticari "viz sch 1.0" ürününün açık-kaynak alternatifi.
 [altium_monkey](https://github.com/wavenumber-eng/altium_monkey) kütüphanesi
 (Eli Hughes / Wavenumber) üzerine kurulu.
 
-**Mevcut sürüm**: `APP_VERSION` sabiti **`viewer.py`'de** tutulur (şu an 2.9.30);
+**Mevcut sürüm**: `APP_VERSION` sabiti **`viewer.py`'de** tutulur (şu an 2.9.41);
 `gui.py` oradan import eder (v2.9.29'da taşındı — HTML çıktıları da sürümü
 gösterebilsin diye, tek kaynak). Yeni özellik/düzeltme ekleyince bu sabiti
 güncelle (semver: major.minor.patch). Sürüm pencere başlığında, alt durum
@@ -105,10 +105,12 @@ path ayracı yok — her yerde `pathlib.Path` kullanılıyor (OS'a göre çözü
 ## Geliştirme Komutları
 
 ```bash
-# Bağımlılıklar (Python 3.12)
-py -3.12 -m pip install PyQt5 altium-monkey openpyxl
-# 3D STEP modelleri için ZORUNLU (yoksa birleşik görünüm üretimi hata verir):
-py -3.12 -m pip install cascadio trimesh numpy
+# Bağımlılıklar (Python 3.12) — requirements.txt tüm listeyi içerir
+# (PyQt5, altium-monkey, openpyxl + 3D için zorunlu cascadio/trimesh/numpy)
+# LINUX: wn-geometer (altium-monkey bağımlılığı) manylinux_2_39 wheel'i
+# dağıttığından glibc >= 2.39 gerekir (Ubuntu 24.04+); eski dağıtımda
+# pip ResolutionImpossible verir. Python >= 3.10 şart.
+py -3.12 -m pip install -r requirements.txt
 
 # Çalıştır
 py -3.12 gui.py
@@ -153,6 +155,21 @@ Bir değişiklik yaptıktan sonra:
 ## HTML Viewer Özellikleri (özet)
 
 - Grid layout (4 sütun), tüm sayfalar tek pan/zoom kanvasında
+- **Not / kutu (annotation) araçları** (v2.9.38+, v2.9.39'da Foxit tarzına
+  revize): toolbar'da **Not / Kutu / Kaydet**. Not: butona bas + tıkladığın
+  yerde DOĞRUDAN yaz (typewriter, prompt yok; Enter = yeni satır, dışına
+  tıkla = bitir, boş = eklenmez). Kutu: sürükleyerek ince (1.5) amber çerçeve.
+  Tüm öğeler tıkla-SEÇ → sürükle-taşı; kutular köşe tutamaçlarından
+  boyutlandırılır; seçiliyken **Del** siler; seçimde mini bar (−/+/renk/×)
+  notta yazı boyutu (4–48), kutuda kenar kalınlığı (0.5–8) ve RENK (not
+  yazısı / kutu kenarı — v2.9.40) ayarlar. Not KUTUSUZ çıplak yazıdır
+  (v2.9.40; varsayılan koyu kırmızı #c62828). Nota çift tık = yerinde
+  düzenle. Esc: araç → seçim sırasıyla bırakır. Otomatik kayıt
+  localStorage'da (`schviz-anno:<proje>` anahtarı). **Kaydet** notları HTML'e
+  gömüp Chromium'da AÇIK DOSYANIN ÜSTÜNE yazar (File System Access; ilk
+  kayıtta dosya seçtirir, handle oturumda saklanır → sonrakiler sessiz ✓;
+  v2.9.41). Firefox/engelli ortamda `{proje}_notlu.html` kopyası indirir.
+  Yüklemede localStorage ile gömülü veriden `ts`'i yeni olan kazanır.
 - **Sol panel katlanabilir** (v2.9.23+): sağ üst köşedeki küçük ◂/▸ ok butonu
   veya `B` kısayolu; kapalıyken 26px şerit kalır. Komponent popup'ı (panele
   dock'lu) açılırsa veya `/` ile arama açılırsa panel otomatik açılır. Durum
@@ -293,6 +310,307 @@ mesajına bak.
   bu API olmayabilir (graceful fallback var, "veri yok" der).
 
 ## Çözülen Sorunlar (tarihçe)
+
+- **Annotation: Kaydet artık açık dosyanın ÜSTÜNE yazabiliyor (v2.9.41,
+  kullanıcı isteği)**: Kaydet her seferinde `_notlu.html` kopyası indiriyordu;
+  kullanıcı var olan dosyanın üstüne kaydetmek istedi. Tarayıcı güvenliği
+  `file://` sayfanın kendi dosyasına SESSİZCE yazmasına izin vermez — çözüm
+  **File System Access API** (Chromium; `window.showSaveFilePicker` bu
+  ortamda `file://` altında da mevcut, headless'ta doğrulandı): (1) İlk
+  Kaydet'te kayıt diyaloğu açılır, `suggestedName` = açık dosyanın adı
+  (`location.pathname`'den; srcdoc iframe'de yok → `{proje}_notlu.html`);
+  kullanıcı mevcut dosyayı seçince üstüne yazılır. (2) Dönen handle
+  `annoFileHandle`'da oturum boyunca saklanır → sonraki Kaydet'ler DİYALOGSUZ
+  aynı dosyaya yazar (`queryPermission`/`requestPermission` 'granted'
+  kontrolüyle; hata olursa handle düşürülüp normal akışa dönülür). Başarıda
+  buton 1.5s '✓' gösterir. (3) `AbortError` (vazgeçme) hiçbir şey yapmaz;
+  BAŞKA hata (örn. `NotAllowedError` — user-activation/iframe kısıtı) ve API
+  yokluğu (Firefox) eski indirme fallback'ine düşer. Klon üretimi
+  `annoBuildHtml()` fonksiyonuna ayrıldı; onclick async oldu (testlerde
+  `await onclick()` gerekir). CDP 5/5: sahte picker ile ilk kayıt (picker 1
+  kez + içerik + ad + ✓), ikinci kayıt sessiz (picker sayısı sabit), iptal
+  (yazma/indirme yok), API yok → indirme, NotAllowedError → indirme.
+
+- **Annotation: kutusuz not + renk seçici + min yazı 4 (v2.9.40, kullanıcı
+  geri bildirimi 2)**: (1) Notun sarı arka plan kutusu KALDIRILDI — çıplak
+  yazı (Foxit typewriter görünümü). Tıklama/sürükleme yüzeyi için ölçülen
+  bbox boyutunda görünmez hit-rect eklendi: `fill='rgba(0,0,0,0)'` — şeffaf
+  ama "painted" olduğundan pointer-events yakalar (`fill:none` YAKALAMAZ,
+  bilinen SVG tuzağı). (2) Mini bar'a `<input type=color>` eklendi
+  (`annoColorInp`): seçili notun yazı rengini / kutunun kenar rengini canlı
+  değiştirir (`a.color`; not varsayılanı #c62828 koyu kırmızı, kutu #ffb300
+  amber — eski veri alansızsa varsayılan uygulanır, geriye uyumlu). Bar
+  gösterilirken input değeri seçili öğenin renginden set edilir; yerinde
+  yazma editörü de notun rengini `style.color` ile gösterir. Editör arka
+  planı sarıdan yarı saydam beyaza (`rgba(255,255,255,0.72)` + gri kesik
+  kenar) alındı — kutusuz görünümle tutarlı. (3) Yazı boyutu alt sınırı
+  8→**4** (adım 2 aynı). CDP testi 7/7: kutusuz render (tek rect=anno-hit),
+  hit-rect ile seçim, renk değişimi not+kutu, min fs 4, editör rengi,
+  localStorage kalıcılığı. Test betiği notu: `Runtime.evaluate` üst kapsamı
+  değerlendirmeler arası KALICI — `const` isimleri çakışır, her testi IIFE
+  ile sarmala.
+
+- **Annotation Foxit tarzına revize: yerinde yazma + seçim/taşıma/boyutlandırma
+  + Del ile silme (v2.9.39, kullanıcı geri bildirimi)**: v2.9.38'in prompt'lu
+  akışı ve kalın kutu kenarı beğenilmedi (Foxit PDF editör referans gösterildi).
+  (1) **Typewriter**: not eklerken prompt yerine tıklanan yerde contenteditable
+  div (`#anno-editor`, `plaintext-only`; desteklenmezse `true` fallback) —
+  canvas İÇİNDE olduğundan zoom/pan ile birlikte ölçeklenir; Enter = yeni
+  satır (SVG'de tspan'ler, `white-space:pre` ile birebir), blur/Esc = bitir,
+  boş = eklenmez/silinir. Editör keydown'ı `stopPropagation` (Del/B gibi ana
+  kısayollar karışmasın); nota çift tık aynı editörü açar. (2) **Seçim
+  modeli**: tıkla-seç (`annoSel`) → kesikli mavi çerçeve + kutuda 4 köşe
+  tutamacı (ekran-sabit boyut, `__annoUi` `applyT`'den her karede çağrılır —
+  `var` ile bildirilir ki modül kurulmadan önceki applyT çağrıları `typeof`
+  guard'ından güvenle geçsin, `let` TDZ tuzağı YOK). Sürükle = taşı (3px
+  eşik), köşe tutamacı = boyutlandır (min 2), mouseup'ta tek `annoStore`.
+  `annoLayer` mousedown'ı `stopPropagation` ile pan'i keser; taşıma sonrası
+  click `annoJustDrew` bayrağıyla yutulur. (3) **Del/Backspace** seçiliyken
+  siler (aktif eleman input/select/contenteditable ise DEĞİL); Esc önce araç,
+  sonra seçim bırakır. "N.Sil" (tümünü sil) butonu kullanıcı isteğiyle
+  KALDIRILDI. (4) **Mini bar** (`#anno-bar`, ekran uzayında seçili öğenin
+  üstünde, pan/zoom'da izler): −/+ notta yazı boyutu (8–48, adım 2), kutuda
+  kenar kalınlığı (0.5–8, adım 0.5); × sil. (5) Kutu kenarı 3→**1.5** ve
+  ayarlanabilir (`a.sw`); ince kenar seçilebilsin diye görünmez geniş
+  hit-rect (`.anno-hit`, `pointer-events:stroke`, min 6) eklendi — görünür
+  rect `pointer-events:none` oldu; tutamaç kuralı `rect.anno-handle` yazılır
+  (özgüllük `.anno-box rect` ile eşit, SONRA geldiği için kazanır). Kutu
+  çizimi bitince otomatik seçilir. Not yüksekliği artık satır sayısı×fs×1.3
+  (+10) — eski tek satır 14px ≈ 28 korunur (v2.9.38 verisiyle uyumlu; fs/sw
+  eksikse varsayılan). Kaydet klonu temizliğine `#anno-editor` + `#anno-bar`
+  eklendi. Headless Edge + CDP: 13 etkileşim testi (typewriter çok satır,
+  yerinde düzenleme, boş=sil, bar ±, mouse-event simülasyonlu taşı/boyutlandır,
+  Del/Esc, editörde Del güvenliği, temiz klon) + kayıtlı kopya round-trip
+  yeniden PASS.
+
+- **Şematik: not ekleme + kutu içine alma + temizleme + notlu HTML kaydetme
+  (v2.9.38, kullanıcı isteği)**: Toolbar'a dört düğme: **Not** (tıklanan yere
+  yapışkan sarı not), **Kutu** (sürükleyerek amber çerçeve), **N.Sil** (tümünü
+  temizle, confirm'li), **Kaydet** (notlar gömülü HTML kopyası indir). Veri
+  KANVAS koordinatında yeni `#anno-layer` SVG'sinde tutulur (arc-layer gibi
+  canvas ile transform olur → pan/zoom'da şemayla birlikte hareket eder; LOD
+  bitmap modunda da canlı kalır). Araç aktifken `#viewport.anno-mode` →
+  crosshair imleç + şema SVG'leri ve mevcut `.anno`'lar pointer-events:none;
+  pan mousedown'ı `if (annoTool) return` ile kilitli; boş-alan-tık
+  seçim-temizleme `annoTool || annoJustDrew` korumalı (kutu çizimini bitiren
+  click'i mouseup'taki setTimeout(0)'lık bayrak yutar — click aynı görevde
+  timer'dan ÖNCE dispatch edilir). Esc yalnız araçtan çıkar, seçime dokunmaz
+  (keydown'da öncelikli dal). Nota çift tık düzenler (boş = sil), kutu
+  KENARINA çift tık siler — kutu içi tıklamayı yutmasın diye rect
+  `pointer-events:stroke`. **Kalıcılık iki katmanlı**: (1) her değişiklikte
+  localStorage `schviz-anno:<proje>` (`build_html`'e yeni `project_name`
+  parametresi, iki çağrı noktası da geçirir; kayıt `ts` damgalı); (2)
+  **Kaydet** canlı DOM'u klonlayıp runtime durumunu temizler (lod-bitmap +
+  lod-ready, sch-hl-overlay, anno-layer, hit/comp-highlight sınıfları, canvas
+  transform/lod sınıfları, arc-layer içeriği, popup/tip/sidebar durumu) ve
+  notları baştan beri template'te duran `<script type="application/json"
+  id="anno-embed">` slotuna gömüp `{proje}_notlu.html` olarak indirir
+  (listeler/LOD kopyada script'lerce yeniden kurulur). Yüklemede localStorage
+  ile gömülü veriden `ts`'i YENİ olan kazanır (aynı makinede son düzenleme,
+  yeni makinede gömülü veri görünür). **İki kritik gömme detayı**: (a) gömülü
+  JSON'da `<` → `\\u003c` kaçışı (not metninde script kapatma etiketi geçse
+  bile tag erken kapanmaz; JSON string'inde geçerli escape); (b) inline
+  script İÇİNE literal script-kapatma etiketi YAZILAMAZ — ilk denemede bir
+  YORUM satırında geçen etiket HTML parser'ı erken kapattı (node --check ile
+  yakalandı, yorum yeniden yazıldı). Birleşik görünümdeki şematik iframe'i
+  özelliği otomatik taşır (aynı build_html); oradaki Kaydet şematik-tek HTML
+  indirir. Headless Edge + CDP doğrulama (18 kontrol): render/store, reload
+  sonrası localStorage'dan yükleme, gömülü-veri önceliği, araç aç/Esc kapat,
+  kaydedilen kopyanın KENDİSİ açılıp gömülüden notları yüklüyor + LOD
+  yeniden kuruluyor + zoom çalışıyor; `</script>`+`<` içeren not metni
+  round-trip'te birebir korunuyor (3 script tag'i sabit).
+
+- **Performans: LOD PCB + 3D'ye taşındı, her viewer'a LOD toggle butonu
+  (v2.9.37, kullanıcı isteği — GUI checkbox yerine HTML arayüzünde)**:
+  (1) **PCB LOD** (`pcbLodBuild` vd.): pan/tekerlek serisi BOYUNCA görünür
+  katmanların tek bitmap'i (`#lod-canvas`, uzun kenar 2600px, `k=2600/max(VIEW)`)
+  gösterilir; svg'nin ALTINDA durduğundan overlay'ler (net-hl, hl-marker, pad
+  etiketleri) üstte canlı kalır; katmanlar `visibility:hidden` (inline `display`
+  katman aç/kapa durumunu taşıdığından ona dokunulmaz). Şematikten farklar:
+  dinlenmede HEP canlı SVG (PCB'de uzak zoom'da da tıklama yaygın); bitmap
+  kendi çözünürlüğünün ~4 katı zoom'a kadar kullanılır (`lodK*4/dpr`), ötesinde
+  canlı SVG (görünür alan küçük → raster ucuz). Katman aç/kapa (layer item,
+  Hepsi/Temizle, Üst/Alt, ↑ en-üste) `pcbLodInvalidate()` → `lodGen` sayacı
+  (üretim SIRASINDA eskirse `done`'da yeniden tetiklenir), 500ms sakinlikte
+  yeniden üretim; hazır olana dek canlı SVG. Bilinen kısıtlar: bitmap'te
+  `vector-effect:non-scaling-stroke` uygulanmaz (sayfa CSS'i SVG-image'a
+  geçmez — hareket anında iz kalınlıkları mm-gerçek görünür) ve net highlight
+  karartması bitmap'e yansımaz; ikisi de yalnız hareket anında, durunca aynı.
+  (2) **3D LOD = dinamik çözünürlük**: döndürme/pan/zoom boyunca
+  `renderer.setPixelRatio(min(basePR,0.6))` + `resize()` (~6× az piksel),
+  220ms sessizlikte tam çözünürlük. `Döndür` (autoRot) etkilenmez.
+  (3) **Toggle butonları**: şematik+PCB toolbar'da `#lod-toggle` (.tool-btn.active
+  — şematik CSS'ine .active stili eklendi), 3D `#tb3d`'de `#v-lod` (.b3d.on).
+  Tercihler localStorage'da: şematik `schviz-ui.lod`, PCB `schviz-ui.pcbLod`,
+  3D `schviz-3dlod` anahtarı. Kapatınca her zaman canlı SVG/tam çözünürlük;
+  şematik bitmap'leri yine üretilir (aç/kapa anında etkili), PCB bitmap'i
+  kapalıyken üretilmez, açınca üretilir. GUI değişikliği YOK (kullanıcı
+  runtime HTML toggle'ını tercih etti).
+
+- **Performans: yakın zoom'da da etkileşim sırasında bitmap (v2.9.36,
+  kullanıcı testi 2)**: v2.9.35 LOD'u uzak zoom'u akıcı yaptı ama kullanıcı
+  yazı okumak için yakınlaşınca (scale > LOD_OFF → canlı SVG) takılma geri
+  geliyordu — yakın zoom'da da her zoom adımı/pan karosu re-raster. Çözüm
+  **harita uygulaması deseni**: pan sürüklemesi ve tekerlek zoom SERİSİ
+  boyunca (`panInteract` — .panning ile birlikte; `wheelInteract` —
+  `lodWheelTouch`, 180ms sessizlikte biter) `scale <= LOD_MAX_I = 4` iken
+  bitmap gösterilir (harekette hafif yumuşak ama akıcı); hareket durunca
+  canlı SVG'ye dönülür → tıklama/metin seçimi/hover DURAN görünümde aynen.
+  `updateLod` artık `rest(histerezis) || (etkileşim && scale<=4)` mantığında.
+  **Beyaz parlama önlemi**: bitmap→SVG dönüşünde `.lod` kalkar ama `.lod-fade`
+  sınıfı bitmap'i 160ms daha ÜSTTE tutar (bitmap DOM'da svg'den sonra) →
+  Chromium SVG karolarını bitmap'in arkasında rasterize eder, boş karo/flash
+  görünmez. `LOD_RES` alt sınırı 1.25'e çekildi (etkileşim bitmap'i scale ~2'de
+  okunur kalsın; ~2-3MB/sayfa). scale > 4'te etkileşimde de canlı SVG (bitmap
+  oraya yetmez; görünür alan küçük olduğundan raster zaten ucuz). Headless
+  Edge + CDP doğrulaması: scale 2 durunca '', tekerlek serisinde 'lod',
+  seri bitince ~0.5s'te '', scale 6'da seri açıkken '' (üst sınır), 0.3'te
+  'lod'. PCB viewer'a taşıma hâlâ aday iş.
+
+- **Performans: şematik LOD — uzak zoom'da sayfa bitmap'leri (v2.9.35,
+  kullanıcı testi sonrası)**: v2.9.34'ün hızlı iyileştirmeleri Chromium'da
+  belirgin fark yaratmadı; `chrome://gpu` "Hardware accelerated" doğrulandı →
+  darboğaz Chromium'un mimarisi (GPU raster açıkken bile her scale değişiminde
+  görünür karolar Skia display-list'ten yeniden rasterize edilir; binlerce
+  `<text>` glifli SVG'de kare süresini aşar). Çözüm **LOD**: `buildLods()`
+  sayfa yüklendikten sonra idle'da (`requestIdleCallback`, 800ms timeout
+  fallback'li) her sayfanın SVG'sini `XMLSerializer`→`Image`→`canvas` ile BİR
+  KEZ bitmap'e çevirir (`.lod-bitmap`, kart-body boyutu × `LOD_RES =
+  min(1.6, devicePixelRatio)` — kart 700×470 olduğundan sayfa başına ~1.3-2MB).
+  `scale < 0.85`'te (`LOD_ON`) `#canvas.lod` sınıfıyla bitmap gösterilir, SVG
+  `visibility:hidden` olur (display:none DEĞİL — highlight/aramanın
+  getBoundingClientRect ölçümleri bozulmasın); `scale > 1.05`'te (`LOD_OFF`,
+  histerezis) canlı SVG'ye dönülür — tıklama/metin seçimi/hover zaten o
+  zoom'da yapılır (fitToSheet ~1.9 scale ürettiğinden sayfa okuma HEP canlı
+  SVG'dedir). Bitmap'i kaydırıp ölçeklemek compositor'da bedavaya yakın →
+  overview/çok-sayfa gezinmesi Chromium'da da akıcı. Net yayları (arc-layer,
+  Python-önhesaplı pozisyon) ve kart çift-tık navigasyonu LOD'da çalışır;
+  SVG-içi tıklama/hover uzak zoom'da devre dışı (zaten okunmaz). `Image`
+  yüklemesi önce blob URL, `onerror`'da data: URI fallback (file:// ortam
+  farkları); üretilemeyen sayfa canlı SVG'de kalır (davranış regresyonu yok).
+  `preserveAspectRatio="none"` sayesinde drawImage hedef boyuta gerilir, ekran
+  görünümüyle birebir. Headless Edge 150 + CDP (`--remote-debugging-port` +
+  `Runtime.evaluate`; `--dump-dom` bu makinede sessizce boş çıktı verdi) ile
+  file:// altında doğrulandı: 2 sahte sayfada bitmap üretimi + `.lod-ready`,
+  scale 0.3→`lod` sınıfı var, scale 2→kalkıyor, 0.3'e dönünce geri geliyor.
+  PCB viewer'a taşınmadı (aday iş — kullanıcı test sonucuna göre).
+
+- **Performans: Chromium'da pan/zoom takılması — 3 hızlı iyileştirme (v2.9.34,
+  kullanıcı bildirimi)**: HTML çıktı Firefox'ta akıcı, Chromium tabanlılarda
+  (Edge/Chrome/Yandex) gezinirken takılıyordu. Mimari fark: Firefox (WebRender)
+  vektör/metni her karede GPU'da çizer; Chromium ise `will-change:transform`
+  katmanını CPU'da karolara rasterize eder — her scale değişiminde görünür
+  karoların TAMAMI yeniden rasterize olur, pan'de yeni karolar anlık çizilir
+  (binlerce `<text>` içeren SVG'de pahalı). Üç düzeltme (şematik + PCB viewer):
+  (1) **Pan sırasında hit-testing kapalı**: gerçek pan başlayınca (hareket eşiği
+  aşılınca, mousedown'da DEĞİL) viewport'a `.panning` sınıfı eklenir → şematikte
+  `.sheet-body svg`, PCB'de `#pcb-svg` `pointer-events:none` olur; mouseup'ta
+  kalkar. Böylece sürükleme boyunca her mousemove'daki binlerce-eleman hit-test'i
+  ve `:hover` stil/repaint zinciri kesilir. Sınıf harekette eklendiğinden
+  hareketsiz tıklamanın hedef elemanı değişmez (şematikte metin/tıklanabilir
+  öğeler pan'i zaten başlatmaz; PCB'de pan-sonrası tıklama `moved` bayrağıyla
+  yutulur). Şematikte pan başlarken `#svg-tip` balonu da gizlenir (asılı
+  kalmasın). (2) **`.sheet-card`'a `contain:layout paint`**: hover/highlight
+  repaint'i tek karta sınırlanır, tüm kanvas katmanını boyatmaz (kartın kendi
+  box-shadow'u containment'tan etkilenmez — descendant değil). (3) **Tekerlek
+  zoom rAF birleştirme**: zoom çarpanları `wheelF`'te birikir, kare başına TEK
+  transform uygulanır (`requestAnimationFrame` + `wheelPend` bayrağı) — yüksek
+  çözünürlüklü tekerlek/trackpad kare başına birden çok event üretip her birinde
+  tam re-raster tetikliyordu; tek event/kare durumunda matematik birebir aynı.
+  **Kod dışı notlar**: Chromium'da asıl büyük şüpheli yazılım rasterizasyonu —
+  `chrome://gpu`'da "Rasterization: Hardware accelerated" olmalı (Win10 + eski
+  Intel iGPU sürücüsünde blocklist'e takılıp software'e düşer). Firefox'un ~2GB
+  RAM'i bu boyutta (30-50MB, gömülü SVG + three.js) tek dosya HTML için normal
+  (WebRender retained display list + süreç modeli), sızıntı değil. Köklü çözüm
+  (yapılmadı, aday iş): LOD — uzak zoom'da sayfa başına bitmap `<img>`, yakında
+  canlı SVG.
+
+- **Arama/cross-probe: hiyerarşik kanal designator'ları (R103 ↔ R103_diffI2C_1)
+  (v2.9.33, kullanıcı sorusu)**: Repeat'li projede şematik MANTIKSAL designator
+  gösterir (R103), board'da her kanal kopyası FİZİKSEL ad alır
+  (`$Component_$RoomName$Index` → R103_diffI2C_1..3; BRK-210'da 30 böyle
+  komponent). PCB araması birebir eşleşme yaptığından R103 "bulunamadı" diyordu;
+  şematik→PCB/3D cross-probe da bu parçalarda sessizce çalışmıyordu. Dört nokta
+  düzeltildi: (1) PCB araması: tam eşleşme yoksa `channelCopies()` (AD_ öneki)
+  ile kanal kopyaları bulunur; Enter'a her basışta SIRADAKİ kopyaya geçilir
+  (R103 → _1 → _2 → _3 → _1…). (2) PCB xprobe-in: mantıksal ad gelirse ilk
+  kanal kopyası vurgulanır. (3) 3D xprobe-in: aynı önek çözümlemesi
+  (meshByDesig üzerinde). (4) Şematik xprobe-in: fiziksel ad gelirse mantıksal
+  tabana iner — önce `_<sayı>` kanal indeksi atılır (U2_1→U2), olmadıysa
+  `_<oda>_<indeks>` soneki atılır (R103_diffI2C_1→R103); v2.9.30 Excel
+  taban-designator fallback'iyle aynı kural. Multipart çözümleme
+  (`resolveCompDesignator`, IC2A→IC2) değişmedi. Şematik template'inde regex
+  `\d` Python string'inde `\\d` yazılır (komşu kodla tutarlı; py3.12
+  SyntaxWarning'i önler).
+
+- **3D: delikler artık GERÇEK delik (v2.9.32, kullanıcı isteği)**: Delikler board
+  yüzeyinde koyu boyalı disk olarak duruyordu (v2.9.6 doku yaklaşımı); kullanıcı
+  gri arka planın delikten görünmesini istedi. Üç parçalı çözüm: (1) `_extract_3d`
+  yeni **`drills`** listesi üretir: ≥0.6mm çaplı YUVARLAK delikler (THT pad +
+  büyük via; `hole_shape==0` şartı slot/kare delikleri eler, küçük via'lar
+  kesilmez — dokudaki koyu nokta tented-via görünümü olarak kalır, earcut de
+  şişmez; >1200 olursa büyükler öncelikli kırpılır). Eleman: `[x, y, r, plated]`
+  (board-merkezli mm; plated = `pad.is_plated`, via=1). Delik çemberi board
+  bbox'ının TAMAMEN içinde değilse atlanır + (x,y) 0.1mm'de dedupe edilir —
+  earcut ASLA throw etmediğinden bozuk girdi (kenar kesen/çakışan delik)
+  sessizce bozuk üçgenleme üretir, JS try/catch'i bu modu yakalayamaz; emniyet
+  Python'da. (2) JS `buildScene`: delikler board `ExtrudeGeometry`'sinden
+  **`shape.holes`** ile gerçekten kesilir (curveSegments=16). **Delik yönü
+  CCW (`absarc(..., false)`) ŞART**: r128 hole-winding normalizasyonu yalnız
+  dış kontur CCW gelip ters çevrildiğinde çalışır; bu board'ların outline'ı CW
+  geldiğinden CW delikler duvar normallerini ters bırakıyordu (NPTH duvarı
+  görünmez — adversarial review yakaladı, gömülü r128 kaynağından kanıtlandı).
+  Kenar çizgisi DELİKSİZ geometriden üretilir (192 delik çemberi çizgi
+  kalabalığı yapmasın). Kaplamalı deliklere **altın barrel**: tek
+  `InstancedMesh` (CylinderGeometry openEnded, rotateX(π/2), DoubleSide;
+  scale(rr, rr, th+0.04), rr = min(r·0.96, r−0.05) — mutlak ≥50µm boşluk küçük
+  deliklerde z-fight'ı önler; **`frustumCulled=false` ŞART** — r128 instanced
+  mesh'i birim-silindir bounding sphere'iyle cull edip köşe zoom'unda tüm
+  barrel'ları kaybettiriyordu). NPTH montaj delikleri barrel almaz (çıplak FR4
+  duvar). (3) `addSurface`: doku kanvasında delik içleri `destination-out` ile
+  ŞEFFAF delinir (altın annular ring korunur; r·k+0.8px pay koyu delik boyasının
+  AA kalıntısını temizler). Dünya→kanvas eşlemesi düzlem yerleşiminden türetilir
+  (`u=(x−(s.cx−w/2))·cw/s.w`, `v=((s.cy+h/2)−y)·chh/s.h`) — üst ve alt doku aynı
+  XY eşlemesini kullandığından (v2.9.4) tek formül iki yüzde de çalışır; sayısal
+  doğrulandı (<0.1px sapma, 36/36 delik). Delme yalnız `surf.ok=1` iken yapılır:
+  `_build_board_surface` outline'ı güvenle bulamayıp merkezleme fallback'ine
+  düşerse doku dünya-gerçeğinden kayabilir — dünya-demirli delme o durumda koyu
+  delik boyasını hilal olarak açığa çıkarırdı; delme kapatılınca eski (boyalı)
+  görünüm korunur. Sonuç: delikten bakınca barrel'ın altın iç duvarı + arka plan
+  görünür (Altium/KiCad 3D gibi). Eski tarayıcı (DecompressionStream yok): doku
+  zaten yok, geometri delikleri yine kesilir. `D.drills` guard'lı — eski/PCB'siz
+  veride davranış değişmez.
+
+- **3D: KESİN Altium yerleşim semantiği — tüm sezgiseller kaldırıldı (v2.9.31,
+  kullanıcı bildirimi: BRK-210'da GYK-J2/GYK-J3/D7 yönleri KiCad'e göre yanlış)**:
+  GYK-J2/J3 (D-sub, BOTTOM katman) yüzleri ters, D7 (P600 bükük-bacak aksiyel
+  diyot, rx=90/ry=270) uzun ekseni etrafında 90° yuvarlanmıştı. Kök neden İKİ
+  katmanlı: (1) v2.7.0'dan beri `model_3d_rotz` "tutarsız" sanılıp atılmıştı —
+  aslında SORUN ROTASYON SIRASIYMIŞ. Ampirik tarama (8 aday sıra × 67
+  sıra-ayırt-edici parça, outline-bbox eşleşmesi) kesin sırayı verdi:
+  **R = Rz(rotz)·Ry(roty)·Rx(rotx)** (67/67; eski varsayım Rx·Ry yalnız 41/67).
+  rotz içte değil dışta ama Rx en içte — rotz atılınca tilt'li parçada eksik Rz
+  ROLL hatasına dönüşüyordu (D7'nin bacakları yana bakıyordu); outline-fit/flip/
+  J4-özel-durumu hep bunun yamalarıydı. (2) Alt katman `scale.z=-1` AYNAydı
+  (det=-1) — simetrik parçalarda görünmez ama D-sub gibi yönlü parçada yüz 180°
+  ters + D-şekli ters elli. Doğrusu **anchor'dan geçen X ekseni etrafında 180°
+  proper rotation** (GYK-J2 pad skoru: Rx(180)=0.98mm vs Ry(180)=24.9mm —
+  tartışmasız). Konum да kesinleşti: **anchor = `model_2d_x/y`** (birim 0.1µmil
+  → ×1e-4 mil), **dikey = `model_3d_dz`** (model orijini board yüzeyinin dz
+  üstünde; 257/274 parçada zmin+dz≈0, THT'lerde zmin+dz = standoff = pin
+  çıkıntısı — birebir). **Doğrulama: bacak↔pad hizalaması** — BRK-213/210: 274
+  STEP gövdede ort. 0.33mm (kalan sapmalar artefakt: D7 bacak ucu 0.33mm ama
+  bacak orta-segmentinde verteks yok; GYK-J3'ün 4.4mm'lik iki pad'i modelde
+  metali olmayan kasa delikleri); Smart_MCU: 75/75 < 0.8mm. **Kaldırılanlar**:
+  `_model_inplane_angle`, `_model_body_base`, outline-fit `ang/zdeg`, `flip`,
+  J4 `zdeg+=180` özel durumu, `pins_up`/`zu`, pad-merkez konumlama, standoff/
+  zb-clamp seating — hepsi kesin veriyle gereksizleşti (v2.9.17-28'in tilt/
+  flip/seating yamaları bu sınıfın tamamını kapsıyordu). JS `buildModels`
+  sadeleşti: quaternion q = Qz·Qy·Qx (+ altta Qx(π) premultiply), konum
+  (cx, cy, ±(th/2+dz)). `model_2d` yoksa (0,0) outline-centroid fallback;
+  anchor-centroid MESAFESİ kötü-veri sinyali değildir (origin'i kenarda
+  modellenmiş Smart_MCU P1/U1'de 31-33mm meşru fark var — mesafe eşiği
+  denendi ve kaldırıldı).
 
 - **Excel: NC pinler + Desig/Pin Say. sütunları + MCU başta + önek hariç tutma
   + KRİTİK ad-çakışması düzeltmesi (v2.9.30, kullanıcı geri bildirimi 2)**:

@@ -26,7 +26,7 @@ from altium_monkey.altium_schdoc import AltiumSchDoc
 
 # Uygulama sürümü — tek kaynak burası; gui.py buradan import eder.
 # HTML çıktılarında sağ üst köşedeki rozette görünür (build saati yerine).
-APP_VERSION = "2.9.30"
+APP_VERSION = "2.9.41"
 
 # Dikey pin adlarının doğru render edildiği minimum altium_monkey sürümü.
 # Bu sürümden öncesinde STM32 gibi IC'lerde dikey pinler yatay çiziliyordu.
@@ -1270,6 +1270,7 @@ def _build_board_surface(all_layers, view_w, view_h, log=print, board_wh_mm=None
     bcx, bcy = vbx + vbw / 2.0, vby + vbh / 2.0
     # Kırpılmış viewBox (varsayılan = tam viewBox; board tespit edilirse daraltılır)
     cvbx, cvby, cvbw, cvbh = vbx, vby, vbw, vbh
+    aligned = False   # board outline güvenle bulundu mu (delik alfa-delme kapısı)
     board_w_mm = board_h_mm = None
     if board_wh_mm and board_wh_mm[0] and board_wh_mm[1]:
         board_w_mm, board_h_mm = float(board_wh_mm[0]), float(board_wh_mm[1])
@@ -1299,6 +1300,7 @@ def _build_board_surface(all_layers, view_w, view_h, log=print, board_wh_mm=None
         if candidates:
             candidates.sort(key=lambda c: c[0])
             bcx, bcy = candidates[0][1], candidates[0][2]
+            aligned = True
             win_bbox = candidates[0][3]
             log("  · board outline merkezi: %s eşleşme (bcx=%.2f, bcy=%.2f, %d aday)"
                 % ("boyut+#C0A000" if candidates[0][0] == 0 else "boyut",
@@ -1320,6 +1322,7 @@ def _build_board_surface(all_layers, view_w, view_h, log=print, board_wh_mm=None
                     "(silk çözünürlüğü artar)" % (vbw, vbh, cvbw, cvbh))
         elif hint_only is not None:
             bcx, bcy = hint_only
+            aligned = True
             log("  · board outline boyut eşleşmedi, #C0A000 ipucu kullanıldı.")
         else:
             log("  · board outline bulunamadı — doku merkezlendi (hizalama yaklaşık).")
@@ -1406,7 +1409,11 @@ def _build_board_surface(all_layers, view_w, view_h, log=print, board_wh_mm=None
     log(f"  ✓ 3D yüzey dokusu: top {len(top)//1024}KB + bot {len(bot)//1024}KB (gzip)")
     # Düzlem boyutu = KIRPILMIŞ viewBox boyutu; ofset kırpılmış origin'i hesaba katar.
     # Board merkezi (bcx,bcy) yine dünya origin'ine düşer (board mesh de orada).
-    return {"top": top, "bot": bot, "gz": 1,
+    # "ok": board outline güvenle bulundu → doku dünya-gerçeğine demirli; delik
+    # alfa-delme yalnız bu durumda yapılır. Fallback (merkezleme sezgiseli)
+    # dokuyu kaydırabilir — delme dünya-koordinatlı olduğundan koyu delik boyası
+    # hilal olarak açığa çıkardı; delmeyi kapatmak eski (boyalı) görünümü korur.
+    return {"top": top, "bot": bot, "gz": 1, "ok": 1 if aligned else 0,
             "cx": round(cvbx + cvbw / 2.0 - bcx, 3),
             "cy": round(bcy - cvby - cvbh / 2.0, 3),
             "w": round(cvbw, 3), "h": round(cvbh, 3)}
@@ -1491,187 +1498,6 @@ def _extract_step_models(pcb, log=print):
     return out
 
 
-def _model_inplane_angle(model, rx_deg, ry_deg, ang):
-    """@brief STEP modelinin düzlem-içi (Z) yerleşim açısını (derece) hesapla.
-
-    @details Modelin ayak-izi (footprint) uzun ekseninin, tilt (rx,ry) three.js
-    'XYZ' Euler'i ile uygulandıktan SONRAKİ **işaretli** dünya-XY yönü izlenir ve
-    gövde-outline açısına (@p ang) hizalanır: `zdeg = ang − φ`.
-
-    Eski yöntem `psi ∈ {0°,90°}` yalnız EKSENİ verirdi (büyüklük snap'i); modelin
-    hangi UCA baktığını (±180°) veremezdi. Bu yüzden ry=180 gibi tilt'li parçalar
-    (MOV, SSR) düzlemde 180° ters görünüyordu. Burada tilt matrisinin sütunları
-    (native X/Y/Z eksenlerinin tilt sonrası görüntüsü) alınır; ayak-izinde en
-    baskın eksen (native uzunluk × XY-düzlemine yatkınlık) seçilip işaretli açısı
-    kullanılır → yön doğru gelir. Tilt=0 ve iyi-davranan parçalarda sonuç eski
-    davranışla aynıdır (yalnız işaretin kaybolduğu tilt'li parçalar düzelir).
-
-    @param model models[mid] sözlüğü ({"parts":[{"v":[x,y,z,...]},...]}) veya None
-    @param rx_deg Model tilt X (derece)
-    @param ry_deg Model tilt Y (derece)
-    @param ang Gövde-outline uzun-kenar açısı (derece)
-    @return Düzlem-içi Z açısı `ang − φ` (derece). model yoksa `ang` döner.
-    """
-    import math as _m
-    if not model:
-        return ang
-    a = _m.radians(rx_deg); b = _m.radians(ry_deg)
-    ca, sa = _m.cos(a), _m.sin(a); cb, sb = _m.cos(b), _m.sin(b)
-    # T = Rx(a)@Ry(b) sütunları = native X/Y/Z eksenlerinin tilt sonrası görüntüsü
-    cols = [(cb, sa * sb, -ca * sb), (0.0, ca, sa), (sb, -sa * cb, ca * cb)]
-    mn = [float("inf")] * 3
-    mx = [float("-inf")] * 3
-    for pt in (model.get("parts") or []):
-        v = pt.get("v")
-        if not v:
-            continue
-        for k in range(0, len(v) - 2, 3):
-            for j in range(3):
-                val = v[k + j]
-                if val < mn[j]:
-                    mn[j] = val
-                if val > mx[j]:
-                    mx[j] = val
-    ext = [(mx[j] - mn[j]) if mx[j] > mn[j] else 0.0 for j in range(3)]
-    # ayak-izinde en baskın eksen: native uzunluk × XY düzlemine yatkınlık
-    best_i, best_score = 0, -1.0
-    for i in range(3):
-        score = ext[i] * _m.hypot(cols[i][0], cols[i][1])
-        if score > best_score:
-            best_score, best_i = score, i
-    phi = _m.degrees(_m.atan2(cols[best_i][1], cols[best_i][0]))
-    return ang - phi
-
-
-def _model_body_base(model, rx_deg, ry_deg, flip, phi_deg):
-    """@brief Tilt+flip+recenter sonrası gövde tabanı z'si + alttan-monte tespiti.
-
-    @details Altium'un `standoff_height` değeri bu kütüphanede bazı parçalarda
-    negatif/güvenilmez → doğrudan Z ofseti olarak uygulanınca gövdeyi board'a
-    gömüyor (SSR ~2mm gömülü). Seating'de gövde tabanının board'un ALTINA inmesini
-    engellemek için, `buildModels`'in yaptığı yönlendirmeyi (tilt Rx@Ry, flip'liyse
-    180° `(cosφ,sinφ,0)` ekseni, sonra min.z→0 recenter) birebir replike edip
-    modelin z-dilimlerinden **gövdenin başladığı** en düşük z'yi döndürür (kesit
-    XY-alanı tepe değerin %30'una ulaştığı ilk dilim). Bacak/pin (ince) bunun
-    altında kalır. JS'te `z0eff = max(z0, −zb)` ile yalnız gömülen parça
-    KALDIRILIR; havada duran (MOV gibi) veya doğru oturan parça DEĞİŞMEZ.
-
-    Ek olarak **alttan-monte** (bükük bacak, ör. Bukum-CPC40055ST SSR) tespiti
-    yapar: yönlendirme sonrası ince uzantılar (bacaklar) SADECE gövdenin
-    ÜSTÜNDE kalıyorsa (altta hiç bacak yok) parça fiziksel olarak ancak board
-    ALTINA monte edilebilir → gövde üstü board alt yüzüne yaslanmalı (v2.9.28).
-
-    @param model models[mid] sözlüğü veya None
-    @param rx_deg,ry_deg Model tilt (derece)
-    @param flip buildModels'teki 180° düzeltme uygulanıyor mu
-    @param phi_deg Flip ekseni açısı (= ang − zdeg); XY-alan profilini etkiler
-    @return (zb, zt, pins_up): zb=gövde tabanı yerel z (mm, flanş-atlamalı),
-            zt=gövde ÜSTÜ yerel z (son geniş bölgenin tavanı), pins_up=True ise
-            parça alttan-monte (bacaklar yukarı, altta bacak yok). model yoksa
-            (0.0, 0.0, False).
-    """
-    import math as _m
-    if not model:
-        return 0.0, 0.0, False
-    a = _m.radians(rx_deg); b = _m.radians(ry_deg)
-    ca, sa = _m.cos(a), _m.sin(a); cb, sb = _m.cos(b), _m.sin(b)
-    # tilt satırları (T = Rx(a)@Ry(b))
-    r0 = (cb, 0.0, sb)
-    r1 = (sa * sb, ca, -sa * cb)
-    r2 = (-ca * sb, sa, ca * cb)
-    # flip: 180° (cosφ,sinφ,0) ekseni etrafında → world-frame, tilt SONRASI (R=F@T).
-    #   180° dönüşte n_z=0 olduğundan z→−z (φ'den bağımsız); x,y in-plane döner.
-    fp = _m.radians(phi_deg)
-    nx, ny = _m.cos(fp), _m.sin(fp)
-    def xf(x, y, z):
-        # tilt
-        tx = r0[0]*x + r0[1]*y + r0[2]*z
-        ty = r1[0]*x + r1[1]*y + r1[2]*z
-        tz = r2[0]*x + r2[1]*y + r2[2]*z
-        if flip:
-            d = nx*tx + ny*ty            # n·v (n_z=0)
-            tx, ty, tz = 2*d*nx - tx, 2*d*ny - ty, -tz
-        return tx, ty, tz
-    zs = []; xs = []; ys = []
-    for pt in (model.get("parts") or []):
-        v = pt.get("v")
-        if not v:
-            continue
-        for k in range(0, len(v) - 2, 3):
-            x, y, z = xf(v[k], v[k+1], v[k+2])
-            xs.append(x); ys.append(y); zs.append(z)
-    if len(zs) < 3:
-        return 0.0, 0.0, False
-    zmin = min(zs); zmax = max(zs)
-    H = zmax - zmin
-    if H <= 1e-6:
-        return 0.0, 0.0, False
-    NB = 40
-    binx_min = [None] * NB; binx_max = [None] * NB
-    biny_min = [None] * NB; biny_max = [None] * NB
-    for x, y, z in zip(xs, ys, zs):
-        k = int((z - zmin) / H * NB)
-        if k >= NB:
-            k = NB - 1
-        if binx_min[k] is None:
-            binx_min[k] = binx_max[k] = x; biny_min[k] = biny_max[k] = y
-        else:
-            if x < binx_min[k]: binx_min[k] = x
-            if x > binx_max[k]: binx_max[k] = x
-            if y < biny_min[k]: biny_min[k] = y
-            if y > biny_max[k]: biny_max[k] = y
-    areas = [((binx_max[k] - binx_min[k]) * (biny_max[k] - biny_min[k]))
-             if binx_min[k] is not None else 0.0 for k in range(NB)]
-    amax = max(areas)
-    if amax <= 0:
-        return 0.0, 0.0, False
-    # Geniş (>=%30) kesit bölgelerini bul; gövde tabanı = en ALT bölgenin tabanı.
-    # AMA en alttaki bölge KISA (<=2 dilim) VE üstünde BOŞLUKLA ayrıysa, bu bir izole
-    # ince flanş/tab'dır (gövde değil) → atla, üstteki gerçek gövdeye geç. Böylece
-    # SSR gibi altında flanş+boşluk olan modellerde gövde board'a oturur (flanş içeri
-    # iner); TB/MOV/SMD gibi izole-flanşı olmayan parçalar DEĞİŞMEZ (v2.9.21).
-    thr = 0.30 * amax
-    wide = [a >= thr for a in areas]
-    regions = []
-    k = 0
-    while k < NB:
-        if wide[k]:
-            s = k
-            while k < NB and wide[k]:
-                k += 1
-            regions.append((s, k - 1))
-        else:
-            k += 1
-    if not regions:
-        return 0.0, 0.0, False
-    i = 0
-    # YALNIZ en alttaki bölge KISA (<=2 dilim) VE üstünde BOŞLUK varsa, BİR KEZ atla
-    # (SSR'nin izole taban flanşı). Fazla atlama yok → gövdesi baştan başlayan
-    # (TB/MOV/SMD) parçalar etkilenmez.
-    if len(regions) >= 2:
-        s, e = regions[0]
-        gap = regions[1][0] - e - 1
-        # flanş şartı: en alt bölge KISA (<=2 dilim) + üstünde bölgeye KÜÇÜK boşlukla
-        # (<1.5mm) bağlı → gerçek gövdenin hemen altındaki montaj flanşı (SSR). Boşluk
-        # BÜYÜKSE (ör. TB tabanı ile üst özelliği arası ~9mm) bu bölge gövdenin kendi
-        # TABANIDIR → atlanmaz.
-        if (e - s + 1) <= 2 and 1 <= gap and gap * H / NB < 1.5:
-            i = 1
-    zb = regions[i][0] * H / NB     # recenter'lı yerel z (zmin→0), gövde bölgesi tabanı
-    # Alttan-monte tespiti: gövde ÜSTÜ (son geniş bölgenin tavanı) üzerinde >=1mm
-    # ince uzantı (bacak) var AMA ilk geniş bölgenin altında bacak yok (<=0.3mm)
-    # → bacaklar yalnız yukarı bakıyor → parça ancak board ALTINA monte edilebilir
-    # (bükük bacaklı SSR gibi). YALNIZ flip'li (180° tilt) parçalarda geçerli:
-    # Altium'un rx=180'i "board düzleminden çevir" demektir; flip'siz düz parçada
-    # altı-düz gövde + üstte ince tel çıkıntısı (L8 trafosu gibi) yanlış pozitif
-    # veriyordu. (BRK-213: 865 parçada yalnız 9 SSR işaretlendi, kullanıcı
-    # görsel doğruladı; L8 flip=False olduğundan dışarıda, board üstünde kalır.)
-    zt = (regions[-1][1] + 1) * H / NB
-    below_thin = regions[0][0] * H / NB
-    pins_up = flip and (H - zt) >= 1.0 and below_thin <= 0.3
-    return zb, zt, pins_up
-
-
 def _extract_3d(pcb, log=print):
     """@brief PCB'den 3D görünüm verisi çıkar: board dış hattı + kalınlık + komponent
     
@@ -1714,30 +1540,9 @@ def _extract_3d(pcb, log=print):
         # olmayan extrude prizma ile çizilir.
         models = _extract_step_models(pcb, log)
         comps = pcb.components
-        # Komponent pad merkezleri (board-centered mm). Bazı kütüphanelerde 3D
-        # gövde-outline'ı pad'lerden KAYIK oturtuluyor (SSR ~11mm, J4/TB birkaç mm)
-        # → model yanlış konuma düşüyordu. Pad merkezi fiziksel doğru yer (KiCad ile
-        # eşleşir); STEP placement konumu için outline centroid yerine bunu kullan.
-        pad_cent = {}
-        try:
-            acc = {}
-            for pd in pcb.pads:
-                pi = getattr(pd, "component_index", None)
-                if pi is None:
-                    continue
-                try:
-                    px = float(pd.x_mils) * MIL2MM - cx
-                    py = float(pd.y_mils) * MIL2MM - cy
-                except Exception:
-                    continue
-                acc.setdefault(pi, []).append((px, py))
-            for pi, lst in acc.items():
-                pad_cent[pi] = (sum(a for a, _ in lst) / len(lst),
-                                sum(bb for _, bb in lst) / len(lst))
-        except Exception:
-            pass
         bodies = []        # modelsiz gövdeler (extrude fallback)
         placements = []    # STEP modelli gövdeler
+        U2MM = 1e-4 * MIL2MM    # model_2d_x/y ve model_3d_dz birimi: 0.1 µmil → mm
         for b in pcb.component_bodies:
             vo = getattr(b, "outline", None)
             if not vo:
@@ -1754,76 +1559,46 @@ def _extract_3d(pcb, log=print):
             pcx = sum(p[0] for p in poly) / len(poly)
             pcy = sum(p[1] for p in poly) / len(poly)
             ci = b.component_index
-            desig = None; layer = "top"; comp_rot = 0.0
+            desig = None; layer = "top"
             if isinstance(ci, int) and 0 <= ci < len(comps):
                 desig = comps[ci].designator
                 layer = "bottom" if str(comps[ci].layer).upper().startswith("B") else "top"
-                try:
-                    comp_rot = float(comps[ci].get_rotation_degrees())
-                except Exception:
-                    comp_rot = 0.0
             h = (b.overall_height_mils or 0) * MIL2MM
             if h <= 0.001:
                 h = 0.4
             so = (b.standoff_height_mils or 0) * MIL2MM
             mid = getattr(b, "model_id", None)
             if mid and mid in models:
-                # gövde outline'ının (yerleşim dikdörtgeni) uzun-kenar açısı →
-                # model bu açıya döndürülür (rotz tahminine gerek kalmaz)
-                ang = 0.0
-                if len(poly) >= 3:
-                    import math as _m
-                    e1 = (poly[1][0]-poly[0][0], poly[1][1]-poly[0][1])
-                    e2 = (poly[2][0]-poly[1][0], poly[2][1]-poly[1][1])
-                    l1 = e1[0]*e1[0]+e1[1]*e1[1]; l2 = e2[0]*e2[0]+e2[1]*e2[1]
-                    e = e1 if l1 >= l2 else e2
-                    ang = _m.degrees(_m.atan2(e[1], e[0]))
+                # KESİN Altium yerleşimi (v2.9.31): R = Rz(rotz)·Ry(roty)·Rx(rotx),
+                # konum = model_2d anchor'ı (model orijini oraya düşer), dikey =
+                # model_3d_dz (orijin board yüzeyinin dz üstünde). Alt katmanda parça
+                # anchor'dan geçen X ekseni etrafında 180° DÖNDÜRÜLÜR (proper
+                # rotation — eski scale.z=-1 aynası D-sub gibi yönlü parçaların
+                # yüzünü ters gösteriyordu). Sıra/eksen/anchor/dz, iki board'da tüm
+                # STEP parçaların bacak↔pad hizalamasıyla ampirik doğrulandı
+                # (BRK-213 274 gövde + Smart_MCU 75 gövde; ort. hata ~0.3mm).
+                # Eski outline-fit/flip/pins_up sezgiselleri bu kesin veriyle
+                # gereksizleşti ve kaldırıldı (bkz. Çözülen Sorunlar v2.9.31).
                 rxv = float(getattr(b, "model_3d_rotx", 0) or 0)
                 ryv = float(getattr(b, "model_3d_roty", 0) or 0)
-                # Düzlem-içi Z açısı: modelin GERÇEK (işaretli) ayak-izi uzun
-                # ekseni tilt (rx,ry) sonrası izlenip outline açısına (ang)
-                # hizalanır. Eski psi∈{0°,90°} snap'i yalnız ekseni verir, yönü
-                # (±180°) veremezdi → ry=180 gibi tilt'li parçalar (MOV, SSR) ters
-                # görünüyordu (bkz. Çözülen Sorunlar v2.9.17).
-                zdeg = _model_inplane_angle(models.get(mid), rxv, ryv, ang)
-                # ry=180 (rx=0) ayak-izini X'te AYNALADIĞINDAN (yansıma) φ-metodu
-                # düzlem-içi açıyı 180° ters veriyor (ör. J4: zdeg=-90 ama doğru=+90=rotz).
-                # Bu grupta (yalnız J4) 180° in-plane düzeltmesi uygula. MOV (rx=90,ry=180)
-                # bunu flip ile telafi ettiğinden dahil DEĞİL. (v2.9.21)
-                if round(rxv) % 360 == 0 and round(ryv) % 360 == 180:
-                    zdeg += 180
-                # 180° tilt bazı parçaları baş-aşağı çeviriyor → JS'te ayak-izi uzun
-                # ekseni etrafında 180° çevrilerek düzeltilir. AMA yalnız rx=180
-                # (SSR/L) veya rx=90&ry=180 (MOV) durumunda; **saf ry=180** (rx=0,
-                # ör. J4 kenar konnektörü) Altium'un DOĞRU yönelimi → flip YOK
-                # (v2.9.20: eski "rx=180 or ry=180" kuralı J4'ü yanlışlıkla çeviriyordu).
-                rxm = round(rxv) % 360; rym = round(ryv) % 360
-                flip = (rxm == 180) or (rxm == 90 and rym == 180)
-                # Gövde tabanı (yerel z): negatif/güvenilmez standoff gövdeyi board'a
-                # gömmesin diye JS'te z0eff=max(z0,-zb) ile kullanılır (yalnız kaldırır).
-                zb, zt, pins_up = _model_body_base(models.get(mid), rxv, ryv,
-                                                   flip, ang - zdeg)
-                # Konum: gövde-outline centroid'i (pcx,pcy) bazı parçalarda pad'lerden
-                # kayık → pad merkezini tercih et (varsa), yoksa outline centroid.
-                # İSTİSNA (v2.9.28): alttan-monte bükük parçada bacaklar gövdenin
-                # BİR KENARINDAN çıkar → pad merkezi = bacak sırası, gövdeyi oraya
-                # merkezlemek ~8.5mm kaydırır (SSR). Altium'un çizdiği gövde-outline
-                # centroid'i bu sınıfta fiziksel doğru yerdir (maske açıklığıyla
-                # eşleşir, kullanıcı doğruladı).
-                pos = (pcx, pcy) if pins_up else pad_cent.get(ci, (pcx, pcy))
-                pe = {
+                rzv = float(getattr(b, "model_3d_rotz", 0) or 0)
+                dzv = float(getattr(b, "model_3d_dz", 0) or 0) * U2MM
+                m2x = float(getattr(b, "model_2d_x", 0) or 0)
+                m2y = float(getattr(b, "model_2d_y", 0) or 0)
+                if m2x == 0 and m2y == 0:
+                    # model_2d verisi yok (eski dosya) → outline centroid'e düş.
+                    # NOT: anchor-centroid mesafesi kötü-veri sinyali DEĞİL —
+                    # origin'i kenarda modellenmiş parçalarda 30mm+ meşru fark var
+                    # (Smart_MCU P1/U1), mesafe eşiği onları bozuyordu.
+                    ax, ay = pcx, pcy
+                else:
+                    ax = m2x * U2MM - cx
+                    ay = m2y * U2MM - cy
+                placements.append({
                     "m": mid, "d": desig, "layer": layer,
-                    "cx": round(pos[0], 3), "cy": round(pos[1], 3), "z0": round(so, 3),
-                    "rx": rxv, "ry": ryv, "flip": flip, "zb": round(zb, 3),
-                    "ang": round(ang, 2), "zdeg": round(zdeg, 2),
-                }
-                if pins_up:
-                    # Alttan-monte (bükük bacak): gövde ÜSTÜ board alt yüzüne yaslanır,
-                    # bacaklar delikten yukarı çıkar. JS bu değeri z0eff olarak
-                    # DOĞRUDAN kullanır (max-clamp devre dışı; o kural "gövde hep
-                    # board üstüne oturur" varsaydığından bu sınıfı üste kaldırıyordu).
-                    pe["zu"] = round(-(th_mm + zt), 3)
-                placements.append(pe)
+                    "cx": round(ax, 3), "cy": round(ay, 3), "dz": round(dzv, 3),
+                    "rx": rxv, "ry": ryv, "rz": rzv,
+                })
             else:
                 col = int(b.body_color_3d or 0x808080)
                 if col in (0x808080, 0x7F7F7F, 0):
@@ -1834,11 +1609,60 @@ def _extract_3d(pcb, log=print):
                     color = "#%02x%02x%02x" % (r, g, bl)
                 bodies.append({"d": desig, "layer": layer, "h": round(h, 3),
                                "z0": round(so, 3), "color": color, "poly": poly})
+        # GERÇEK delikler (v2.9.32): ≥0.6mm çaplı yuvarlak delikler (THT pad +
+        # büyük via) JS'te board geometrisinden shape.holes ile kesilir, doku
+        # alfası delinir → içinden arka plan görünür (eski görünüm: koyu boyalı
+        # disk). 4. eleman plated bayrağı: 1 → altın barrel (delik duvarı) çizilir,
+        # 0 (NPTH montaj deliği) → çıplak FR4 duvar. Küçük via'lar (<0.6mm)
+        # kesilmez — dokudaki koyu nokta (tented via görünümü) yeterli ve yüzlerce
+        # mini delik earcut üçgenlemesini şişirir.
+        drills = []
+        try:
+            # earcut ASLA throw etmez — bozuk girdi (outline dışı/kenarı kesen
+            # delik, çakışan pad+via) sessizce bozuk üçgenleme üretir; JS'teki
+            # try/catch bu modu YAKALAYAMAZ. Emniyet Python'da: delik çemberi
+            # board bbox'ının tamamen içinde olmalı, (x,y) dedupe edilir.
+            hw = (maxx - minx) / 2 - 0.05
+            hh = (maxy - miny) / 2 - 0.05
+            seen_xy = set()
+            def _add(x, y, r, plated):
+                if abs(x) + r > hw or abs(y) + r > hh:
+                    return
+                key = (round(x, 1), round(y, 1))
+                if key in seen_xy:
+                    return
+                seen_xy.add(key)
+                drills.append([round(x, 2), round(y, 2), round(r, 3), plated])
+            for pd in pcb.pads:
+                try:
+                    hs = float(getattr(pd, "hole_size_mils", 0) or 0) * MIL2MM
+                    if hs < 0.6 or int(getattr(pd, "hole_shape", 0) or 0) != 0:
+                        continue      # yuvarlak olmayan (slot/kare) delik kesilmez
+                    _add(float(pd.x_mils) * MIL2MM - cx,
+                         float(pd.y_mils) * MIL2MM - cy, hs / 2,
+                         1 if getattr(pd, "is_plated", True) else 0)
+                except Exception:
+                    continue
+            for vv in (getattr(pcb, "vias", None) or []):
+                try:
+                    hs = float(getattr(vv, "hole_size_mils", 0) or 0) * MIL2MM
+                    if hs < 0.6:
+                        continue
+                    _add(float(vv.x_mils) * MIL2MM - cx,
+                         float(vv.y_mils) * MIL2MM - cy, hs / 2, 1)
+                except Exception:
+                    continue
+            if len(drills) > 1200:    # earcut emniyeti: en büyükler öncelikli
+                drills.sort(key=lambda d: -d[2])
+                drills = drills[:1200]
+        except Exception:
+            drills = []
         log(f"  ✓ 3D: board {maxx-minx:.0f}×{maxy-miny:.0f}mm · {th_mm:.2f}mm ·"
-            f" {len(placements)} STEP + {len(bodies)} extrude gövde")
+            f" {len(placements)} STEP + {len(bodies)} extrude gövde ·"
+            f" {len(drills)} gerçek delik")
         return {"available": True, "thickness": round(th_mm, 3),
                 "outline": outline, "bodies": bodies,
-                "models": models, "placements": placements,
+                "models": models, "placements": placements, "drills": drills,
                 "w": round(maxx - minx, 2), "h": round(maxy - miny, 2)}
     except Exception as e:
         log(f"  · 3D çıkarılamadı: {e}")
@@ -2119,6 +1943,7 @@ def generate_viewer(
     html = build_html(
         data["sheets"], data["net_list"], data["components"], timestamp,
         inter_sheet_color, intra_sheet_color, pcb=data.get("pcb"),
+        project_name=data["project_name"],
     )
     out = Path(output_path)
     out.parent.mkdir(parents=True, exist_ok=True)
@@ -2246,6 +2071,7 @@ def generate_combined_viewer(
     sch_html = build_html(
         data["sheets"], data["net_list"], data["components"], timestamp,
         inter_sheet_color, intra_sheet_color, pcb=data.get("pcb"),
+        project_name=data["project_name"],
     )
 
     # 2) PCB HTML (tam katmanlı görüntüleyici)
@@ -2329,6 +2155,7 @@ def build_3d_html(d3d, timestamp, project_name):
   <button class="b3d" id="v-bot">Alt</button>
   <button class="b3d" id="v-rot">Döndür</button>
   <button class="b3d on" id="v-comp" title="Komponentleri gizle/göster — çıplak board'u incele">Parçalar</button>
+  <button class="b3d on" id="v-lod" title="LOD: döndürme/zoom sırasında çözünürlük düşürülür (akıcılık), durunca netleşir">LOD</button>
 </div>
 <div id="lbl3d"></div>
 <div id="info3d">Sürükle: döndür · Tekerlek: zoom · Sağ-sürükle: kaydır · Tıkla: komponent</div>
@@ -2377,14 +2204,57 @@ function buildScene(){
   const d3 = new THREE.DirectionalLight(0xfff0e0, 0.5); d3.position.set(20,40,-120); scene.add(d3);
 
   const th = D.thickness || 1.6;
-  // Board levhası (yeşil FR4) + kenar çizgisi
-  const bgeo = new THREE.ExtrudeGeometry(shapeFrom(D.outline), {depth:th, bevelEnabled:false});
+  // Board levhası (yeşil FR4). Delikler (≥0.6mm: THT pad + büyük via) v2.9.32'den
+  // itibaren shape.holes ile GERÇEKTEN kesilir → içinden arka plan görünür
+  // (doku alfası da addSurface'te deliniyor). ExtrudeGeometry hole winding'ini
+  // kendisi normalize eder; kesim patlarsa deliksiz geometriye düşülür.
+  const bshape = shapeFrom(D.outline);
+  (D.drills||[]).forEach(dr=>{
+    const p = new THREE.Path();
+    // aClockwise=false (CCW) ŞART: r128 ExtrudeGeometry delik winding'ini yalnız
+    // dış kontur CCW gelip ters çevrildiğinde normalize eder; bu board'ların
+    // outline'ı CW geldiğinden CW delik duvar normalleri ters kalıyordu (NPTH
+    // duvarı backface-cull ile görünmezdi). CCW delik iki dalda da kanonik.
+    p.absarc(dr[0], dr[1], dr[2], 0, Math.PI*2, false);
+    bshape.holes.push(p);
+  });
+  let bgeo;
+  try { bgeo = new THREE.ExtrudeGeometry(bshape, {depth:th, bevelEnabled:false, curveSegments:16}); }
+  catch(e){ bgeo = new THREE.ExtrudeGeometry(shapeFrom(D.outline), {depth:th, bevelEnabled:false}); }
   const board = new THREE.Mesh(bgeo, new THREE.MeshStandardMaterial(
     {color:0x0c6b32, metalness:0.12, roughness:0.72}));
   board.position.z = -th/2; scene.add(board); dimReg(board.material, null);
-  const edge = new THREE.LineSegments(new THREE.EdgesGeometry(bgeo),
+  // Kenar çizgisi DELİKSİZ geometriden: yüzlerce delik çemberi çizgi kalabalığı
+  // yapmasın (delik kenarını zaten barrel/duvar gösteriyor).
+  const edge = new THREE.LineSegments(new THREE.EdgesGeometry(
+    new THREE.ExtrudeGeometry(shapeFrom(D.outline), {depth:th, bevelEnabled:false})),
     new THREE.LineBasicMaterial({color:0x0a431f}));
   edge.position.z = -th/2; scene.add(edge); dimReg(edge.material, null);
+  // Kaplamalı (plated) delik duvarları: altın barrel — tek InstancedMesh (tek draw
+  // call). Yarıçap deliğinkinden %4 küçük: board'un yeşil delik duvarıyla z-fight
+  // olmasın (altın önde kalır). NPTH montaj delikleri barrel almaz (çıplak FR4).
+  const plated = (D.drills||[]).filter(d=>d[3]);
+  if(plated.length && THREE.InstancedMesh){
+    const cyl = new THREE.CylinderGeometry(1, 1, 1, 16, 1, true);
+    cyl.rotateX(Math.PI/2);   // silindir ekseni Y→Z
+    const bmat = new THREE.MeshStandardMaterial({color:0xb99043, metalness:0.72,
+      roughness:0.40, side:THREE.DoubleSide});
+    const inst = new THREE.InstancedMesh(cyl, bmat, plated.length);
+    const m4 = new THREE.Matrix4();
+    plated.forEach((d,i)=>{
+      // boşluk: %4 ama en az 50µm — küçük deliklerde (0.6mm) 12µm oransal boşluk
+      // kameranın derinlik hassasiyetinin altında kalıp z-fight yapabiliyordu
+      const rr = Math.min(d[2]*0.96, d[2]-0.05);
+      m4.makeScale(rr, rr, th+0.04);
+      m4.setPosition(d[0], d[1], 0);
+      inst.setMatrixAt(i, m4);
+    });
+    inst.instanceMatrix.needsUpdate = true;
+    // r128 InstancedMesh'i TABAN geometrinin (birim silindir, origin) bounding
+    // sphere'iyle frustum-cull eder → köşeye zoom'da tüm barrel'lar kaybolurdu
+    inst.frustumCulled = false;
+    scene.add(inst); dimReg(bmat, null);
+  }
   addSurface();   // bakır + pad + silkscreen dokusu
 
   // Komponentler (extrude gövdeler)
@@ -2431,7 +2301,27 @@ function addSurface(){
         const cw = ar>=1 ? MAX : Math.round(MAX*ar);
         const chh = ar>=1 ? Math.round(MAX/ar) : MAX;
         const cv = document.createElement('canvas'); cv.width=cw; cv.height=chh;
-        cv.getContext('2d').drawImage(img, 0, 0, cw, chh);
+        const ctx = cv.getContext('2d');
+        ctx.drawImage(img, 0, 0, cw, chh);
+        // Delik alfa-delme (v2.9.32): geometriden kesilen deliklerin içi dokuda da
+        // ŞEFFAF yapılır → gerçek delikten arka plan görünür (altın annular ring
+        // korunur; +0.8px pay koyu delik boyasının AA kalıntısını temizler).
+        // Dünya→kanvas eşlemesi düzlem yerleşiminden türetilir: düzlem dünyada
+        // [s.cx−w/2, s.cx+w/2]×[s.cy−h/2, s.cy+h/2] aralığını kaplar, kanvas v=0
+        // üst kenar = +Y (dokular üst/alt AYNI XY eşlemesini kullanır, bkz. v2.9.4).
+        if(s.ok && (D.drills||[]).length){
+          ctx.save();
+          ctx.globalCompositeOperation = 'destination-out';
+          const k = cw / s.w;
+          (D.drills||[]).forEach(d=>{
+            const u = (d[0] - (s.cx - s.w/2)) * k;
+            const v = ((s.cy + s.h/2) - d[1]) * (chh / s.h);
+            const r = d[2] * k + 0.8;
+            if(u < -r || v < -r || u > cw+r || v > chh+r) return;
+            ctx.beginPath(); ctx.arc(u, v, r, 0, Math.PI*2); ctx.fill();
+          });
+          ctx.restore();
+        }
         const tex = new THREE.CanvasTexture(cv);
         try { tex.anisotropy = renderer.capabilities.getMaxAnisotropy(); } catch(e){}
         const mat = new THREE.MeshStandardMaterial({map:tex, transparent:true,
@@ -2474,48 +2364,26 @@ function buildModels(){
       inner.add(new THREE.Mesh(geo, mat));
     });
     if(!inner.children.length) return;
-    // 1) model TILT'i (Euler X,Y; Z atlanır — in-plane açı zdeg'den gelir)
-    inner.rotation.set((pl.rx||0)*DEG, (pl.ry||0)*DEG, 0);
-    inner.updateMatrixWorld(true);
-    // 1b) 180° tilt'li parçalar baş-aşağı çıkıyor (bacak/pin yukarı, gövde altta).
-    //     Ayak-izi uzun ekseni (φ = ang − zdeg) etrafında 180° çevir → gövde yukarı,
-    //     bacak/pin aşağı; uzun eksen korunduğundan in-plane hizası bozulmaz.
-    if(pl.flip){
-      const phi = ((pl.ang||0) - (pl.zdeg||0))*DEG;
-      const qf = new THREE.Quaternion().setFromAxisAngle(
-        new THREE.Vector3(Math.cos(phi), Math.sin(phi), 0), Math.PI);
-      inner.quaternion.premultiply(qf);
-      inner.updateMatrixWorld(true);
-    }
-    // 2) XY merkez orijine, taban z=0'a (flip SONRASI — z sınırları değişti)
-    const box = new THREE.Box3().setFromObject(inner);
-    const c = box.getCenter(new THREE.Vector3());
-    inner.position.set(-c.x, -c.y, -box.min.z);
-    // 3) düzlem-içi açı: Python'da modelin GERÇEK (işaretli) ayak-izi uzun ekseni
-    //    tilt sonrası izlenip outline açısına hizalandı (_model_inplane_angle).
-    //    Eski psi∈{0,90} snap'i yönü (±180°) veremiyordu → ry=180 tilt'li parçalar
-    //    (MOV/SSR) düzlemde 180° ters çıkıyordu; artık zdeg işaretli gelir.
-    let z = (pl.zdeg||0)*DEG;
-    // 3b) seating: standoff (pl.z0) bu kütüphanede negatif/güvenilmez olabiliyor →
-    //     gövdeyi board'a gömüyordu (SSR). z0eff = max(z0, −zb): gövde tabanı
-    //     board üst yüzünün ALTINA inecekse KALDIR, aksi halde dokunma (havada duran
-    //     MOV veya doğru oturan parça değişmez). Bacak/pin board altına inebilir.
-    //     İSTİSNA (v2.9.28): pl.zu tanımlıysa parça ALTTAN-MONTE (bükük bacaklı SSR
-    //     gibi, bacaklar yukarı) → zu doğrudan z0eff olur: gövde üstü board alt
-    //     yüzüne yaslanır, bacaklar delikten yukarı çıkar. max-clamp bu sınıfı
-    //     yanlışlıkla board üstüne kaldırıyordu.
-    const z0eff = (pl.zu !== undefined) ? pl.zu
-                : Math.max((pl.z0||0), -(pl.zb||0));
-    // 4) dış grup: in-plane açı + konum + alt katman aynalama
-    const outer = new THREE.Group(); outer.add(inner);
+    // KESİN Altium yerleşimi (v2.9.31): dünya = R·v + (cx, cy, ±(th/2+dz));
+    // R = Rz(rotz)·Ry(roty)·Rx(rotx). Sıra, anchor (model_2d) ve dz, iki board'da
+    // tüm STEP parçaların bacak↔pad hizalamasıyla ampirik doğrulandı (~0.3mm).
+    // Alt katman: anchor'dan geçen X ekseni etrafında 180° PROPER rotation —
+    // eski scale.z=-1 aynası parçanın ayna görüntüsünü çiziyordu (D-sub gibi
+    // yönlü parçalarda yüz 180° ters, D-şekli ters elli görünüyordu).
+    const AX = new THREE.Vector3(1,0,0), AY = new THREE.Vector3(0,1,0),
+          AZ = new THREE.Vector3(0,0,1);
+    const q = new THREE.Quaternion().setFromAxisAngle(AZ,(pl.rz||0)*DEG)
+      .multiply(new THREE.Quaternion().setFromAxisAngle(AY,(pl.ry||0)*DEG))
+      .multiply(new THREE.Quaternion().setFromAxisAngle(AX,(pl.rx||0)*DEG));
     if(pl.layer==='bottom'){
-      outer.scale.z = -1; outer.rotation.z = -z;
-      outer.position.set(pl.cx, pl.cy, -(th/2 + z0eff));
+      // Rx(180)·(R·v + dz·ẑ) + (cx,cy,−th/2)  →  konum z = −th/2 − dz
+      q.premultiply(new THREE.Quaternion().setFromAxisAngle(AX, Math.PI));
+      inner.position.set(pl.cx, pl.cy, -(th/2 + (pl.dz||0)));
     } else {
-      outer.rotation.z = z;
-      outer.position.set(pl.cx, pl.cy, th/2 + z0eff);
+      inner.position.set(pl.cx, pl.cy, th/2 + (pl.dz||0));
     }
-    scene.add(outer);
+    inner.quaternion.copy(q);
+    scene.add(inner);
     inner.children.forEach(m=>registerMesh(m, pl.d));
   });
 }
@@ -2530,6 +2398,27 @@ function applyCam(){
     orbit.tz + orbit.r*ce*Math.cos(orbit.az));
   camera.lookAt(orbit.tx, orbit.ty, orbit.tz);
 }
+// === LOD: etkileşim sırasında dinamik çözünürlük (2D LOD'un WebGL karşılığı):
+// döndürme/pan/zoom BOYUNCA pixelRatio düşürülür (~6x az piksel), hareket
+// durunca 220ms'de tam çözünürlüğe dönülür. Döndür (autoRot) etkilenmez.
+let lodOn = true; try { lodOn = localStorage.getItem('schviz-3dlod') !== '0'; } catch(e){}
+let lodLow = false, lodT = null;
+function lodSetLow(low){
+  low = low && lodOn;
+  if (low === lodLow || !renderer) return;
+  lodLow = low;
+  const basePR = Math.min(devicePixelRatio||1, 1.5);
+  renderer.setPixelRatio(low ? Math.min(basePR, 0.6) : basePR);
+  resize();   // drawing buffer'ı yeni pixelRatio ile yeniden boyutlandırır
+}
+function lodTouch(){ lodSetLow(true); clearTimeout(lodT);
+  lodT = setTimeout(()=>lodSetLow(false), 220); }
+const lodBtn3d = document.getElementById('v-lod');
+if (!lodOn) lodBtn3d.classList.remove('on');
+lodBtn3d.onclick = ()=>{ lodOn = !lodOn; lodBtn3d.classList.toggle('on', lodOn);
+  try { localStorage.setItem('schviz-3dlod', lodOn?'1':'0'); } catch(e){}
+  if (!lodOn) lodSetLow(false); };
+
 let drag=null, lastX=0, lastY=0, moved=false;
 canvas.addEventListener('mousedown', e=>{ drag = (e.button===2?'pan':'rot');
   lastX=e.clientX; lastY=e.clientY; moved=false; e.preventDefault(); });
@@ -2546,11 +2435,13 @@ window.addEventListener('mousemove', e=>{
     orbit.ty += (-right.y*dx + up.y*dy)*k;
     orbit.tz += (-right.z*dx + up.z*dy)*k;
   }
+  lodTouch();
   applyCam();
 });
 window.addEventListener('mouseup', ()=>{ drag=null; });
 canvas.addEventListener('contextmenu', e=>e.preventDefault());
 canvas.addEventListener('wheel', e=>{ e.preventDefault();
+  lodTouch();
   orbit.r *= (e.deltaY<0 ? 0.9 : 1.1);
   orbit.r = Math.max(4, Math.min(3000, orbit.r)); applyCam(); }, {passive:false});
 
@@ -2618,7 +2509,15 @@ window.addEventListener('message', ev=>{
   const m=ev.data; if(!m||m.type!=='xprobe'||m.source==='3d') return;
   // Diğer panelden seçim geldi — parçalar gizliyse geri aç ki seçim görünsün
   if(!compsVisible) compBtn.onclick();
-  setSel(m.designator);
+  let d = m.designator;
+  if(d && !meshByDesig[d]){
+    // Şematikten MANTIKSAL ad gelmiş olabilir (hiyerarşik kanal: R103) →
+    // kanal-sonekli ilk fiziksel kopyaya çözümle (R103_diffI2C_1)
+    const q = (d+'_').toUpperCase();
+    const c = Object.keys(meshByDesig).filter(k=>k.toUpperCase().startsWith(q)).sort();
+    if(c.length) d = c[0];
+  }
+  setSel(d);
 });
 
 // === Butonlar ===
@@ -3002,7 +2901,21 @@ def build_pcb_html(pcb, comp_info, timestamp, project_name):
                   background-size:20px 20px; }}
   #canvas-wrap.grabbing {{ cursor:crosshair; }}
   #pcb-svg {{ position:absolute; transform-origin:0 0; will-change:transform; }}
+  /* Pan sırasında hit-testing kapalı (Chromium mousemove başına binlerce elemanı
+     hit-test ediyordu). Sınıf gerçek harekette eklenir; hareketsiz tıklama hedefi
+     değişmez, pan sonrası tıklama zaten `moved` bayrağıyla yutulur. */
+  #canvas-wrap.panning #pcb-svg {{ pointer-events:none; }}
   #pcb-svg .pcb-layer * {{ vector-effect:non-scaling-stroke; }}
+  /* LOD: etkileşim sırasında katmanların yerine tek board bitmap'i (svg'nin
+     ALTINDA durur → overlay'ler — net-hl, hl-marker, pad etiketi — üstte canlı
+     kalır). Katmanlar visibility:hidden (display değil — inline display katman
+     aç/kapa durumunu taşıyor, ona dokunmuyoruz). lod-fade: bitmap→SVG dönüşünde
+     bitmap 160ms daha görünür kalır, SVG karoları arkada rasterize olur. */
+  #lod-canvas {{ position:absolute; left:0; top:0; transform-origin:0 0;
+                 display:none; will-change:transform; }}
+  #canvas-wrap.lod #lod-canvas,
+  #canvas-wrap.lod-fade #lod-canvas {{ display:block; }}
+  #canvas-wrap.lod .pcb-layer {{ visibility:hidden; }}
   #toolbar {{ position:absolute; top:10px; right:10px; display:flex; gap:6px;
               z-index:50; }}
   .tool-btn {{ background:rgba(30,30,30,0.92); border:1px solid #444;
@@ -3080,6 +2993,7 @@ def build_pcb_html(pcb, comp_info, timestamp, project_name):
     </div>
   </div>
   <div id="canvas-wrap">
+    <canvas id="lod-canvas"></canvas>
     <svg id="pcb-svg" xmlns="http://www.w3.org/2000/svg"
          width="{view_w}" height="{view_h}"
          viewBox="0 0 {view_w} {view_h}">
@@ -3089,6 +3003,8 @@ def build_pcb_html(pcb, comp_info, timestamp, project_name):
       <button class="tool-btn" id="zoom-in-btn" title="Yaklaş">+</button>
       <button class="tool-btn" id="zoom-out-btn" title="Uzaklaş">−</button>
       <button class="tool-btn" id="fit-btn">Sığdır</button>
+      <button class="tool-btn active" id="lod-toggle"
+              title="LOD: gezinirken board bitmap çizilir (Chromium'da akıcılık). Kapatınca her zaman canlı SVG.">LOD</button>
       <button class="tool-btn" id="flip-btn">Üst/Alt</button>
       <button class="tool-btn" id="pin-btn" title="Pad pin no + net adı">Pin</button>
       <button class="tool-btn" id="bg-btn" title="Arka plan rengini değiştir">Zemin</button>
@@ -3109,6 +3025,7 @@ let LAZY_SVG = {json.dumps(lazy_svgs)};
 
 const wrap = document.getElementById('canvas-wrap');
 const svg = document.getElementById('pcb-svg');
+const lodCanvas = document.getElementById('lod-canvas');
 // Bir katmanın içeriğini (tembelse) DOM'a enjekte et.
 function ensureLayerLoaded(id) {{
   const g=document.getElementById('layer-'+id);
@@ -3125,6 +3042,7 @@ function loadAllLazyLayers() {{
 let scale = 1, tx = 0, ty = 0;
 function applyTransform() {{
   svg.style.transform = `translate(${{tx}}px, ${{ty}}px) scale(${{scale}})`;
+  lodCanvas.style.transform = svg.style.transform;   // bitmap svg ile senkron
   updateMarkerMetrics();
   updatePadLabelVis();
 }}
@@ -3147,22 +3065,136 @@ wrap.addEventListener('mousedown', e => {{
 window.addEventListener('mousemove', e => {{
   if (!dragging) return;
   const dx=e.clientX-lastX, dy=e.clientY-lastY;
-  if (Math.abs(dx)>2||Math.abs(dy)>2) {{ moved=true; autoFit=false; }}
+  if (Math.abs(dx)>2||Math.abs(dy)>2) {{
+    // Gerçek pan başladı: SVG hit-testing'i kapat (bkz. #canvas-wrap.panning CSS'i)
+    // + etkileşim boyunca bitmap moduna geç (akıcı sürükleme).
+    if (!moved) {{ wrap.classList.add('panning'); panInteract=true; pcbLodUpdate(); }}
+    moved=true; autoFit=false;
+  }}
   tx+=dx; ty+=dy; lastX=e.clientX; lastY=e.clientY; applyTransform();
 }});
 window.addEventListener('mouseup', () => {{
-  dragging=false; wrap.classList.remove('grabbing');
+  dragging=false; wrap.classList.remove('grabbing', 'panning');
+  if (panInteract) {{ panInteract=false; pcbLodUpdate(); }}
 }});
+// Tekerlek zoom'u rAF ile birleştirilir: çarpanlar wheelF'te birikir, kare başına
+// TEK transform uygulanır (Chromium her scale değişiminde tüm görünür karoları
+// yeniden rasterize ettiğinden event başına uygulamak takılma yaratıyordu).
+let wheelF=1, wheelPend=false, wheelMx=0, wheelMy=0;
 wrap.addEventListener('wheel', e => {{
   e.preventDefault();
+  pcbLodTouchWheel();   // zoom serisi boyunca bitmap modu (akıcı tekerlek)
   autoFit=false;
   svg.style.transition='none';
   const r=wrap.getBoundingClientRect();
-  const mx=e.clientX-r.left, my=e.clientY-r.top;
-  const f=e.deltaY<0?1.15:1/1.15;
-  const ns=Math.max(0.05,Math.min(80,scale*f));
-  tx=mx-(mx-tx)*(ns/scale); ty=my-(my-ty)*(ns/scale); scale=ns; applyTransform();
+  wheelMx=e.clientX-r.left; wheelMy=e.clientY-r.top;
+  wheelF*=e.deltaY<0?1.15:1/1.15;
+  if (wheelPend) return;
+  wheelPend=true;
+  requestAnimationFrame(() => {{
+    wheelPend=false;
+    const ns=Math.max(0.05,Math.min(80,scale*wheelF)); wheelF=1;
+    tx=wheelMx-(wheelMx-tx)*(ns/scale); ty=wheelMy-(wheelMy-ty)*(ns/scale);
+    scale=ns; applyTransform();
+  }});
 }}, {{ passive:false }});
+
+// === LOD: etkileşim sırasında board bitmap'i ==============================
+// Şematikteki desenin PCB uyarlaması: pan sürüklemesi / tekerlek zoom serisi
+// BOYUNCA görünür katmanların tek bitmap'i gösterilir (compositor'da ucuz),
+// hareket durunca canlı SVG'ye dönülür → tıklama/highlight/pad etiketi aynen.
+// Şematikten farklar: (1) dinlenmede HEP canlı SVG (PCB'de uzak zoom'da da
+// komponent/net tıklaması yaygın); (2) bitmap TEK parça (board tek SVG);
+// (3) katman aç/kapa/sıralama bitmap'i eskitir (lodGen) → sakin anda yeniden
+// üretilir, hazır olana dek canlı SVG. Net highlight karartması bitmap'e
+// yansımaz (harekette karartmasız görünür, durunca geri gelir) — bilinen kısıt.
+let pcbLodEnabled = lsGet().pcbLod !== false;
+let lodReady=false, lodBuilding=false, lodK=0, lodActive=false, lodGen=0, lodBuiltGen=-1;
+let panInteract=false, wheelInteract=false, wheelIdleT=null, lodFadeT=null;
+function pcbLodUpdate() {{
+  // Bitmap, kendi çözünürlüğünün ~4 katına dek kabul edilebilir (harekette);
+  // daha yakın zoom'da canlı SVG (görünür alan küçük → raster zaten ucuz).
+  const maxS = lodK ? (lodK * 4) / (window.devicePixelRatio || 1) : 0;
+  const want = pcbLodEnabled && lodReady && lodBuiltGen === lodGen &&
+               (panInteract || wheelInteract) && scale <= maxS;
+  if (want === lodActive) return;
+  lodActive = want;
+  if (want) {{
+    clearTimeout(lodFadeT); wrap.classList.remove('lod-fade');
+    wrap.classList.add('lod');
+  }} else {{
+    // Bitmap'i hemen söndürme: 160ms daha görünür kalsın → SVG karoları
+    // arkada rasterize edilir, boş karo/flash görünmez (bkz. .lod-fade CSS).
+    wrap.classList.remove('lod');
+    wrap.classList.add('lod-fade');
+    clearTimeout(lodFadeT);
+    lodFadeT = setTimeout(() => wrap.classList.remove('lod-fade'), 160);
+  }}
+}}
+function pcbLodTouchWheel() {{
+  wheelInteract = true; pcbLodUpdate();
+  clearTimeout(wheelIdleT);
+  wheelIdleT = setTimeout(() => {{ wheelInteract = false; pcbLodUpdate(); }}, 180);
+}}
+// Görünür katmanlardan bitmap üret (async; katman değişince yeniden).
+function pcbLodBuild() {{
+  if (lodBuilding || !pcbLodEnabled) return;
+  lodBuilding = true;
+  const gen = lodGen;
+  const parts = [];
+  for (const ch of svg.children) {{
+    if (ch.classList && ch.classList.contains('pcb-layer') && ch.style.display !== 'none')
+      parts.push(new XMLSerializer().serializeToString(ch));
+  }}
+  const k = 2600 / Math.max(VIEW_W, VIEW_H);
+  const W = Math.max(1, Math.round(VIEW_W * k)), H = Math.max(1, Math.round(VIEW_H * k));
+  const src = '<svg xmlns="http://www.w3.org/2000/svg" width="' + W + '" height="' + H
+            + '" viewBox="0 0 ' + VIEW_W + ' ' + VIEW_H + '">' + parts.join('') + '</svg>';
+  const img = new Image();
+  let url = '', tried = false;
+  const done = ok => {{
+    if (url) {{ URL.revokeObjectURL(url); url = ''; }}
+    if (ok) {{
+      try {{
+        lodCanvas.width = W; lodCanvas.height = H;
+        lodCanvas.getContext('2d').drawImage(img, 0, 0, W, H);
+        lodCanvas.style.width = VIEW_W + 'px'; lodCanvas.style.height = VIEW_H + 'px';
+        lodK = k; lodReady = true; lodBuiltGen = gen;
+      }} catch (e) {{ /* bitmap üretilemedi → canlı SVG'de kal */ }}
+    }}
+    lodBuilding = false;
+    if (lodBuiltGen !== lodGen) setTimeout(pcbLodBuild, 100);  // üretim sırasında eskidi
+    pcbLodUpdate();
+  }};
+  img.onload = () => done(true);
+  img.onerror = () => {{
+    // blob: bazı ortamlarda engellenebilir → data: URI ile bir kez daha dene
+    if (tried) {{ done(false); return; }}
+    tried = true;
+    if (url) {{ URL.revokeObjectURL(url); url = ''; }}
+    img.src = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(src);
+  }};
+  url = URL.createObjectURL(new Blob([src], {{ type: 'image/svg+xml;charset=utf-8' }}));
+  img.src = url;
+}}
+// Katman görünürlüğü/sırası değişti → bitmap'i eskit, sakin anda yeniden üret.
+function pcbLodInvalidate() {{
+  lodGen++; pcbLodUpdate();
+  clearTimeout(pcbLodInvalidate._t);
+  pcbLodInvalidate._t = setTimeout(pcbLodBuild, 500);
+}}
+// Toolbar LOD toggle'ı (tercih localStorage'da).
+const pcbLodBtn = document.getElementById('lod-toggle');
+function setPcbLod(on) {{
+  pcbLodEnabled = on;
+  pcbLodBtn.classList.toggle('active', on);
+  if (on && lodBuiltGen !== lodGen) pcbLodBuild();
+  pcbLodUpdate();
+  lsSet({{ pcbLod: on }});
+}}
+pcbLodBtn.addEventListener('click', () => setPcbLod(!pcbLodEnabled));
+if (!pcbLodEnabled) pcbLodBtn.classList.remove('active');
+(window.requestIdleCallback || (f => setTimeout(f, 400)))(pcbLodBuild);
 
 const layerList = document.getElementById('layer-list');
 let raisedId=null;   // en üste getirilen katman (null = orijinal sıra)
@@ -3179,6 +3211,7 @@ function restoreLayerOrder() {{
 // Seçilen katmanı diğer KATMANLARIN üstüne taşı (overlay'lerin altında kalır).
 // Aynı katmana tekrar basınca orijinal sıraya döner (toggle).
 function bringLayerToTop(id) {{
+  pcbLodInvalidate();                           // katman sırası değişiyor
   if(raisedId===id) {{ raisedId=null; restoreLayerOrder(); renderLayerList(); return; }}
   raisedId=id;
   ensureLayerLoaded(id);                      // tembelse içeriği yükle
@@ -3208,6 +3241,7 @@ function renderLayerList() {{
       if(!vis) ensureLayerLoaded(l.id);        // açarken tembel içeriği yükle
       gg.style.display=vis?'none':'block';
       item.classList.toggle('layer-off',vis);
+      pcbLodInvalidate();
     }};
     item.querySelector('.layer-top').onclick=(ev) => {{
       ev.stopPropagation(); bringLayerToTop(l.id);
@@ -3219,10 +3253,12 @@ document.getElementById('all-on').onclick=() => {{
   loadAllLazyLayers();
   LAYERS.forEach(l => document.getElementById('layer-'+l.id).style.display='block');
   renderLayerList();
+  pcbLodInvalidate();
 }};
 document.getElementById('all-off').onclick=() => {{
   LAYERS.forEach(l => document.getElementById('layer-'+l.id).style.display='none');
   renderLayerList();
+  pcbLodInvalidate();
 }};
 document.getElementById('fit-btn').onclick=fitView;
 // Görünüm merkezinde yakınlaş/uzaklaş (toolbar +/− butonları)
@@ -3374,6 +3410,7 @@ document.getElementById('flip-btn').onclick=() => {{
     else if(n.startsWith('BOTTOM')) g.style.display=showingTop?'none':'block';
   }});
   renderLayerList();
+  pcbLodInvalidate();
 }};
 
 const popup=document.getElementById('comp-popup');
@@ -3621,13 +3658,31 @@ svg.addEventListener('mousemove', e => {{
     hoverLabel.style.top=(e.clientY+12)+'px';
   }} else hoverLabel.style.display='none';
 }});
+// Kanal-farkındalıklı çözümleme (v2.9.33): hiyerarşik Repeat projelerinde
+// şematikteki MANTIKSAL designator (R103) board'da kanal-sonekli FİZİKSEL
+// kopyalara açılır (R103_diffI2C_1..3). Tam eşleşme yoksa 'AD_' önekli
+// kopyalar bulunur (arama + cross-probe bunu kullanır).
+function channelCopies(base) {{
+  const q = String(base||'').toUpperCase() + '_';
+  return Object.keys(COMPONENTS).filter(d => d.toUpperCase().startsWith(q)).sort();
+}}
+let searchCycleKey=null, searchCycleIdx=0;
 document.getElementById('comp-search').addEventListener('keydown', e => {{
   if(e.key!=='Enter') return;
   const q=e.target.value.trim().toUpperCase();
   if(!q) return;
   const desig=Object.keys(COMPONENTS).find(d => d.toUpperCase()===q);
-  if(desig) {{ showComp(desig); crossProbeOut(desig); }}
-  else alert(q+' bulunamadı');
+  if(desig) {{ showComp(desig); crossProbeOut(desig); return; }}
+  // Mantıksal ad → kanal kopyaları; Enter'a her basışta sıradaki kopyaya geçilir
+  const copies = channelCopies(q);
+  if(copies.length) {{
+    if(searchCycleKey !== q) {{ searchCycleKey = q; searchCycleIdx = 0; }}
+    const d = copies[searchCycleIdx % copies.length];
+    searchCycleIdx++;
+    showComp(d); crossProbeOut(d);
+    return;
+  }}
+  alert(q+' bulunamadı');
 }});
 // Esc: net / komponent highlight'ı temizle, detay panelini kapat
 window.addEventListener('keydown', e => {{
@@ -3655,7 +3710,11 @@ function crossProbeOut(designator) {{
 window.addEventListener('message', ev => {{
   const d = ev.data;
   if (!d || d.type !== 'xprobe' || d.source === 'pcb') return;
-  if (COMPONENTS[d.designator]) showComp(d.designator);
+  if (COMPONENTS[d.designator]) {{ showComp(d.designator); return; }}
+  // Şematikten MANTIKSAL ad gelmiş olabilir (hiyerarşik kanal: R103) →
+  // ilk fiziksel kopyayı göster (R103_diffI2C_1)
+  const copies = channelCopies(d.designator);
+  if (copies.length) showComp(copies[0]);
 }});
 
 renderLayerList();
@@ -4877,7 +4936,7 @@ def generate_mcu_pinout_xlsx(project_path, output_path, mcu_designator,
 
 
 def build_html(sheets, net_list, components, timestamp,
-               inter_color, intra_color, pcb=None):
+               inter_color, intra_color, pcb=None, project_name=""):
     """@brief Şematik viewer'ın tam HTML belgesini kurar (gömülü SVG + JS).
     
     @param sheets
@@ -4887,6 +4946,7 @@ def build_html(sheets, net_list, components, timestamp,
     @param inter_color Sayfalar arası bağlantı rengi (hex)
     @param intra_color Sayfa içi bağlantı rengi (hex)
     @param pcb AltiumPcbDoc PCB nesnesi
+    @param project_name Proje adı (not/kutu localStorage anahtarı + kayıt dosya adı)
     @return Üretilen sonuç.
     """
     pcb = pcb or {"available": False}
@@ -4981,9 +5041,16 @@ def build_html(sheets, net_list, components, timestamp,
   #viewport {{ flex:1; position:relative; overflow:hidden; cursor:grab;
                background: radial-gradient(circle at 50% 50%, #252525, #151515); }}
   #viewport.grabbing {{ cursor:grabbing; }}
+  /* Pan sırasında SVG hit-testing kapalı: Chromium her mousemove'da binlerce
+     SVG elemanını hit-test edip :hover stil değişimleriyle repaint tetikliyor.
+     Sınıf mousedown'da değil GERÇEK harekette eklenir (panMoved eşiği) —
+     hareketsiz tıklamanın hedef elemanı değişmez. */
+  #viewport.panning .sheet-body svg {{ pointer-events:none; }}
   #canvas {{ position:absolute; transform-origin:0 0; left:0; top:0;
              width:{max_x}px; height:{max_y}px; will-change:transform; }}
+  /* contain: hover/highlight repaint'ini tek karta sınırlar (tüm kanvası boyatmaz) */
   .sheet-card {{ position:absolute; background:#fff; overflow:hidden;
+                 contain:layout paint;
                  box-shadow: 0 0 0 1px #444, 0 6px 24px rgba(0,0,0,0.6);
                  display:flex; flex-direction:column; }}
   .sheet-title {{ height:30px; background:#252525; color:#ccc; padding:6px 10px;
@@ -4991,6 +5058,17 @@ def build_html(sheets, net_list, components, timestamp,
                    flex-shrink:0; line-height:18px; }}
   .sheet-body {{ flex:1; overflow:hidden; background:#fff; position:relative; }}
   .sheet-body svg {{ width:100%; height:100%; display:block; }}
+  /* LOD: uzak zoom'da sayfa yerine bir kez üretilmiş bitmap gösterilir (bkz.
+     buildLods JS'i). SVG display:none DEĞİL visibility:hidden ile gizlenir —
+     highlight/arama getBoundingClientRect ölçümleri çalışmaya devam eder. */
+  .lod-bitmap {{ position:absolute; left:0; top:0; width:100%; height:100%;
+                 display:none; }}
+  #canvas.lod .sheet-body.lod-ready svg {{ visibility:hidden; }}
+  /* lod-fade: bitmap→SVG dönüşünde bitmap ~160ms daha ÜSTTE kalır (SVG sonra
+     eklendiği için değil — bitmap DOM'da svg'den sonra) → Chromium SVG
+     karolarını bitmap'in arkasında rasterize eder, beyaz parlama görünmez. */
+  #canvas.lod .sheet-body.lod-ready .lod-bitmap,
+  #canvas.lod-fade .sheet-body.lod-ready .lod-bitmap {{ display:block; }}
   /* Şematik metinleri PDF'teki gibi seçilebilir/kopyalanabilir (body user-select:none
      bunu global kapatıyor; text elemanlarında geri açılır). Tıklanabilir sınıflar
      (net/block/designator) pointer imlecini korur — hem seçilir hem tıklanır. */
@@ -5004,6 +5082,50 @@ def build_html(sheets, net_list, components, timestamp,
   .sheet-card.hit-3 {{ box-shadow: 0 0 0 3px #ffeb3b, 0 0 40px rgba(255,235,59,0.5); }}
   #arc-layer {{ position:absolute; top:0; left:0; pointer-events:none;
                 overflow:visible; z-index:100; }}
+  /* === Not / kutu (annotation) katmanı — JS'te kurulur, kanvasla transform olur === */
+  #anno-layer {{ position:absolute; top:0; left:0; overflow:visible; z-index:120; }}
+  #anno-layer .anno {{ pointer-events:auto; cursor:move; }}
+  #anno-layer text {{ font-family:'Consolas','Courier New',monospace;
+                      user-select:none; -webkit-user-select:none; }}
+  /* Kutu içi tıklamayı yutmasın: görünür rect tıklanmaz, geniş görünmez
+     hit-rect'in yalnız KENARI tıklanır (ince kenarlıkta da seçilebilsin) */
+  #anno-layer .anno-box rect {{ pointer-events:none; }}
+  #anno-layer .anno-box rect.anno-hit {{ pointer-events:stroke; }}
+  #anno-layer .anno-sel-rect {{ pointer-events:none; }}
+  /* rect.anno-handle: .anno-box rect kuralıyla özgüllük eşit, SONRA geldiği
+     için kazanır (tutamaçlar tıklanabilir kalır) */
+  #anno-layer rect.anno-handle {{ pointer-events:all; }}
+  #anno-layer .anno-handle[data-c="nw"],
+  #anno-layer .anno-handle[data-c="se"] {{ cursor:nwse-resize; }}
+  #anno-layer .anno-handle[data-c="ne"],
+  #anno-layer .anno-handle[data-c="sw"] {{ cursor:nesw-resize; }}
+  /* Araç aktifken: crosshair imleç, şema SVG'leri ve mevcut notlar tıklamaya kapalı
+     (yeni not/kutu mevcutların üstüne de konabilsin) */
+  #viewport.anno-mode {{ cursor:crosshair; }}
+  #viewport.anno-mode .sheet-body svg {{ pointer-events:none; }}
+  #viewport.anno-mode #anno-layer .anno {{ pointer-events:none; }}
+  /* Yerinde yazma editörü (Foxit typewriter gibi) — canvas içinde, onunla ölçeklenir.
+     white-space:pre → otomatik sarma YOK (SVG render'ı ile birebir; satır = Enter).
+     Arka plan hafif saydam (not artık kutusuz çıplak yazı — v2.9.40); yazı
+     rengi notun kendi rengiyle inline verilir. */
+  #anno-editor {{ position:absolute; z-index:130; min-width:30px;
+                  background:rgba(255,255,255,0.72); border:1px dashed #999;
+                  border-radius:3px; padding:5px 8px; line-height:1.3;
+                  outline:none; white-space:pre;
+                  font-family:'Consolas','Courier New',monospace;
+                  user-select:text; -webkit-user-select:text; }}
+  /* Seçim mini araç çubuğu (ekran uzayında, seçili öğenin üstünde) */
+  #anno-bar {{ position:absolute; z-index:600; display:flex; gap:2px;
+               background:rgba(30,30,30,0.92); border:1px solid #444;
+               border-radius:4px; padding:2px; }}
+  #anno-bar button {{ background:none; border:1px solid transparent; color:#ccc;
+                      width:22px; height:22px; font-family:inherit; font-size:13px;
+                      line-height:1; cursor:pointer; border-radius:3px; padding:0; }}
+  #anno-bar button:hover {{ border-color:#4ec9b0; color:#4ec9b0; }}
+  #anno-bar input[type=color] {{ width:22px; height:22px; padding:1px;
+                                 border:1px solid transparent; background:none;
+                                 cursor:pointer; border-radius:3px; }}
+  #anno-bar input[type=color]:hover {{ border-color:#4ec9b0; }}
   .clickable-net {{ cursor:pointer; }}
   .clickable-net:hover {{ fill:#ff6b35 !important; font-weight:bold; }}
   /* Block link - .SchDoc filename'ine tıklanınca o sayfaya gider */
@@ -5109,6 +5231,7 @@ def build_html(sheets, net_list, components, timestamp,
                padding:5px 10px; cursor:pointer; font-family:inherit; font-size:11px;
                border-radius:3px; }}
   .tool-btn:hover {{ background:#333; color:{inter_color}; border-color:{inter_color}; }}
+  .tool-btn.active {{ background:#2a4a6a; border-color:{inter_color}; color:{inter_color}; }}
   #zoom-info {{ position:absolute; bottom:8px; left:50%; transform:translateX(-50%);
                 color:#666; font-size:11px; }}
   #brand {{ position:absolute; bottom:8px; right:12px; color:#444; font-size:10px; }}
@@ -5198,6 +5321,8 @@ def build_html(sheets, net_list, components, timestamp,
     <button class="tool-btn" id="zoom-in" title="Yaklaş ( + )">+</button>
     <button class="tool-btn" id="zoom-out" title="Uzaklaş ( − )">−</button>
     <button class="tool-btn" id="fit-all" title="Tüm sayfaları sığdır">Tümü</button>
+    <button class="tool-btn active" id="lod-toggle"
+            title="LOD: uzak zoom'da ve gezinirken sayfalar bitmap çizilir (Chromium'da akıcılık). Kapatınca her zaman canlı SVG.">LOD</button>
     <div class="toolbar-sep"></div>
     <label class="color-input" title="Sayfalar arası yay rengi">
       <input type="color" id="inter-color-picker" value="{inter_color}">
@@ -5205,6 +5330,13 @@ def build_html(sheets, net_list, components, timestamp,
     <label class="color-input" title="Sayfa içi eğri rengi">
       <input type="color" id="intra-color-picker" value="{intra_color}">
     </label>
+    <div class="toolbar-sep"></div>
+    <button class="tool-btn" id="anno-note"
+            title="Not ekle: butona bas, şemada istediğin yere tıkla ve DOĞRUDAN yaz (dışına tıkla = bitir, Enter = yeni satır). Sonradan: çift tık düzenle · sürükle taşı · seç + Del sil · A−/A+ yazı boyutu">Not</button>
+    <button class="tool-btn" id="anno-box"
+            title="Kutu içine al: butona bas, sürükleyerek çerçeve çiz (Esc iptal). Sonradan: kenarına tıkla seç → sürükle taşı · köşe tutamaçlarıyla boyutlandır · Del sil · −/+ kenar kalınlığı">Kutu</button>
+    <button class="tool-btn" id="anno-save"
+            title="Not ve kutuları HTML dosyasının içine göm ve kaydet. Chromium'da AÇIK DOSYANIN ÜSTÜNE yazabilir (ilk kayıtta dosyayı seç; aynı oturumda sonrakiler sessiz). Firefox'ta kopya indirir. Paylaşınca/başka bilgisayarda da görünür">Kaydet</button>
     <div class="toolbar-sep"></div>
     <button class="tool-btn" id="shortcut-btn" title="Kısayollar (?)">?</button>
     <button class="tool-btn" id="export-png">PNG</button>
@@ -5242,6 +5374,10 @@ def build_html(sheets, net_list, components, timestamp,
       <tr><td>Comps listesinde tık</td><td>Komponente zoom + pulse + detay popup</td></tr>
       <tr><td>Designator'a tık (şema)</td><td>Komponent detay popup'ı aç</td></tr>
       <tr><td>Block (.SchDoc) yazısına tık</td><td>O sayfaya navigate et</td></tr>
+      <tr><td>Toolbar: Not / Kutu</td><td>Tıklanan yere doğrudan yazı yaz / alanı kutu içine al (Esc iptal)</td></tr>
+      <tr><td>Not/kutuya tık + sürükle</td><td>Seç ve taşı · kutuda köşe tutamacı: boyutlandır</td></tr>
+      <tr><td>Seçiliyken Del · mini bar −/+</td><td>Sil · yazı boyutu / kenar kalınlığı</td></tr>
+      <tr><td>Nota çift tık</td><td>Yerinde düzenle (boş bırak = sil)</td></tr>
     </table>
     <h3>Renk Pickers</h3>
     <table>
@@ -5252,8 +5388,12 @@ def build_html(sheets, net_list, components, timestamp,
 </div>
 
 <script src="https://html2canvas.hertzen.com/dist/html2canvas.min.js"></script>
+<!-- "Kaydet" ile indirilen kopyada notlar buraya JSON olarak gömülür
+     (type=application/json → tarayıcı script olarak ÇALIŞTIRMAZ, veri taşır) -->
+<script type="application/json" id="anno-embed">null</script>
 <script>
 const BUILD_STAMP = "{timestamp}";
+const PROJECT_NAME = {json.dumps(project_name)};
 const nets = {json.dumps(net_list)};
 const components = {json.dumps(components)};
 const sheetPos = {json.dumps(sheet_positions)};
@@ -5289,10 +5429,117 @@ schHlOverlay.setAttribute('width', arcLayer.getAttribute('width') || 10000);
 schHlOverlay.setAttribute('height', arcLayer.getAttribute('height') || 10000);
 canvas.appendChild(schHlOverlay);
 let schMarkerBox = null;   // {{x,y,w,h,label}}
+
+// === LOD: uzak zoom'da sayfa bitmap'leri ==================================
+// Chromium CSS-scale edilen dev SVG katmanını HER zoom adımında CPU'da yeniden
+// rasterize eder (Firefox/WebRender vektörü GPU'da çizer — akıcılık farkı
+// buradan). Uzak zoom'da her sayfanın yerine bir kez üretilen bitmap (canvas)
+// gösterilir: bitmap'i kaydırıp ölçeklemek compositor'da bedavaya yakındır.
+// LOD_OFF üstüne yakınlaşınca canlı SVG'ye dönülür — tıklama/metin seçimi/hover
+// zaten o zoom'da yapılır. Bitmap üretimi idle'da sayfa sayfa yapılır; üretim
+// bitene kadar (ve üretilemeyen sayfalarda) canlı SVG kalır = eski davranış.
+const LOD_ON = 0.85, LOD_OFF = 1.05;  // histerezis: girişte <ON, çıkışta >OFF
+// Etkileşim (pan sürükleme / tekerlek zoom serisi) SIRASINDA bitmap, yakın
+// zoom'da da gösterilir (harita uygulaması deseni: harekette yumuşak ama
+// akıcı, durunca keskin canlı SVG). Üst sınır: çok aşırı zoom'da bitmap
+// çirkinleşir + görünür alan zaten küçük olduğundan canlı SVG akıcıdır.
+const LOD_MAX_I = 4;
+// Bitmap çözünürlüğü: LOD aralığının tepesinde (scale≈1) ekran pikseliyle
+// eşleşsin diye DPR kadar; alt sınır 1.25 (etkileşim bitmap'i okunur kalsın),
+// bellek için 1.6 ile sınırlı (kart 700×470 → ~2-3MB/sayfa).
+const LOD_RES = Math.min(1.6, Math.max(1.25, window.devicePixelRatio || 1));
+let lodActive = false, lodReady = 0, lodFadeT = null, lodEnabled = true;
+let panInteract = false, wheelInteract = false, wheelIdleT = null;
+function updateLod() {{
+  if (!lodReady) return;
+  const rest = lodActive ? (scale < LOD_OFF) : (scale < LOD_ON);
+  const want = lodEnabled &&
+    (rest || ((panInteract || wheelInteract) && scale <= LOD_MAX_I));
+  if (want === lodActive) return;
+  lodActive = want;
+  if (want) {{
+    clearTimeout(lodFadeT); canvas.classList.remove('lod-fade');
+    canvas.classList.add('lod');
+  }} else {{
+    // Bitmap'i hemen söndürme: SVG görünür olur, bitmap 160ms üstte kalır →
+    // SVG karoları arkada rasterize edilir (bkz. .lod-fade CSS yorumu).
+    canvas.classList.remove('lod');
+    canvas.classList.add('lod-fade');
+    clearTimeout(lodFadeT);
+    lodFadeT = setTimeout(() => canvas.classList.remove('lod-fade'), 160);
+  }}
+}}
+// Tekerlek zoom serisi: her event sayacı tazeler; 180ms sessizlik = seri bitti.
+function lodWheelTouch() {{
+  wheelInteract = true;
+  updateLod();
+  clearTimeout(wheelIdleT);
+  wheelIdleT = setTimeout(() => {{ wheelInteract = false; updateLod(); }}, 180);
+}}
+// Toolbar LOD toggle'ı — kapatınca her zoom'da canlı SVG (tercih localStorage'da,
+// restoreUi geri yükler). Bitmap'ler yine üretilir ki açınca anında çalışsın.
+const lodBtn = document.getElementById('lod-toggle');
+function setLodEnabled(on) {{
+  lodEnabled = on;
+  lodBtn.classList.toggle('active', on);
+  updateLod();
+  lsSet({{ lod: on }});
+}}
+lodBtn.addEventListener('click', () => setLodEnabled(!lodEnabled));
+(function buildLods() {{
+  const bodies = Array.from(document.querySelectorAll('.sheet-body'));
+  const idle = window.requestIdleCallback
+    ? (f => window.requestIdleCallback(f, {{ timeout: 800 }}))
+    : (f => setTimeout(f, 150));
+  let i = 0;
+  function step() {{
+    if (i >= bodies.length) return;
+    const body = bodies[i++];
+    const svgEl = body.querySelector('svg');
+    if (!svgEl) {{ idle(step); return; }}
+    const w = Math.max(1, Math.round(body.clientWidth * LOD_RES));
+    const h = Math.max(1, Math.round(body.clientHeight * LOD_RES));
+    const src = new XMLSerializer().serializeToString(svgEl);
+    const img = new Image();
+    let url = '', triedData = false;
+    const done = ok => {{
+      if (url) {{ URL.revokeObjectURL(url); url = ''; }}
+      if (ok) {{
+        try {{
+          const cv = document.createElement('canvas');
+          cv.width = w; cv.height = h;
+          // preserveAspectRatio="none" → hedef boyuta gerilir, ekranla birebir
+          cv.getContext('2d').drawImage(img, 0, 0, w, h);
+          cv.className = 'lod-bitmap';
+          body.appendChild(cv);
+          body.classList.add('lod-ready');
+          lodReady++; updateLod();
+        }} catch (e) {{ /* bu sayfa canlı SVG'de kalır */ }}
+      }}
+      idle(step);
+    }};
+    img.onload = () => done(true);
+    img.onerror = () => {{
+      // blob: bazı ortamlarda engellenebilir → data: URI ile bir kez daha dene
+      if (triedData) {{ done(false); return; }}
+      triedData = true;
+      if (url) {{ URL.revokeObjectURL(url); url = ''; }}
+      img.src = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(src);
+    }};
+    url = URL.createObjectURL(new Blob([src], {{ type: 'image/svg+xml;charset=utf-8' }}));
+    img.src = url;
+  }}
+  idle(step);
+}})();
+
 function applyT() {{
   canvas.style.transform = `translate(${{tx}}px,${{ty}}px) scale(${{scale}})`;
   zoomVal.textContent = scale.toFixed(2) + 'x';
   updateSchMarkerMetrics();
+  // Not/kutu seçim görselleri + mini bar (modül aşağıda kurulur; var hoisting
+  // sayesinde ilk applyT çağrılarında typeof güvenle 'undefined' döner)
+  if (typeof __annoUi === 'function') __annoUi();
+  updateLod();
 }}
 applyT();
 // Programatik görünüm değişimlerinde (fit/reset/zoom butonu) yumuşak geçiş.
@@ -5314,6 +5561,7 @@ function classifyNet(name) {{
 let panning = false, sx, sy, stx, sty, panMoved = false;
 viewport.addEventListener('mousedown', e => {{
   if (e.target.closest('.tool-btn') || e.target.closest('#detail-panel')) return;
+  if (annoTool) return;   // not/kutu aracı aktif — pan yerine araç çalışır
   // SVG metni üzerinde pan BAŞLATMA → tarayıcının native metin seçimi çalışsın
   // (PDF'teki gibi sürükleyip kopyalama). Boş alanda pan aynen devam eder.
   if (e.target.closest && e.target.closest('.sheet-body') && e.target.closest('text')) return;
@@ -5322,30 +5570,50 @@ viewport.addEventListener('mousedown', e => {{
 }});
 window.addEventListener('mousemove', e => {{
   if (!panning) return;
-  if (Math.abs(e.clientX - sx) > 3 || Math.abs(e.clientY - sy) > 3) panMoved = true;
+  if (Math.abs(e.clientX - sx) > 3 || Math.abs(e.clientY - sy) > 3) {{
+    // Gerçek pan başladı: SVG hit-testing'i kapat (bkz. #viewport.panning CSS'i)
+    // + etkileşim boyunca bitmap moduna geç (akıcı sürükleme).
+    if (!panMoved) {{ panMoved = true; viewport.classList.add('panning');
+                      svgTip.style.display = 'none';
+                      panInteract = true; updateLod(); }}
+  }}
   tx = stx + (e.clientX - sx);
   ty = sty + (e.clientY - sy);
   applyT();
 }});
 window.addEventListener('mouseup', () => {{
-  panning = false; viewport.classList.remove('grabbing');
+  panning = false; viewport.classList.remove('grabbing', 'panning');
+  if (panInteract) {{ panInteract = false; updateLod(); }}
 }});
+// Tekerlek zoom'u rAF ile birleştirilir: Chromium her scale değişiminde görünür
+// karoları yeniden rasterize eder; yüksek çözünürlüklü tekerlek/trackpad kare
+// başına birden çok event üretebildiğinden çarpanlar wheelF'te biriktirilip
+// kare başına TEK transform uygulanır (tek event/kare durumunda aynı matematik).
+let wheelF = 1, wheelPend = false, wheelMx = 0, wheelMy = 0;
 viewport.addEventListener('wheel', e => {{
   e.preventDefault();
+  lodWheelTouch();   // zoom serisi boyunca bitmap modu (akıcı tekerlek)
   const r = viewport.getBoundingClientRect();
-  const mx = e.clientX - r.left, my = e.clientY - r.top;
-  const old = scale;
-  scale *= e.deltaY < 0 ? 1.15 : 0.87;
-  scale = Math.max(0.03, Math.min(8, scale));
-  tx = mx - (mx - tx) * (scale / old);
-  ty = my - (my - ty) * (scale / old);
-  applyT();
+  wheelMx = e.clientX - r.left; wheelMy = e.clientY - r.top;
+  wheelF *= e.deltaY < 0 ? 1.15 : 0.87;
+  if (wheelPend) return;
+  wheelPend = true;
+  requestAnimationFrame(() => {{
+    wheelPend = false;
+    const old = scale;
+    scale = Math.max(0.03, Math.min(8, scale * wheelF));
+    wheelF = 1;
+    tx = wheelMx - (wheelMx - tx) * (scale / old);
+    ty = wheelMy - (wheelMy - ty) * (scale / old);
+    applyT();
+  }});
 }}, {{ passive: false }});
 
 // Boş alana tıklama = komponent seçimini (spotlight kutusunu) iptal et.
 // Pan hareketi, metin seçimi, toolbar ve tıklanabilir öğeler hariç tutulur.
 viewport.addEventListener('click', e => {{
   if (panMoved) return;                                    // pan bitişi, tıklama değil
+  if (annoTool || annoJustDrew) return;                    // not/kutu yerleştiriliyor
   if (!schMarkerBox) return;                               // seçim yoksa iş yok
   if (e.target.closest('.tool-btn') || e.target.closest('#detail-panel')
       || e.target.closest('#toolbar')) return;
@@ -5892,6 +6160,7 @@ function lsSet(patch) {{ try {{
 (function restoreUi() {{
   const st = lsGet();
   if (st.sidebar === false) setSidebarOpen(false);
+  if (st.lod === false) setLodEnabled(false);
   if (st.inter) {{ NET_COLORS[0] = st.inter;
     document.getElementById('inter-color-picker').value = st.inter; }}
   if (st.intra) {{ INTRA_COLOR = st.intra;
@@ -6188,6 +6457,17 @@ document.addEventListener('keydown', e => {{
     toggleShortcutModal();
     return;
   }}
+  // Not/kutu aracı aktifken Esc yalnız araçtan çıkar; değilse önce seçimi bırakır
+  if (e.key === 'Escape' && (annoTool || annoDrag)) {{ setAnnoTool(null); return; }}
+  if (e.key === 'Escape' && annoSel != null) {{ annoSetSel(null); return; }}
+  // Seçili not/kutu Del (veya Backspace) ile silinir — yazı alanları hariç
+  if ((e.key === 'Delete' || e.key === 'Backspace') && annoSel != null) {{
+    const ae = document.activeElement;
+    if (!ae || (ae.tagName !== 'INPUT' && ae.tagName !== 'TEXTAREA'
+                && ae.tagName !== 'SELECT' && !ae.isContentEditable)) {{
+      e.preventDefault(); annoDelete(annoSel); return;
+    }}
+  }}
   if (e.key === '?') {{ e.preventDefault(); toggleShortcutModal(); }}
   else if (e.key === 'Escape') {{
     // Önce popup, sonra seçim
@@ -6261,6 +6541,519 @@ document.getElementById('export-png').onclick = async () => {{
   }}
 }};
 
+// === Not / kutu (annotation) araçları =====================================
+// Foxit tarzı kullanım: yerinde yazma (typewriter — prompt yok), tıkla-seç,
+// sürükle-taşı, kutuda köşe tutamacından boyutlandır, seçiliyken Del ile sil,
+// mini bar (−/+/×) ile yazı boyutu / kenar kalınlığı / silme.
+// Veri KANVAS koordinatında tutulur (pan/zoom ile birlikte hareket eder),
+// localStorage'a proje bazlı anahtarla otomatik kaydedilir. "Kaydet" butonu
+// notlar gömülü, temizlenmiş bir HTML kopyası indirir — dosya paylaşılınca/
+// başka makinede açılınca notlar gömülü veriden yüklenir. Yükleme önceliği:
+// localStorage ile gömülü veriden HANGİSİ daha yeniyse o (ts karşılaştırması).
+const annoLayer = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+annoLayer.setAttribute('id', 'anno-layer');
+annoLayer.setAttribute('width', arcLayer.getAttribute('width') || 10000);
+annoLayer.setAttribute('height', arcLayer.getAttribute('height') || 10000);
+annoLayer.style.pointerEvents = 'none';   // yalnız .anno çocukları tıklanır (CSS)
+canvas.appendChild(annoLayer);
+
+// Yerinde yazma editörü — canvas İÇİNDE HTML div, transformla birlikte ölçeklenir
+const annoEditor = document.createElement('div');
+annoEditor.id = 'anno-editor';
+annoEditor.setAttribute('contenteditable', 'plaintext-only');
+annoEditor.style.display = 'none';
+canvas.appendChild(annoEditor);
+if (!annoEditor.isContentEditable)   // eski Firefox: plaintext-only desteklenmez
+  annoEditor.setAttribute('contenteditable', 'true');
+
+// Seçim mini araç çubuğu (ekran uzayında, seçili öğenin üstünde durur)
+const annoBar = document.createElement('div');
+annoBar.id = 'anno-bar';
+annoBar.style.display = 'none';
+annoBar.innerHTML =
+    '<button data-act="minus" title="Yazı boyutu / kenar kalınlığı azalt">−</button>'
+  + '<button data-act="plus" title="Yazı boyutu / kenar kalınlığı artır">+</button>'
+  + '<input type="color" title="Renk (not yazısı / kutu kenarı)">'
+  + '<button data-act="del" title="Sil (Del)">×</button>';
+viewport.appendChild(annoBar);
+const annoColorInp = annoBar.querySelector('input[type=color]');
+
+const ANNO_NS = 'http://www.w3.org/2000/svg';
+const LS_ANNO = 'schviz-anno:' + (PROJECT_NAME || 'proje');
+let annotations = [];      // {{k:'note',id,x,y,text,fs}} | {{k:'box',id,x,y,w,h,sw}}
+let annoTool = null;       // null | 'note' | 'box'
+let annoDrag = null;       // kutu çizimi sürüyor: {{x0,y0,x1,y1}}
+let annoJustDrew = false;  // kutu/taşıma biten click'i seçim-temizlemeden korur
+let annoSel = null;        // seçili annotation id'si
+let annoEditId = null;     // yerinde düzenlenen not id'si ('' = yeni not)
+let annoEditPos = null;    // yeni notun kanvas konumu
+let annoMove = null;       // taşıma/boyutlandırma sürükleme durumu
+const annoMeasure = {{}};  // not id → render'da ölçülen {{w,h}} (seçim çerçevesi)
+var __annoUi = null;       // applyT her karede çağırır (var: hoisting, TDZ yok)
+
+function annoLoad() {{
+  let emb = null, loc = null;
+  try {{ emb = JSON.parse(document.getElementById('anno-embed').textContent); }} catch (e) {{}}
+  try {{ loc = JSON.parse(localStorage.getItem(LS_ANNO) || 'null'); }} catch (e) {{}}
+  const pick = (emb && loc) ? (((loc.ts || 0) >= (emb.ts || 0)) ? loc : emb) : (loc || emb);
+  annotations = (pick && Array.isArray(pick.items)) ? pick.items : [];
+}}
+function annoStore() {{
+  try {{ localStorage.setItem(LS_ANNO, JSON.stringify({{ ts: Date.now(), items: annotations }})); }}
+  catch (e) {{}}   // file:// altında storage kısıtlıysa sessizce atla
+}}
+
+function annoRectEl(x, y, w, h) {{
+  const r = document.createElementNS(ANNO_NS, 'rect');
+  r.setAttribute('x', x); r.setAttribute('y', y);
+  r.setAttribute('width', w); r.setAttribute('height', h);
+  return r;
+}}
+// Seçim çerçevesi/bar için öğe sınırları (not boyutu render'da ölçülür)
+function annoBounds(a) {{
+  if (a.k === 'box') return {{ x: a.x, y: a.y, w: a.w, h: a.h }};
+  const m = annoMeasure[a.id] || {{ w: 60, h: 28 }};
+  return {{ x: a.x, y: a.y, w: m.w, h: m.h }};
+}}
+function annoRender() {{
+  annoLayer.innerHTML = '';
+  annotations.forEach(a => {{
+    if (a.id === annoEditId) return;   // düzenlenen not şu an editörde
+    const g = document.createElementNS(ANNO_NS, 'g');
+    g.setAttribute('class', 'anno anno-' + a.k + (a.id === annoSel ? ' sel' : ''));
+    g.setAttribute('data-id', String(a.id));
+    const tip = document.createElementNS(ANNO_NS, 'title');
+    tip.textContent = a.k === 'note'
+      ? 'Sürükle: taşı · Çift tık: düzenle · Seç + Del: sil'
+      : 'Kenardan sürükle: taşı · Köşe tutamacı: boyutlandır · Del: sil';
+    g.appendChild(tip);
+    if (a.k === 'box') {{
+      const r = annoRectEl(a.x, a.y, a.w, a.h);
+      r.setAttribute('rx', 3);
+      r.setAttribute('fill', 'rgba(255,179,0,0.05)');
+      r.setAttribute('stroke', a.color || '#ffb300');
+      r.setAttribute('stroke-width', a.sw || 1.5);
+      g.appendChild(r);
+      // Geniş görünmez hit-kenarı: ince çizgide de kolayca tıklanıp seçilsin
+      const hit = annoRectEl(a.x, a.y, a.w, a.h);
+      hit.setAttribute('class', 'anno-hit');
+      hit.setAttribute('fill', 'none');
+      hit.setAttribute('stroke', 'rgba(0,0,0,0)');
+      hit.setAttribute('stroke-width', Math.max(a.sw || 1.5, 6));
+      g.appendChild(hit);
+      annoLayer.appendChild(g);
+    }} else {{
+      const fs = a.fs || 14;
+      const lines = String(a.text).split('\\n');
+      const t = document.createElementNS(ANNO_NS, 'text');
+      t.setAttribute('font-size', fs);
+      t.setAttribute('fill', a.color || '#c62828');
+      lines.forEach((ln, i) => {{
+        const ts = document.createElementNS(ANNO_NS, 'tspan');
+        ts.setAttribute('x', a.x + 8);
+        ts.setAttribute('y', a.y + 5 + fs * 0.9 + i * fs * 1.3);
+        ts.textContent = ln || ' ';
+        t.appendChild(ts);
+      }});
+      g.appendChild(t);
+      annoLayer.appendChild(g);            // getBBox için önce DOM'a girmeli
+      let tw = 60; try {{ tw = t.getBBox().width; }} catch (e) {{}}
+      const bw = Math.max(tw + 16, 30);
+      const bh = lines.length * fs * 1.3 + 10;
+      annoMeasure[a.id] = {{ w: bw, h: bh }};
+      // Arka plan kutusu YOK (v2.9.40, kullanıcı isteği) — çıplak yazı.
+      // Görünmez hit-rect tıklama/sürükleme yüzeyi verir: şeffaf ama
+      // "painted" fill (rgba 0) pointer-events'i yakalar, fill:none yakalamaz.
+      const hit = annoRectEl(a.x, a.y, bw, bh);
+      hit.setAttribute('class', 'anno-hit');
+      hit.setAttribute('fill', 'rgba(0,0,0,0)');
+      g.insertBefore(hit, t);
+    }}
+    // Seçim görselleri: kesikli çerçeve + (kutuda) köşe tutamaçları.
+    // Kalınlık/boyutları __annoUi ekran-sabit tutar (1/scale).
+    if (a.id === annoSel) {{
+      const b = annoBounds(a);
+      const sr = annoRectEl(b.x - 3, b.y - 3, b.w + 6, b.h + 6);
+      sr.setAttribute('class', 'anno-sel-rect');
+      sr.setAttribute('fill', 'none');
+      sr.setAttribute('stroke', '#26a0da');
+      g.appendChild(sr);
+      if (a.k === 'box')
+        ['nw', 'ne', 'sw', 'se'].forEach(c => {{
+          const hd = annoRectEl(0, 0, 0, 0);
+          hd.setAttribute('class', 'anno-handle');
+          hd.setAttribute('data-c', c);
+          hd.setAttribute('fill', '#fff');
+          hd.setAttribute('stroke', '#26a0da');
+          g.appendChild(hd);
+        }});
+    }}
+  }});
+  if (__annoUi) __annoUi();
+}}
+
+const annoNoteBtn = document.getElementById('anno-note');
+const annoBoxBtn = document.getElementById('anno-box');
+function setAnnoTool(t) {{
+  annoTool = t; annoDrag = null;
+  annoNoteBtn.classList.toggle('active', t === 'note');
+  annoBoxBtn.classList.toggle('active', t === 'box');
+  viewport.classList.toggle('anno-mode', !!t);
+  const tmp = annoLayer.querySelector('.anno-temp');
+  if (tmp) tmp.remove();
+  if (t) annoSetSel(null);   // araç açılırken mevcut seçim bırakılır
+}}
+function annoSetSel(id) {{
+  if (annoSel === id) return;
+  annoSel = id;
+  annoRender();
+}}
+function annoDelete(id) {{
+  const i = annotations.findIndex(x => String(x.id) === String(id));
+  if (i < 0) return;
+  annotations.splice(i, 1);
+  delete annoMeasure[id];
+  if (annoSel === id) annoSel = null;
+  annoStore(); annoRender();
+}}
+// Seçim görselleri ekran-sabit kalınlıkta tutulur + mini bar seçili öğeyi izler.
+// applyT her transform değişiminde çağırır (pan/zoom'da bar öğeyle gider).
+__annoUi = function() {{
+  const k = 1 / scale;
+  annoLayer.querySelectorAll('.anno-sel-rect').forEach(r => {{
+    r.setAttribute('stroke-width', 1.3 * k);
+    r.setAttribute('stroke-dasharray', (4 * k) + ' ' + (3 * k));
+  }});
+  const a = annotations.find(x => x.id === annoSel);
+  if (a && a.k === 'box') {{
+    const hs = 7 * k, b = annoBounds(a);
+    const pos = {{ nw: [b.x, b.y], ne: [b.x + b.w, b.y],
+                   sw: [b.x, b.y + b.h], se: [b.x + b.w, b.y + b.h] }};
+    annoLayer.querySelectorAll('.anno-handle').forEach(h => {{
+      const p = pos[h.getAttribute('data-c')];
+      if (!p) return;
+      h.setAttribute('x', p[0] - hs / 2); h.setAttribute('y', p[1] - hs / 2);
+      h.setAttribute('width', hs); h.setAttribute('height', hs);
+      h.setAttribute('stroke-width', 1 * k);
+    }});
+  }}
+  if (a && annoEditId === null) {{
+    const b = annoBounds(a);
+    annoColorInp.value = a.color || (a.k === 'note' ? '#c62828' : '#ffb300');
+    annoBar.style.display = 'flex';
+    annoBar.style.left = Math.max(2, Math.round(b.x * scale + tx)) + 'px';
+    annoBar.style.top = Math.max(2, Math.round(b.y * scale + ty - 32)) + 'px';
+  }} else {{
+    annoBar.style.display = 'none';
+  }}
+}};
+annoNoteBtn.onclick = () => setAnnoTool(annoTool === 'note' ? null : 'note');
+annoBoxBtn.onclick = () => setAnnoTool(annoTool === 'box' ? null : 'box');
+
+// Ekran (client) koordinatı → kanvas koordinatı
+function annoCanvasXY(e) {{
+  const r = viewport.getBoundingClientRect();
+  return {{ x: (e.clientX - r.left - tx) / scale, y: (e.clientY - r.top - ty) / scale }};
+}}
+function annoId() {{ return Date.now().toString(36) + Math.random().toString(36).slice(2, 7); }}
+
+// Not yerleştirme: araç aktifken tıklanan yerde DOĞRUDAN yazılır (typewriter)
+viewport.addEventListener('click', e => {{
+  if (annoTool !== 'note') return;
+  if (e.target.closest('#toolbar') || e.target.closest('.tool-btn')
+      || e.target.closest('#detail-panel')) return;
+  const p = annoCanvasXY(e);
+  setAnnoTool(null);
+  annoOpenEditor(null, p);
+}});
+
+// Yerinde yazma editörünü aç: a = düzenlenecek not (null = yeni), pos = konum.
+// Editör canvas içinde olduğundan zoom/pan sırasında da notla aynı yerde kalır.
+function annoOpenEditor(a, pos) {{
+  annoEditId = a ? a.id : '';
+  annoEditPos = a ? {{ x: a.x, y: a.y }} : pos;
+  const fs = (a && a.fs) || 14;
+  annoEditor.style.left = annoEditPos.x + 'px';
+  annoEditor.style.top = annoEditPos.y + 'px';
+  annoEditor.style.fontSize = fs + 'px';
+  annoEditor.style.color = (a && a.color) || '#c62828';
+  annoEditor.dataset.fs = fs;
+  annoEditor.innerText = a ? a.text : '';
+  annoEditor.style.display = 'block';
+  annoSetSel(null);
+  annoRender();                          // düzenlenen notun SVG'si gizlenir
+  annoEditor.focus();
+  const rg = document.createRange();     // imleci metnin sonuna al
+  rg.selectNodeContents(annoEditor); rg.collapse(false);
+  const sl = window.getSelection(); sl.removeAllRanges(); sl.addRange(rg);
+}}
+// Bitirme: dışarı tıklama (blur) veya Esc. Boş metin = eklenmez / silinir.
+function annoCommitEditor() {{
+  if (annoEditId === null) return;
+  const text = annoEditor.innerText
+    .replace(/\\u00a0/g, ' ').replace(/[\\s\\n]+$/, '');
+  const editing = annoEditId;
+  annoEditId = null;
+  annoEditor.style.display = 'none';
+  if (editing === '') {{
+    if (text.trim())
+      annotations.push({{ k: 'note', id: annoId(), x: annoEditPos.x,
+                          y: annoEditPos.y, text: text,
+                          fs: parseFloat(annoEditor.dataset.fs) || 14 }});
+  }} else {{
+    const i = annotations.findIndex(x => String(x.id) === String(editing));
+    if (i >= 0) {{
+      if (text.trim()) annotations[i].text = text;
+      else annotations.splice(i, 1);
+    }}
+  }}
+  annoStore(); annoRender();
+}}
+annoEditor.addEventListener('blur', annoCommitEditor);
+annoEditor.addEventListener('keydown', e => {{
+  e.stopPropagation();                   // ana kısayollar (Del/B/0...) karışmasın
+  if (e.key === 'Escape') {{ e.preventDefault(); annoEditor.blur(); }}
+}});
+annoEditor.addEventListener('mousedown', e => e.stopPropagation());
+
+// Kutu çizimi: araç aktifken sürükle
+viewport.addEventListener('mousedown', e => {{
+  if (annoTool !== 'box' || e.button !== 0) return;
+  if (e.target.closest('#toolbar') || e.target.closest('.tool-btn')
+      || e.target.closest('#detail-panel')) return;
+  e.preventDefault();
+  const p = annoCanvasXY(e);
+  annoDrag = {{ x0: p.x, y0: p.y, x1: p.x, y1: p.y }};
+}});
+function annoDragBox() {{
+  return {{ x: Math.min(annoDrag.x0, annoDrag.x1), y: Math.min(annoDrag.y0, annoDrag.y1),
+            w: Math.abs(annoDrag.x1 - annoDrag.x0), h: Math.abs(annoDrag.y1 - annoDrag.y0) }};
+}}
+window.addEventListener('mousemove', e => {{
+  if (!annoDrag) return;
+  const p = annoCanvasXY(e);
+  annoDrag.x1 = p.x; annoDrag.y1 = p.y;
+  let tmp = annoLayer.querySelector('.anno-temp');
+  if (!tmp) {{
+    tmp = document.createElementNS(ANNO_NS, 'rect');
+    tmp.setAttribute('class', 'anno-temp');
+    tmp.setAttribute('fill', 'rgba(255,179,0,0.08)');
+    tmp.setAttribute('stroke', '#ffb300');
+    tmp.setAttribute('stroke-dasharray', '6 4');
+    tmp.setAttribute('stroke-width', 1.5);
+    annoLayer.appendChild(tmp);
+  }}
+  const b = annoDragBox();
+  tmp.setAttribute('x', b.x); tmp.setAttribute('y', b.y);
+  tmp.setAttribute('width', b.w); tmp.setAttribute('height', b.h);
+}});
+window.addEventListener('mouseup', () => {{
+  if (!annoDrag) return;
+  const b = annoDragBox();
+  setAnnoTool(null);   // annoDrag'ı ve geçici kutuyu da temizler
+  // Ekranda >6px sürüklendiyse gerçek kutu (kazara tık değil)
+  if (b.w * scale > 6 && b.h * scale > 6) {{
+    const nid = annoId();
+    annotations.push({{ k: 'box', id: nid, x: b.x, y: b.y,
+                        w: b.w, h: b.h, sw: 1.5 }});
+    annoStore();
+    annoSel = nid;   // yeni kutu seçili gelsin (hemen taşı/boyutlandır/sil)
+    annoRender();
+  }}
+  // mouseup'ı izleyen click seçim-temizleme sanılmasın (click bu görevden
+  // ÖNCE dispatch edilir, setTimeout sonra çalışır → bayrak güvenle sıfırlanır)
+  annoJustDrew = true;
+  setTimeout(() => {{ annoJustDrew = false; }}, 0);
+}});
+
+// Çift tık: notu yerinde düzenle (typewriter editörüyle)
+annoLayer.addEventListener('dblclick', e => {{
+  const g = e.target.closest('.anno-note');
+  if (!g) return;
+  e.stopPropagation(); e.preventDefault();
+  const a = annotations.find(x => String(x.id) === g.getAttribute('data-id'));
+  if (a) annoOpenEditor(a, null);
+}});
+
+// Tıkla-seç + sürükle-taşı + (kutuda) köşe tutamacından boyutlandır.
+// stopPropagation: viewport pan handler'ı bu mousedown'ı görmesin.
+annoLayer.addEventListener('mousedown', e => {{
+  if (annoTool || e.button !== 0) return;
+  const hEl = e.target.closest('.anno-handle');
+  const gEl = e.target.closest('.anno');
+  if (!gEl) return;
+  e.stopPropagation(); e.preventDefault();
+  const a = annotations.find(x => String(x.id) === gEl.getAttribute('data-id'));
+  if (!a) return;
+  annoSetSel(a.id);
+  const p = annoCanvasXY(e);
+  annoMove = {{ a: a, mode: hEl ? hEl.getAttribute('data-c') : 'move',
+                px: p.x, py: p.y, ox: a.x, oy: a.y,
+                ow: a.w || 0, oh: a.h || 0, moved: false }};
+}});
+window.addEventListener('mousemove', e => {{
+  if (!annoMove) return;
+  const p = annoCanvasXY(e);
+  const dx = p.x - annoMove.px, dy = p.y - annoMove.py;
+  if (!annoMove.moved && Math.hypot(dx * scale, dy * scale) < 3) return;
+  annoMove.moved = true;
+  const a = annoMove.a, m = annoMove.mode;
+  if (m === 'move') {{
+    a.x = annoMove.ox + dx; a.y = annoMove.oy + dy;
+  }} else {{
+    let x1 = annoMove.ox, y1 = annoMove.oy;
+    let x2 = annoMove.ox + annoMove.ow, y2 = annoMove.oy + annoMove.oh;
+    if (m === 'nw') {{ x1 += dx; y1 += dy; }}
+    else if (m === 'ne') {{ x2 += dx; y1 += dy; }}
+    else if (m === 'sw') {{ x1 += dx; y2 += dy; }}
+    else {{ x2 += dx; y2 += dy; }}
+    a.x = Math.min(x1, x2); a.y = Math.min(y1, y2);
+    a.w = Math.max(2, Math.abs(x2 - x1)); a.h = Math.max(2, Math.abs(y2 - y1));
+  }}
+  annoRender();
+}});
+window.addEventListener('mouseup', () => {{
+  if (!annoMove) return;
+  if (annoMove.moved) {{
+    annoStore();
+    annoJustDrew = true;                 // izleyen click seçimi/vurguyu bozmasın
+    setTimeout(() => {{ annoJustDrew = false; }}, 0);
+  }}
+  annoMove = null;
+}});
+
+// Boş alana tık: seçimi bırak (pan/araç/taşıma sonrası click hariç)
+viewport.addEventListener('click', e => {{
+  if (annoTool || annoJustDrew || annoMove || panMoved) return;
+  if (annoSel === null) return;
+  if (e.target.closest('.anno') || e.target.closest('#anno-bar')
+      || e.target.closest('#toolbar') || e.target.closest('.tool-btn')) return;
+  annoSetSel(null);
+}});
+
+// Mini bar: − / + (notta yazı boyutu, kutuda kenar kalınlığı) ve × (sil)
+annoBar.addEventListener('mousedown', e => e.stopPropagation());
+annoBar.addEventListener('click', e => {{
+  const act = e.target.getAttribute && e.target.getAttribute('data-act');
+  if (!act) return;
+  e.stopPropagation();
+  const a = annotations.find(x => x.id === annoSel);
+  if (!a) return;
+  if (act === 'del') {{ annoDelete(annoSel); return; }}
+  const d = act === 'plus' ? 1 : -1;
+  if (a.k === 'note') a.fs = Math.max(4, Math.min(48, (a.fs || 14) + d * 2));
+  else a.sw = Math.max(0.5, Math.min(8, (a.sw || 1.5) + d * 0.5));
+  annoStore(); annoRender();
+}});
+// Renk seçici: not yazısının / kutu kenarının rengi (canlı önizleme)
+annoColorInp.addEventListener('input', () => {{
+  const a = annotations.find(x => x.id === annoSel);
+  if (!a) return;
+  a.color = annoColorInp.value;
+  annoStore(); annoRender();
+}});
+
+// Kaydet: notlar gömülü HTML. Chromium'da File System Access API ile mevcut
+// dosyanın ÜSTÜNE yazılabilir (ilk kayıtta dosya seçtirir — tarayıcı güvenliği
+// sessiz öz-yazmaya izin vermez; handle oturum boyunca saklanır, sonraki
+// kayıtlar diyalogsuz). API yok/engelliyse kopya indirme fallback'i.
+// Canlı DOM klonlanır; script'lerin çalışma anında eklediği/değiştirdiği durum
+// temizlenir ki kayıt ilk açılıştaki gibi başlasın (script'ler yeniden kurar).
+function annoBuildHtml() {{
+    const clone = document.documentElement.cloneNode(true);
+    clone.querySelectorAll('.lod-bitmap').forEach(el => el.remove());
+    clone.querySelectorAll('.lod-ready').forEach(el => el.classList.remove('lod-ready'));
+    clone.querySelectorAll('#sch-hl-overlay, #anno-layer, #anno-editor, #anno-bar')
+      .forEach(el => el.remove());
+    clone.querySelectorAll('.comp-highlight').forEach(el => el.classList.remove('comp-highlight'));
+    clone.querySelectorAll('.sheet-card').forEach(c =>
+      c.classList.remove('hit', 'hit-1', 'hit-2', 'hit-3'));
+    const cv = clone.querySelector('#canvas');
+    if (cv) {{ cv.classList.remove('lod', 'lod-fade'); cv.removeAttribute('style'); }}
+    const arc = clone.querySelector('#arc-layer'); if (arc) arc.innerHTML = '';
+    const cn = clone.querySelector('#current-net'); if (cn) cn.textContent = '';
+    const dp = clone.querySelector('#detail-panel'); if (dp) dp.classList.remove('open');
+    const pp = clone.querySelector('#comp-popup');
+    if (pp) {{ pp.classList.remove('open');
+               const pb = pp.querySelector('#popup-body'); if (pb) pb.innerHTML = ''; }}
+    const sb = clone.querySelector('#sidebar'); if (sb) sb.classList.remove('collapsed');
+    const tp = clone.querySelector('#svg-tip');
+    if (tp) {{ tp.removeAttribute('style'); tp.innerHTML = ''; }}
+    const vp = clone.querySelector('#viewport');
+    if (vp) vp.classList.remove('anno-mode', 'panning', 'grabbing');
+    // Notları göm: JSON içindeki '<' kaçırılır ki not metninde script kapatma
+    // etiketi geçse bile gömülü tag erken kapanmasın (u003c escape'i JSON'da
+    // geçerlidir; HTML parser '<' görmez).
+    const slot = clone.querySelector('#anno-embed');
+    slot.textContent = JSON.stringify({{ ts: Date.now(), items: annotations }})
+      .replace(/</g, '\\\\u003c');
+    return '<!DOCTYPE html>\\n' + clone.outerHTML;
+}}
+let annoFileHandle = null;   // oturum boyunca: sonraki kayıtlar diyalogsuz
+async function annoWriteViaHandle(html) {{
+  if (!annoFileHandle) return false;
+  try {{
+    if (annoFileHandle.queryPermission) {{
+      let p = await annoFileHandle.queryPermission({{ mode: 'readwrite' }});
+      if (p !== 'granted' && annoFileHandle.requestPermission)
+        p = await annoFileHandle.requestPermission({{ mode: 'readwrite' }});
+      if (p !== 'granted') return false;
+    }}
+    const w = await annoFileHandle.createWritable();
+    await w.write(html); await w.close();
+    return true;
+  }} catch (e) {{ annoFileHandle = null; return false; }}
+}}
+document.getElementById('anno-save').onclick = async () => {{
+  const btn = document.getElementById('anno-save');
+  btn.textContent = '...'; btn.disabled = true;
+  const done = okTxt => {{
+    btn.disabled = false;
+    btn.textContent = okTxt || 'Kaydet';
+    if (okTxt) setTimeout(() => {{ btn.textContent = 'Kaydet'; }}, 1500);
+  }};
+  let html;
+  try {{ html = annoBuildHtml(); }}
+  catch (err) {{ alert('Kaydetme hatası: ' + err.message); done(); return; }}
+  // 1) Bu oturumda dosya zaten seçildiyse: sessiz üzerine yaz
+  if (await annoWriteViaHandle(html)) {{ done('✓'); return; }}
+  // 2) Chromium: kayıt diyaloğu — mevcut dosya seçilirse ÜSTÜNE yazılır.
+  //    suggestedName = açık dosyanın adı (srcdoc iframe'de yoktur → _notlu).
+  if (window.showSaveFilePicker) {{
+    try {{
+      let name = '';
+      try {{ name = decodeURIComponent(location.pathname.split('/').pop() || ''); }}
+      catch (e) {{}}
+      if (!/\\.html?$/i.test(name))
+        name = (PROJECT_NAME || 'schematic') + '_notlu.html';
+      const fh = await window.showSaveFilePicker({{
+        suggestedName: name,
+        types: [{{ description: 'HTML', accept: {{ 'text/html': ['.html', '.htm'] }} }}],
+      }});
+      const w = await fh.createWritable();
+      await w.write(html); await w.close();
+      annoFileHandle = fh;
+      done('✓'); return;
+    }} catch (err) {{
+      if (err && err.name === 'AbortError') {{ done(); return; }}  // vazgeçildi
+      // NotAllowedError vb. (iframe/ortam kısıtı) → indirme fallback'ine düş
+    }}
+  }}
+  // 3) Fallback (Firefox / engellenen ortam): kopya indir
+  try {{
+    const blob = new Blob([html], {{ type: 'text/html;charset=utf-8' }});
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = (PROJECT_NAME || 'schematic') + '_notlu.html';
+    a.click();
+    setTimeout(() => URL.revokeObjectURL(a.href), 5000);
+    done('✓');
+  }} catch (err) {{ alert('Kaydetme hatası: ' + err.message); done(); }}
+}};
+
+annoLoad();
+annoRender();
+
 // === Cross-probe köprüsü (birleşik görünüm için) ===
 // Bir iframe içindeysek parent ile haberleş.
 const IN_FRAME = window.parent && window.parent !== window;
@@ -6274,7 +7067,19 @@ window.addEventListener('message', ev => {{
   const d = ev.data;
   if (!d || d.type !== 'xprobe' || d.source === 'sch') return;
   const desig = d.designator;
-  const comp = compByDesig[desig];
+  let comp = compByDesig[desig];
+  if (!comp && desig) {{
+    // PCB/3D'den FİZİKSEL kanal designator'ı gelmiş olabilir (hiyerarşik Repeat:
+    // R103_diffI2C_1). Mantıksal tabana in: önce kanal indeksini at (U2_1→U2),
+    // olmadıysa oda+indeks sonekini at (R103_diffI2C_1→R103) — v2.9.30'un
+    // Excel taban-designator fallback'iyle aynı kural.
+    const m1 = desig.match(/^(.+)_\\d+$/);
+    if (m1 && compByDesig[m1[1]]) comp = compByDesig[m1[1]];
+    if (!comp) {{
+      const m2 = desig.match(/^([A-Za-z]+\\d+)_.+$/);
+      if (m2 && compByDesig[m2[1]]) comp = compByDesig[m2[1]];
+    }}
+  }}
   if (comp) {{
     const sid = (comp.placements && comp.placements[0])
       ? comp.placements[0].sheet_id : comp.sheet_id;

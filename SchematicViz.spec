@@ -27,7 +27,13 @@ a = Analysis(
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
-    excludes=['PyQt6'],
+    # PyQt6 dışındakiler: build ortamında başka projelerden kalma ağır
+    # paketler varsa (pyenv'de numba/scipy vb. — Linux'ta 450MB çıktı
+    # görüldü) trimesh'in opsiyonel import'ları üzerinden pakete
+    # sürükleniyorlar. Bu uygulama hiçbirini kullanmaz; temiz ortamda
+    # bu liste no-op'tur.
+    excludes=['PyQt6', 'numba', 'llvmlite', 'scipy', 'matplotlib',
+              'pandas', 'IPython', 'tkinter', 'PySide2', 'PySide6'],
     noarchive=False,
     optimize=0,
 )
@@ -53,7 +59,7 @@ exe = EXE(
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
-    upx=True,
+    upx=False,
     upx_exclude=[],
     runtime_tmpdir=None,
     console=False,

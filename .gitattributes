@@ -1,0 +1,5 @@
+# Shell betikleri her platformda LF kalmalı (CRLF bash'i bozar;
+# core.autocrlf=true Windows checkout'unda CRLF'e çevirirdi).
+*.sh text eol=lf
+# Windows batch dosyaları CRLF ister.
+*.bat text eol=crlf

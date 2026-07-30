@@ -5,7 +5,7 @@ Wavenumber'ın ticari "viz sch 1.0" ürününün açık-kaynak alternatifi.
 [altium_monkey](https://github.com/wavenumber-eng/altium_monkey) kütüphanesi
 (Eli Hughes / Wavenumber) üzerine kurulu.
 
-**Mevcut sürüm**: `APP_VERSION` sabiti **`viewer.py`'de** tutulur (şu an 2.9.41);
+**Mevcut sürüm**: `APP_VERSION` sabiti **`viewer.py`'de** tutulur (şu an 2.9.42);
 `gui.py` oradan import eder (v2.9.29'da taşındı — HTML çıktıları da sürümü
 gösterebilsin diye, tek kaynak). Yeni özellik/düzeltme ekleyince bu sabiti
 güncelle (semver: major.minor.patch). Sürüm pencere başlığında, alt durum
@@ -310,6 +310,39 @@ mesajına bak.
   bu API olmayabilir (graceful fallback var, "veri yok" der).
 
 ## Çözülen Sorunlar (tarihçe)
+
+- **Şematik: çok satırlı metin çerçeveleri (DESIGN NOTE kutuları) görünmüyordu —
+  sayfalar arası SVG id çakışması (v2.9.42, kullanıcı bildirimi)**: Kırmızı
+  çerçeve çiziliyor ama içindeki metin YOK; pan/zoom sırasında bir an görünüp
+  hareket bitince tekrar kayboluyordu. Kök neden: altium_monkey her sayfayı
+  BAĞIMSIZ SVG dokümanı sayıp id'leri sayfa yerelinde numaralıyor
+  (`ClipRect1..N`); Altium "Text Frame" nesnesinin her satırı `clip-path=
+  "url(#ClipRectN)"` ile çerçeveye kırpılıyor. Viewer 8 sayfayı TEK HTML
+  dokümanına gömdüğünden aynı id 4-8 kez tanımlanıyor ve tarayıcı referansı
+  **dokümandaki İLK** tanıma çözüyor → BRK-210'da 175 clip referansının
+  **128'i yanlış sayfanın dikdörtgenine** düşüyor; DS1683 notu (metin y=218)
+  sayfa 0'ın `y=443..587` dikdörtgeniyle kırpılıp TAMAMEN görünmez oluyordu.
+  **Pan/zoom'da görünmesinin sebebi LOD**: `buildLods` sayfa SVG'sini
+  `XMLSerializer` ile TEK BAŞINA serileştirdiğinden bitmap'te id'ler doğru
+  (yerel) çözülüyor — bu yüzden metin yalnız hareket anındaki bitmap'te
+  görünüyordu (v2.9.35/36 LOD davranışı; LOD'un kendi hatası DEĞİL, çakışmayı
+  görünür kılan ipucu). **Çözüm**: yeni `namespace_svg_ids(svg, prefix)` —
+  `to_svg()` çıktısında hem TANIMLI hem REFERANSLI id'ler sayfaya özgü
+  `s{idx}__` önekiyle benzersizleştirilir (`url(#id)` ve `href="#id"`
+  referansları da yazılır; `_collect_data`'da render'dan hemen sonra çağrılır
+  → HTML/birleşik görünüm/LOD hepsi aynı SVG'yi kullandığından tek noktadan
+  düzelir). Referanssız id'lere (scene, DocumentItemsGroup, TPL00001 …)
+  DOKUNULMAZ: hiçbir CSS/JS onlara bakmıyor ve metin içeriğinde geçen
+  `id="..."` benzeri dizilerde yanlış eşleşme riski böylece sıfırlanır.
+  **Doğrulama** (BRK-210, 8 sayfa): yanlış çözülen referans 128 → **0**,
+  175/175 referans tek tanıma çözülüyor; headless Edge + CDP ile canlı SVG'de
+  (LOD kapalı, durgun) not metni `elementFromPoint`'te hit alıyor
+  (`clipRect=[1171,201,358,78]`, `ayniSvg=true`) ve ekran görüntüsünde
+  Altium'la aynı şekilde okunuyor — düzeltmesiz HTML'de aynı noktada
+  `polygon` (zemin) çıkıyor, kutu boş. **PCB görüntüleyici etkilenmiyor**:
+  katman SVG'lerinde `url(#…)` referansı YOK (0), tekrarlı id'ler
+  (`pcb-pad-*-hole`, `scene`, `board-outline`) referanssız → render doğru,
+  namespace uygulanmadı.
 
 - **Annotation: Kaydet artık açık dosyanın ÜSTÜNE yazabiliyor (v2.9.41,
   kullanıcı isteği)**: Kaydet her seferinde `_notlu.html` kopyası indiriyordu;

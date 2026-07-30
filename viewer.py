@@ -43,7 +43,7 @@ from altium_monkey.altium_schdoc import AltiumSchDoc
 
 # Uygulama sürümü — tek kaynak burası; gui.py buradan import eder.
 # HTML çıktılarında sağ üst köşedeki rozette görünür (build saati yerine).
-APP_VERSION = "2.9.41"
+APP_VERSION = "2.9.42"
 
 # Dikey pin adlarının doğru render edildiği minimum altium_monkey sürümü.
 # Bu sürümden öncesinde STM32 gibi IC'lerde dikey pinler yatay çiziliyordu.
@@ -177,6 +177,61 @@ def strip_aspect_ratio(svg_str: str) -> str:
             count=1,
         )
     return svg_str.replace("<svg", '<svg preserveAspectRatio="none"', 1)
+
+
+# SVG içi id referansları: clip-path/fill/mask/filter gibi url(#id) ve
+# <use xlink:href="#id">. Referanslanan id'ler sayfa başına ad-alanına alınır.
+_SVG_ID_REF_RE = re.compile(
+    r'url\(\s*#([^)\s"\']+)\s*\)'          # url(#id)  — clip-path, fill, mask …
+    r'|(?:xlink:)?href\s*=\s*"#([^"]+)"'   # href="#id" — <use>, <textPath>
+)
+
+
+def namespace_svg_ids(svg_str: str, prefix: str) -> str:
+    """@brief Bir sayfanın SVG'sindeki REFERANSLANAN id'lerini sayfaya özgü
+    önekle benzersizleştirir (sayfalar arası id çakışmasını önler).
+
+    @details altium_monkey her sayfayı BAĞIMSIZ bir SVG dokümanı sayar ve
+    id'leri sayfa yerelinde numaralar (`ClipRect1`, `ClipRect2`, …). Viewer
+    tüm sayfaları TEK HTML dokümanına gömdüğü için aynı id birden çok kez
+    tanımlanır; tarayıcı `url(#ClipRect12)`'i **dokümandaki İLK** tanıma
+    çözer → çok satırlı metin çerçeveleri (Altium "Text Frame" — DESIGN NOTE
+    kutuları) başka bir sayfanın clip dikdörtgeniyle kırpılıp GÖRÜNMEZ olur.
+    LOD bitmap'i sayfa SVG'sini tek başına serileştirdiğinden orada id'ler
+    doğru çözülür — bu yüzden metin yalnız pan/zoom sırasında görünüp
+    hareket bitince kaybolur (bkz. Çözülen Sorunlar).
+
+    Yalnızca aynı SVG içinde hem TANIMLI hem REFERANSLI id'ler değiştirilir;
+    referanssız id'lere (scene, DocumentItemsGroup …) dokunulmaz — metin
+    içeriğinde geçen `id="..."` benzeri diziler yüzünden yanlış eşleşme
+    olasılığı böylece pratikte sıfırlanır.
+
+    @param svg_str SVG metni
+    @param prefix Sayfaya özgü önek (harfle başlar, ör. "s3")
+    @return id'leri ad-alanına alınmış SVG metni
+    """
+    refs = {m.group(1) or m.group(2) for m in _SVG_ID_REF_RE.finditer(svg_str)}
+    if not refs:
+        return svg_str
+    declared = set(re.findall(r'\sid\s*=\s*"([^"]*)"', svg_str))
+    ren = {i: f"{prefix}__{i}" for i in (refs & declared)}
+    if not ren:
+        return svg_str
+
+    def _decl(m):
+        old = m.group(2)
+        return f'{m.group(1)}"{ren[old]}"' if old in ren else m.group(0)
+
+    def _ref(m):
+        old = m.group(1) or m.group(2)
+        if old not in ren:
+            return m.group(0)
+        if m.group(1) is not None:
+            return f"url(#{ren[old]})"
+        return m.group(0).replace(f"#{old}", f"#{ren[old]}")
+
+    svg_str = re.sub(r'(\sid\s*=\s*)"([^"]*)"', _decl, svg_str)
+    return _SVG_ID_REF_RE.sub(_ref, svg_str)
 
 
 def collect_net_names_from_sheet(schdoc) -> set:
@@ -466,6 +521,11 @@ def _collect_data(project_path: str, log, with_pcb=False, progress=None):
                 svg = schdoc.to_svg()
             except TypeError:
                 svg = schdoc.to_svg(project_parameters=project.parameters)
+
+            # Tüm sayfalar TEK HTML dokümanına gömüldüğünden id'ler sayfaya
+            # özgü ad-alanına alınır (yoksa clip-path'ler karışır, çok satırlı
+            # metin çerçeveleri kaybolur — bkz. namespace_svg_ids).
+            svg = namespace_svg_ids(svg, f"s{idx}")
 
             # Komponent kutusu (highlight) için sheet'in viewBox yüksekliği:
             # mils → SVG viewBox dönüşümü (1 viewBox birimi = 10 mils, y ters).

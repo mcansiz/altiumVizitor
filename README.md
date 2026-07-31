@@ -8,8 +8,7 @@
 ![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20Linux-lightgrey.svg)
 ![License](https://img.shields.io/badge/license-AGPL--3.0--or--later-orange.svg)
 
-Wavenumber'ın ticari **"viz sch 1.0"** ürününün açık-kaynak alternatifi. Eli Hughes / Wavenumber'ın
-[`altium_monkey`](https://github.com/wavenumber-eng/altium_monkey) kütüphanesi üzerine kuruludur.
+Eli Hughes / Wavenumber'ın [`altium_monkey`](https://github.com/wavenumber-eng/altium_monkey) kütüphanesi üzerine kuruludur.
 
 Projeyi seçin, bir düğmeye basın — çıktı olarak **çift tıkla açılan, tek dosya, portable** bir HTML
 (veya Excel/CSV/JSON) alın. Ne web sunucusu, ne kurulum, ne internet gerekir; `file://` ile açılır.

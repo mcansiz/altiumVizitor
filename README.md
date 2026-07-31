@@ -68,7 +68,7 @@ Uygulama sekiz ayrı çıktı üretir:
 
 ### Gereksinimler
 
-- **Python 3.10+** (Windows'ta 3.12 önerilir)
+- **Python 3.12** 
 - Linux'ta `altium-monkey` bağımlılığı `wn-geometer` yalnızca `manylinux_2_39` wheel'i dağıttığından **glibc ≥ 2.39** gerekir (Ubuntu 24.04+ / Debian 13+). Eski dağıtımlarda `pip` `ResolutionImpossible` hatası verir.
 
 ### Bağımlılıklar

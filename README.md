@@ -1,4 +1,204 @@
-# Schematic Viz Generator
+
+# Schematic Viz Generator (EN)
+
+> A PyQt5 desktop application that converts Altium schematic and PCB projects into **interactive, single-file HTML viewers** — no server required.
+
+![Version](https://img.shields.io/badge/version-2.9.41-blue.svg)
+![Python](https://img.shields.io/badge/python-3.10%2B-3776AB.svg?logo=python\&logoColor=white)
+![GUI](https://img.shields.io/badge/GUI-PyQt5-41CD52.svg?logo=qt\&logoColor=white)
+![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20Linux-lightgrey.svg)
+![License](https://img.shields.io/badge/license-AGPL--3.0--or--later-orange.svg)
+
+---
+
+## ❤️ Support
+
+If this project helps you, consider supporting its development ☕
+
+This tool is developed in my free time and your support helps me maintain and improve it.
+
+👉 https://buymeacoffee.com/cansizmikab
+
+<a href="https://buymeacoffee.com/cansizmikab" target="_blank">
+<img src="https://www.buymeacoffee.com/assets/img/custom_images/orange_img.png" alt="Buy Me A Coffee" style="height: 41px !important;width: 174px !important;">
+</a>
+
+---
+
+## Project Overview
+
+Select your project, click a button — and get a **double-clickable, single-file, portable HTML output**
+(or Excel / CSV / JSON).
+
+No web server, no installation, no internet required. Works directly via `file://`.
+
+![Main UI](img/app.jpg)
+
+---
+
+## ✨ Key Features
+
+* **Interactive Schematic Viewer**
+  All pages in a single pan/zoom canvas, clickable nets and components, selectable text like PDF.
+
+* **PCB Viewer**
+  Full-screen layered view similar to Altium, layer toggling, copper/net highlighting, cross-probing.
+
+* **Schematic + PCB + 3D in One HTML**
+  Side-by-side layout with bidirectional cross-probing and real embedded **STEP 3D models**.
+
+* **Excel & CSV Outputs**
+  MCU pin list, IC connection map, BOM, Pick & Place.
+
+* **AI/LLM Friendly JSON**
+  Compact export with real electrical connectivity (pin → net), BOM, and variant data.
+
+* **Annotation Tools**
+  Add notes and highlights directly on schematics (PDF-like editing experience).
+
+* **Cross-platform**
+  Works on Windows and Linux. Fully OS-independent via `pathlib`.
+
+---
+
+## Screenshots
+
+**Interactive schematic viewer**
+
+![Schematic viewer](img/sch.jpg)
+
+**PCB viewer**
+
+![PCB viewer](img/pcb.jpg)
+
+**3D board preview**
+
+![3D board](img/3d.jpg)
+
+---
+
+## 📦 Outputs
+
+The application generates eight types of outputs:
+
+| Output                     | Format           | Description                       |
+| -------------------------- | ---------------- | --------------------------------- |
+| **Schematic Viewer**       | HTML (~30 MB)    | Single-file interactive schematic |
+| **PCB Viewer**             | HTML (~30-40 MB) | Layered PCB with net highlighting |
+| **Schematic + PCB + 3D ★** | HTML (~45-50 MB) | Combined view with cross-probing  |
+| **MCU Pin List**           | XLSX             | MCU-centric pin mapping           |
+| **IC Connection Map**      | XLSX             | Signal/interface mapping          |
+| **BOM**                    | CSV              | Full bill of materials            |
+| **Pick & Place**           | CSV              | PCB placement coordinates         |
+| **JSON**                   | JSON             | AI/LLM-friendly structured data   |
+
+---
+
+## ⚙️ Installation
+
+### Requirements
+
+* **Python 3.12**
+* On Linux: `glibc ≥ 2.39` required due to dependency constraints
+
+### Install dependencies
+
+```bash
+# Windows
+py -3.12 -m pip install -r requirements.txt
+
+# Linux
+python3 -m pip install -r requirements.txt
+```
+
+---
+
+## ▶️ Usage
+
+```bash
+# Windows
+py -3.12 gui.py
+
+# Linux
+python3 gui.py
+```
+
+1. Select your Altium project (`.PrjPcb`)
+2. Click the desired output button
+3. Generated files appear in the project directory
+
+> Tip: If updates are not visible, refresh with **Ctrl+F5**
+
+---
+
+## ⌨️ Shortcuts (HTML Viewer)
+
+| Key     | Function            |
+| ------- | ------------------- |
+| `/`     | Open search         |
+| `Enter` | Select first result |
+| `B`     | Toggle sidebar      |
+| `0`     | Reset view          |
+| `F`     | Fit view            |
+| `Esc`   | Clear selection     |
+| `?`     | Show help           |
+| `1-4`   | Switch views        |
+
+---
+
+## 🛠 Windows EXE Build
+
+```bash
+py -3.12 -m PyInstaller --noconfirm --onefile --windowed --name "SchematicViz" ^
+    --collect-all altium_monkey --collect-all PyQt5 ^
+    --collect-all openpyxl --collect-all cascadio --collect-all trimesh ^
+    --collect-all numpy ^
+    --icon icon.ico --add-data "gui.ui;." --add-data "icon.ico;." gui.py
+```
+
+---
+
+## 🧠 Architecture Notes
+
+* **Single-file HTML strategy** → fully portable, no backend needed
+* **Real netlist generation** via `compile_netlist()`
+* **Cross-platform path resolution**
+* Robust file discovery for mixed OS workflows
+
+---
+
+## 🙏 Acknowledgements
+
+Built on top of [`altium_monkey`](https://github.com/wavenumber-eng/altium_monkey)
+by Eli Hughes / Wavenumber.
+
+---
+
+## 📄 License
+
+Licensed under **AGPL-3.0-or-later**
+
+Due to dependencies:
+
+* `altium_monkey` (AGPL-3.0)
+* PyQt5 (GPL v3)
+
+The combined work must be distributed under AGPL.
+
+> Generated outputs (HTML, CSV, JSON, Excel) are **NOT affected** by AGPL and can be freely shared.
+
+---
+
+## ⭐ If you like this project
+
+Give it a star ⭐ on GitHub and consider supporting:
+
+👉 https://buymeacoffee.com/cansizmikab
+
+
+-----------------------
+
+# Schematic Viz Generator (TR)
 
 > Altium şematik ve PCB projelerini tek dosyalık, sunucu gerektirmeyen **interaktif HTML görüntüleyicilere** dönüştüren PyQt5 masaüstü uygulaması.
 
@@ -8,7 +208,17 @@
 ![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20Linux-lightgrey.svg)
 ![License](https://img.shields.io/badge/license-AGPL--3.0--or--later-orange.svg)
 
-Eli Hughes / Wavenumber'ın [`altium_monkey`](https://github.com/wavenumber-eng/altium_monkey) kütüphanesi üzerine kuruludur.
+
+## ❤️ Support
+
+If this project helped you, consider buying me a coffee ☕
+
+
+<a href="https://buymeacoffee.com/cansizmikab" target="_blank"><img src="https://www.buymeacoffee.com/assets/img/custom_images/orange_img.png" alt="Buy Me A Coffee" style="height: 41px !important;width: 174px !important;box-shadow: 0px 3px 2px 0px rgba(190, 190, 190, 0.5) !important;-webkit-box-shadow: 0px 3px 2px 0px rgba(190, 190, 190, 0.5) !important;" ></a>
+
+
+
+## Proje
 
 Projeyi seçin, bir düğmeye basın — çıktı olarak **çift tıkla açılan, tek dosya, portable** bir HTML
 (veya Excel/CSV/JSON) alın. Ne web sunucusu, ne kurulum, ne internet gerekir; `file://` ile açılır.
@@ -172,7 +382,7 @@ Geliştirici dokümantasyonu için `CLAUDE.md`; kaynak-kod dokümantasyonu için
 
 Bu proje [`altium_monkey`](https://github.com/wavenumber-eng/altium_monkey)
 (Eli Hughes / [Wavenumber](https://github.com/wavenumber-eng)) kütüphanesi üzerine kuruludur.
-Altium dosya formatlarının okunması bu kütüphane sayesinde mümkündür.
+Altium dosya formatlarının okunması bu kütüphane sayesinde mümkündür. Kendisine Teşkkürlerimi sunuyorum.
 
 ---
 

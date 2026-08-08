@@ -12,7 +12,7 @@ bağımsızdır (Three.js gömülü, harici bağımlılık yok).
 
 @author Mikail Cansız
 @date 2026
-@version 2.9.27
+@version 2.10.0
 """
 # Schematic Viz Generator — Altium projelerini interaktif HTML görüntüleyiciye dönüştürür.
 # Copyright (C) 2026  Mikail Cansız <cansizmikail@gmail.com>
@@ -43,11 +43,162 @@ from altium_monkey.altium_schdoc import AltiumSchDoc
 
 # Uygulama sürümü — tek kaynak burası; gui.py buradan import eder.
 # HTML çıktılarında sağ üst köşedeki rozette görünür (build saati yerine).
-APP_VERSION = "2.9.42"
+APP_VERSION = "2.10.0"
 
 # Dikey pin adlarının doğru render edildiği minimum altium_monkey sürümü.
 # Bu sürümden öncesinde STM32 gibi IC'lerde dikey pinler yatay çiziliyordu.
 MIN_RECOMMENDED_AM = "2026.6.21"
+
+# Mobil/dokunmatik ekranlarda kullanılacak `<head>` etiketleri. Viewport meta'sı
+# OLMADAN mobil tarayıcı 980px'lik sanal bir düzen genişliği varsayar: arayüz
+# minik çıkar, `100vh` yerleşimi taşar ve jestler sayfanın kendisine gider.
+_MOBILE_META = (
+    '<meta name="viewport" content="width=device-width, initial-scale=1, '
+    'maximum-scale=5, viewport-fit=cover">'
+)
+
+# === Dokunmatik jest desteği (Pointer Events) — tüm görüntüleyiciler ortak ====
+# Şematik/PCB/3D görünümlerinin pan-zoom kodu yalnızca `mousedown`/`wheel` ile
+# yazılmıştı; faresi olmayan mobil tarayıcıda (Android Firefox/Chrome, iOS
+# Safari) HİÇBİRİ çalışmıyordu — ne kaydırma ne parmakla yakınlaştırma.
+# `installGesture` pointer olaylarıyla tek parmak sürükleme + iki parmak pinch
+# zoom sağlar; masaüstü fare kod yolu olduğu gibi korunur.
+#
+# ÜÇ KRİTİK NOKTA:
+#  (1) Jest yüzeyine CSS'te `touch-action:none` verilmelidir — yoksa tarayıcı
+#      jesti kendi alır (sayfayı kaydırır/zoom'lar) ve `pointermove` akışı kesilir.
+#  (2) `pointerdown`da preventDefault ÇAĞRILMAZ — Chromium'da bu, tarayıcının
+#      dokunuş sonunda ürettiği `click`i de bastırıyor (CDP dokunma
+#      emülasyonuyla ölçüldü) ve parmakla komponent/net seçmek imkânsız
+#      hâle geliyordu. Bunun yerine `pointermove`da preventDefault edilir
+#      (sürükleme) ve tarayıcının dokunuş-sonu uyumluluk (compat) fare
+#      olaylarına karşı `gTouchActive()` koruması kullanılır.
+#  (3) Dokunma pointer'ları hedef elemana örtük olarak "capture" edilir; bu
+#      yüzden dinleyiciler window'a değil elemanın kendisine bağlanır.
+# `gTouchActive()` compat olayları yine de üreten tarayıcılar için ek emniyet:
+# mevcut fare handler'ları dokunma sırasında erken çıkar.
+_GESTURE_JS = r"""
+var __gTouchN = 0, __gTouchUntil = 0;
+function gTouchActive() { return __gTouchN > 0 || Date.now() < __gTouchUntil; }
+function installGesture(el, h) {
+  h = h || {};
+  var pts = new Map();
+  var mode = 0, lx = 0, ly = 0, pd = 0, moved = false, bridge = false, tgt = null;
+  var lastTap = 0, ltx = 0, lty = 0, nativeDbl = 0;
+  function two() {
+    var a = []; pts.forEach(function (p) { a.push(p); });
+    return { x:(a[0].x + a[1].x) / 2, y:(a[0].y + a[1].y) / 2,
+             d:Math.hypot(a[0].x - a[1].x, a[0].y - a[1].y) || 1 };
+  }
+  // Köprü modu: sürükleme mantığı mouse olaylarına bağlı olan bileşenler
+  // (ör. şematikteki not/kutu araçları) için dokunuş sentetik fare olaylarına
+  // çevrilir → o kod yolları değişmeden mobilde de çalışır.
+  // DİKKAT: yalnız `mousedown` dokunulan öğeye gönderilir (hedef bazlı mantık
+  // için gerekli); sonraki mousemove/mouseup JEST YÜZEYİNE gönderilir. Sebep:
+  // mousedown handler'ı çoğu zaman yeniden render eder (ör. annoSetSel →
+  // annoRender) ve ilk hedef DOM'dan KOPAR — kopuk düğüme gönderilen olay
+  // window'a bubble ETMEZ, sürükleme hiç ilerlemezdi.
+  function synth(type, x, y, onTarget) {
+    ((onTarget && tgt) ? tgt : el).dispatchEvent(new MouseEvent(type,
+      { bubbles:true, cancelable:true, clientX:x, clientY:y, view:window }));
+  }
+  el.addEventListener('dblclick', function () { nativeDbl = Date.now(); }, true);
+  el.addEventListener('pointerdown', function (e) {
+    if (e.pointerType === 'mouse') return;         // fare: mevcut kod yolu
+    if (h.skip && h.skip(e)) return;
+    pts.set(e.pointerId, { x:e.clientX, y:e.clientY });
+    __gTouchN = pts.size;
+    if (pts.size === 1) {
+      mode = 1; moved = false; lx = e.clientX; ly = e.clientY; tgt = e.target;
+      bridge = !!(h.bridge && h.bridge(e));
+      if (h.down) h.down();
+      // preventDefault YOK: dokunuş sonundaki `click` korunmalı (bkz. yukarıdaki
+      // not). Köprü modunda mousedown yalnızca ilk harekette üretilir ki
+      // dokunuş tıklamaya dönüşürse sahte bir sürükleme başlatılmasın.
+    } else if (pts.size === 2 && !bridge) {
+      var m = two(); mode = 2; moved = true; pd = m.d; lx = m.x; ly = m.y;
+      e.preventDefault();
+      if (h.start) h.start();
+    }
+  }, { passive:false });
+  el.addEventListener('pointermove', function (e) {
+    if (!mode || !pts.has(e.pointerId)) return;
+    pts.set(e.pointerId, { x:e.clientX, y:e.clientY });
+    e.preventDefault();
+    if (mode === 1) {
+      if (!moved) {
+        // Küçük parmak titremesi pan sayılmasın (dokunuş hâlâ tıklama olabilir)
+        if (Math.abs(e.clientX - lx) < 4 && Math.abs(e.clientY - ly) < 4) return;
+        moved = true;
+        if (bridge) synth('mousedown', lx, ly, true);   // hedefe: sürükleme başlangıcı
+        else if (h.start) h.start();
+      }
+      var dx = e.clientX - lx, dy = e.clientY - ly;
+      lx = e.clientX; ly = e.clientY;
+      if (bridge) synth('mousemove', e.clientX, e.clientY);
+      else if (h.pan) h.pan(dx, dy);
+    } else if (mode === 2 && pts.size >= 2) {
+      var m = two(), f = m.d / pd;
+      pd = m.d;
+      var mdx = m.x - lx, mdy = m.y - ly;
+      lx = m.x; ly = m.y;
+      if (h.pinch) h.pinch(f, m.x, m.y, mdx, mdy);
+    }
+  }, { passive:false });
+  function up(e) {
+    if (!pts.has(e.pointerId)) return;
+    pts.delete(e.pointerId);
+    __gTouchN = pts.size;
+    if (pts.size === 1 && mode === 2) {
+      // Bir parmak kalktı → kalan parmakla pan'e dön (sıçrama olmasın)
+      var a = []; pts.forEach(function (p) { a.push(p); });
+      mode = 1; lx = a[0].x; ly = a[0].y; moved = true;
+      return;
+    }
+    if (pts.size > 0) return;
+    if (bridge && moved) { synth('mousemove', e.clientX, e.clientY);
+                           synth('mouseup', e.clientX, e.clientY); }
+    else if (!moved) {
+      // Çift dokunuş → dblclick (bazı mobil tarayıcılar dokunmada üretmez).
+      // Tarayıcı kendisi üretmişse tekrarlamayız (nativeDbl kontrolü).
+      var now = Date.now(), ex = e.clientX, ey = e.clientY, t = tgt || el;
+      if (now - lastTap < 350 && Math.abs(ex - ltx) < 30 && Math.abs(ey - lty) < 30) {
+        lastTap = 0;
+        setTimeout(function () {
+          if (Date.now() - nativeDbl > 400)
+            t.dispatchEvent(new MouseEvent('dblclick', { bubbles:true, cancelable:true,
+              clientX:ex, clientY:ey, view:window }));
+        }, 60);
+      } else { lastTap = now; ltx = ex; lty = ey; }
+    }
+    if (moved && h.end) h.end();
+    mode = 0; bridge = false; moved = false; tgt = null;
+    __gTouchUntil = Date.now() + 500;   // compat fare olaylarına karşı emniyet
+  }
+  el.addEventListener('pointerup', up);
+  el.addEventListener('pointercancel', up);
+}
+// Tutamaç/ayraç gibi basit sürükleme öğeleri için: fare + dokunuş tek yoldan.
+// setPointerCapture sayesinde parmak/fare elemandan çıksa da olaylar gelir.
+function installDrag(el, onStart, onMove, onEnd) {
+  var on = false;
+  el.addEventListener('pointerdown', function (e) {
+    on = true;
+    try { el.setPointerCapture(e.pointerId); } catch (err) {}
+    e.preventDefault();
+    if (onStart) onStart(e);
+  });
+  el.addEventListener('pointermove', function (e) { if (on && onMove) onMove(e); });
+  function fin(e) {
+    if (!on) return;
+    on = false;
+    try { el.releasePointerCapture(e.pointerId); } catch (err) {}
+    if (onEnd) onEnd(e);
+  }
+  el.addEventListener('pointerup', fin);
+  el.addEventListener('pointercancel', fin);
+}
+"""
 
 
 def _check_altium_monkey_version(log):
@@ -2208,10 +2359,11 @@ def build_3d_html(d3d, timestamp, project_name):
     @return Üretilen sonuç.
     """
     import json
-    tpl = r'''<!DOCTYPE html><html><head><meta charset="utf-8"><style>
+    tpl = r'''<!DOCTYPE html><html><head><meta charset="utf-8">__VIEWPORT__<style>
   html,body{margin:0;height:100%;background:#9499a0;overflow:hidden;
             font-family:"Segoe UI",system-ui,sans-serif;}
-  #c3d{display:block;width:100%;height:100%;}
+  /* touch-action:none ŞART — yoksa mobil tarayıcı jesti kendi alır */
+  #c3d{display:block;width:100%;height:100%;touch-action:none;}
   #tb3d{position:absolute;top:8px;right:8px;display:flex;gap:4px;z-index:5;}
   .b3d{background:#1a1a1a;border:1px solid #333;color:#bbb;font-size:11px;
        padding:4px 11px;border-radius:4px;cursor:pointer;}
@@ -2235,7 +2387,7 @@ def build_3d_html(d3d, timestamp, project_name):
   <button class="b3d on" id="v-lod" title="LOD: döndürme/zoom sırasında çözünürlük düşürülür (akıcılık), durunca netleşir">LOD</button>
 </div>
 <div id="lbl3d"></div>
-<div id="info3d">Sürükle: döndür · Tekerlek: zoom · Sağ-sürükle: kaydır · Tıkla: komponent</div>
+<div id="info3d">Sürükle / tek parmak: döndür · Tekerlek / iki parmak: zoom · Sağ-sürükle veya iki parmak kaydır: taşı · Tıkla: komponent</div>
 <script>__THREE__</script>
 <script>
 const D = __DATA__;
@@ -2497,7 +2649,9 @@ lodBtn3d.onclick = ()=>{ lodOn = !lodOn; lodBtn3d.classList.toggle('on', lodOn);
   if (!lodOn) lodSetLow(false); };
 
 let drag=null, lastX=0, lastY=0, moved=false;
-canvas.addEventListener('mousedown', e=>{ drag = (e.button===2?'pan':'rot');
+canvas.addEventListener('mousedown', e=>{
+  if(gTouchActive()) return;            // dokunma jesti sürüyor (compat fare olayı)
+  drag = (e.button===2?'pan':'rot');
   lastX=e.clientX; lastY=e.clientY; moved=false; e.preventDefault(); });
 window.addEventListener('mousemove', e=>{
   if(!drag) return;
@@ -2521,6 +2675,27 @@ canvas.addEventListener('wheel', e=>{ e.preventDefault();
   lodTouch();
   orbit.r *= (e.deltaY<0 ? 0.9 : 1.1);
   orbit.r = Math.max(4, Math.min(3000, orbit.r)); applyCam(); }, {passive:false});
+
+__GESTURE__
+// === Dokunmatik: tek parmak döndür, iki parmak yakınlaştır + kaydır ========
+// (Faresi olmayan mobil tarayıcıda 3D görünüm hiç çevrilemiyordu.)
+installGesture(canvas, {
+  down: ()=>{ moved=false; },
+  start: ()=>{ moved=true; },
+  pan: (dx,dy)=>{ orbit.az -= dx*0.0095; orbit.el += dy*0.0095;
+                  lodTouch(); applyCam(); },
+  pinch: (f,cx,cy,mdx,mdy)=>{
+    orbit.r = Math.max(4, Math.min(3000, orbit.r / f));   // parmaklar açılır → yakınlaş
+    // İki parmağın ortak kayması = board'u kaydır (fare sağ-sürüklemesinin karşılığı)
+    const k = orbit.r*0.0016;
+    const right = new THREE.Vector3().setFromMatrixColumn(camera.matrix,0);
+    const up    = new THREE.Vector3().setFromMatrixColumn(camera.matrix,1);
+    orbit.tx += (-right.x*mdx + up.x*mdy)*k;
+    orbit.ty += (-right.y*mdx + up.y*mdy)*k;
+    orbit.tz += (-right.z*mdx + up.z*mdy)*k;
+    lodTouch(); applyCam();
+  }
+});
 
 // === Seçim + cross-probe ===
 const ray = new THREE.Raycaster(), ndc = new THREE.Vector2();
@@ -2645,6 +2820,8 @@ else fail('Bu projede 3D verisi bulunamadı.');
 </script>
 </body></html>'''
     return (tpl
+            .replace("__VIEWPORT__", _MOBILE_META)
+            .replace("__GESTURE__", _GESTURE_JS)
             .replace("__THREE__", _three_js_source())
             .replace("__DATA__", json.dumps(d3d)))
 
@@ -2684,11 +2861,15 @@ def build_combined_shell(sch_html, pcb_html, timestamp, project_name, have_pcb,
     return f"""<!DOCTYPE html>
 <html lang="tr"><head>
 <meta charset="utf-8">
+{_MOBILE_META}
 <title>Şematik + PCB · {project_name} · {timestamp}</title>
 <style>
   * {{ margin:0; padding:0; box-sizing:border-box; }}
+  /* dvh: mobilde adres çubuğu açılıp kapanırken 100vh taşma yapar (alt kısım
+     ekran dışında kalır); destekleyen tarayıcılarda dinamik yükseklik kullanılır */
   html,body {{ height:100%; overflow:hidden; background:#0a0a0a;
                font-family:'Segoe UI',sans-serif; }}
+  html,body {{ height:100dvh; }}
   #topbar {{ height:34px; background:#161616; border-bottom:1px solid #333;
              display:flex; align-items:center; padding:0 12px; gap:14px;
              color:#ccc; font-size:12px; }}
@@ -2703,13 +2884,15 @@ def build_combined_shell(sch_html, pcb_html, timestamp, project_name, have_pcb,
   .vm-btn:hover {{ color:#4ec9b0; border-color:#4ec9b0; }}
   .vm-btn.active {{ background:#4ec9b0; color:#0a0a0a; border-color:#4ec9b0;
                     font-weight:bold; }}
-  #split {{ display:flex; height:calc(100vh - 34px); width:100%; }}
+  body {{ display:flex; flex-direction:column; }}
+  #topbar {{ flex-shrink:0; }}
+  #split {{ display:flex; flex:1; min-height:0; width:100%; }}
   .pane {{ height:100%; overflow:hidden; position:relative; }}
   #pane-sch {{ width:50%; }}
   #pane-pcb {{ flex:1; }}
   .pane iframe {{ width:100%; height:100%; border:none; display:block; }}
   #divider {{ width:6px; background:#333; cursor:col-resize; flex-shrink:0;
-              position:relative; }}
+              position:relative; touch-action:none; }}
   #divider:hover {{ background:#4ec9b0; }}
   #divider::after {{ content:'⋮'; position:absolute; top:50%; left:50%;
                      transform:translate(-50%,-50%); color:#666; font-size:14px; }}
@@ -2722,6 +2905,15 @@ def build_combined_shell(sch_html, pcb_html, timestamp, project_name, have_pcb,
                            border-radius:50%; margin-right:10px;
                            animation:spin 0.9s linear infinite; }}
   @keyframes spin {{ to {{ transform:rotate(360deg); }} }}
+  /* === Mobil: dar üst çubuk — açıklama metni ve rozet gizlenir, mod
+     düğmeleri parmakla basılacak kadar büyür. Ayraç da kalınlaşır. === */
+  @media (max-width: 820px) {{
+    #topbar {{ height:auto; min-height:40px; padding:0 8px; gap:8px; }}
+    #topbar .hint, #topbar .badge, #topbar .title {{ display:none; }}
+    #view-modes {{ margin:0 auto; }}
+    .vm-btn {{ padding:9px 14px; font-size:12px; }}
+    #divider {{ width:12px; }}
+  }}
 </style>
 </head>
 <body>
@@ -2811,22 +3003,35 @@ window.addEventListener('message', ev => {{
 const divider = document.getElementById('divider');
 const paneSch = document.getElementById('pane-sch');
 const split = document.getElementById('split');
-let resizing = false, lastSplitPct = 50;
-divider.addEventListener('mousedown', () => {{
-  resizing = true; document.body.style.userSelect = 'none';
-  frameSch.style.pointerEvents = 'none'; framePcb.style.pointerEvents = 'none';
-}});
-window.addEventListener('mousemove', e => {{
-  if (!resizing) return;
-  const rect = split.getBoundingClientRect();
-  let pct = ((e.clientX - rect.left) / rect.width) * 100;
-  pct = Math.max(15, Math.min(85, pct));
-  paneSch.style.width = pct + '%'; lastSplitPct = pct;
-}});
-window.addEventListener('mouseup', () => {{
-  resizing = false; document.body.style.userSelect = '';
-  frameSch.style.pointerEvents = ''; framePcb.style.pointerEvents = '';
-}});
+let lastSplitPct = 50;
+// Pointer olayları: fare + dokunuş tek yoldan (mobilde ayraç sürüklenebilsin).
+// setPointerCapture sayesinde parmak iframe'lerin üstüne geçse de olay gelir.
+(function () {{
+  let on = false;
+  divider.addEventListener('pointerdown', e => {{
+    on = true;
+    try {{ divider.setPointerCapture(e.pointerId); }} catch (err) {{}}
+    e.preventDefault();
+    document.body.style.userSelect = 'none';
+    frameSch.style.pointerEvents = 'none'; framePcb.style.pointerEvents = 'none';
+  }});
+  divider.addEventListener('pointermove', e => {{
+    if (!on) return;
+    const rect = split.getBoundingClientRect();
+    let pct = ((e.clientX - rect.left) / rect.width) * 100;
+    pct = Math.max(15, Math.min(85, pct));
+    paneSch.style.width = pct + '%'; lastSplitPct = pct;
+  }});
+  function fin(e) {{
+    if (!on) return;
+    on = false;
+    try {{ divider.releasePointerCapture(e.pointerId); }} catch (err) {{}}
+    document.body.style.userSelect = '';
+    frameSch.style.pointerEvents = ''; framePcb.style.pointerEvents = '';
+  }}
+  divider.addEventListener('pointerup', fin);
+  divider.addEventListener('pointercancel', fin);
+}})();
 
 // === Görünüm modu: şematik / böl / PCB / 3D ===
 const paneSchEl = document.getElementById('pane-sch');
@@ -2922,12 +3127,16 @@ def build_pcb_html(pcb, comp_info, timestamp, project_name):
     return f"""<!DOCTYPE html>
 <html lang="tr"><head>
 <meta charset="utf-8">
+{_MOBILE_META}
 <title>PCB Görüntüleyici · {project_name} · {timestamp}</title>
 <style>
   * {{ margin:0; padding:0; box-sizing:border-box; }}
   body {{ background:#0a0a0a; color:#ddd; font-family:'Segoe UI',sans-serif;
           overflow:hidden; height:100vh; }}
   #app {{ display:flex; height:100vh; }}
+  /* dvh: mobilde adres çubuğu açılıp kapanırken 100vh taşar — destekleyen
+     tarayıcılarda dinamik yükseklik kullanılır */
+  body, #app {{ height:100dvh; }}
   #sidebar {{ width:240px; background:#161616; border-right:1px solid #333;
               display:flex; flex-direction:column; flex-shrink:0;
               position:relative; overflow:hidden;
@@ -2972,10 +3181,54 @@ def build_pcb_html(pcb, comp_info, timestamp, project_name):
   #search-box input {{ width:100%; background:#0d0d0d; border:1px solid #333;
                        color:#ddd; padding:6px 8px; border-radius:4px;
                        font-size:12px; margin-top:6px; }}
+  /* touch-action:none ŞART — yoksa mobil tarayıcı parmak jestini kendi alır
+     (sayfa kaydırma/zoom) ve installGesture'a pointermove hiç gelmez. */
   #canvas-wrap {{ flex:1; position:relative; overflow:hidden; cursor:crosshair;
+                  touch-action:none;
                   background:#0a0a0a;
                   background-image:radial-gradient(circle, #1a1a1a 1px, transparent 1px);
                   background-size:20px 20px; }}
+  /* === Sidebar sekmeleri: Katmanlar | BOM·Montaj === */
+  .sb-tabs {{ display:flex; gap:4px; padding:6px 8px 0; }}
+  .sb-tab {{ flex:1; background:#1a1a1a; border:1px solid #333; color:#888;
+             font-size:11px; padding:6px 4px; cursor:pointer; border-radius:3px;
+             font-family:inherit; }}
+  .sb-tab.active {{ background:#2a4a6a; color:#4ec9b0; border-color:#4ec9b0; }}
+  #bom-panel {{ flex:1; display:flex; flex-direction:column; overflow:hidden; }}
+  #bom-panel.hidden, #layer-list.hidden {{ display:none; }}
+  #bom-head {{ padding:6px 8px; border-bottom:1px solid #2a2a2a; flex-shrink:0; }}
+  #bom-progress {{ font-size:11px; color:#888; margin-bottom:5px;
+                   display:flex; align-items:center; gap:6px; }}
+  #bom-done {{ color:#4ec9b0; font-weight:bold; }}
+  #bom-reset {{ margin-left:auto; background:#1a1a1a; border:1px solid #333;
+                color:#888; font-size:10px; padding:2px 7px; border-radius:3px;
+                cursor:pointer; font-family:inherit; }}
+  #bom-reset:hover {{ color:#ff8a65; border-color:#ff8a65; }}
+  #bom-chips {{ display:flex; gap:3px; }}
+  .bom-chip {{ flex:1; background:#1a1a1a; border:1px solid #333; color:#777;
+               font-size:10px; padding:3px 0; cursor:pointer; border-radius:9px;
+               font-family:inherit; }}
+  .bom-chip.active {{ border-color:#4ec9b0; color:#4ec9b0; }}
+  #bom-list {{ flex:1; overflow-y:auto; padding:4px; }}
+  /* Satır: [✓] adet · değer · designator'lar · footprint */
+  .bom-row {{ display:flex; align-items:flex-start; gap:6px; padding:5px 6px;
+              border-radius:4px; cursor:pointer; font-size:11px;
+              border-bottom:1px solid #202020; }}
+  .bom-row:hover {{ background:#222; }}
+  .bom-row.sel {{ background:#2a4a6a; }}
+  .bom-row.done {{ opacity:0.5; }}
+  .bom-row.done .bom-val {{ text-decoration:line-through; }}
+  .bom-chk {{ width:16px; height:16px; flex-shrink:0; border:1px solid #555;
+              border-radius:3px; color:#4ec9b0; font-size:12px; line-height:14px;
+              text-align:center; background:#111; }}
+  .bom-row.done .bom-chk {{ background:#1d4d33; border-color:#4ec9b0; }}
+  .bom-qty {{ color:#4ec9b0; min-width:22px; flex-shrink:0; text-align:right; }}
+  .bom-mid {{ flex:1; min-width:0; }}
+  .bom-val {{ color:#eee; font-weight:bold; }}
+  .bom-fp {{ color:#666; font-size:10px; }}
+  .bom-desigs {{ color:#999; font-size:10px; word-break:break-word;
+                 font-family:Consolas,monospace; }}
+  .bom-empty {{ color:#555; font-size:11px; padding:10px 6px; font-style:italic; }}
   #canvas-wrap.grabbing {{ cursor:crosshair; }}
   #pcb-svg {{ position:absolute; transform-origin:0 0; will-change:transform; }}
   /* Pan sırasında hit-testing kapalı (Chromium mousemove başına binlerce elemanı
@@ -3011,7 +3264,8 @@ def build_pcb_html(pcb, comp_info, timestamp, project_name):
   #comp-popup.collapsed .popup-body,
   #comp-popup.collapsed #popup-resize {{ display:none; }}
   #popup-resize {{ height:7px; cursor:ns-resize; background:#222;
-                   flex-shrink:0; border-bottom:1px solid #333; }}
+                   flex-shrink:0; border-bottom:1px solid #333;
+                   touch-action:none; }}
   #popup-resize:hover {{ background:#4ec9b0; }}
   .popup-hdr {{ padding:8px 10px; background:#2a4a6a; display:flex;
                 align-items:center; gap:6px; flex-shrink:0; }}
@@ -3040,12 +3294,26 @@ def build_pcb_html(pcb, comp_info, timestamp, project_name):
      köşe/yazı JS'te 1/scale ile ölçeklenir (ekranda sabit px) — zoom CSS
      transform ile yapıldığından non-scaling-stroke çalışmaz. */
   #hl-marker {{ pointer-events:none; }}
+  /* İlk pin (pin 1) işareti — iBOM'daki "highlight first pin" karşılığı */
+  #hl-marker .hl-pin1 {{ fill:none; stroke:#ffd54f; }}
   #hl-marker .hl-box {{ fill:none; stroke:#00e5ff; stroke-linejoin:round;
     animation:hlpulse 1.1s ease-in-out infinite; }}
   #hl-marker .hl-text {{ fill:#00e5ff; font-family:Consolas,monospace;
     font-weight:bold; paint-order:stroke; stroke:#04222a;
     stroke-linejoin:round; }}
   @keyframes hlpulse {{ 0%,100%{{stroke-opacity:0.5}} 50%{{stroke-opacity:1}} }}
+  /* === Mobil / dokunmatik düzen: sol panel board'un ÜSTÜNE kayan katman ===
+     (240px sabit panel telefon ekranında board'a yer bırakmıyordu) */
+  @media (max-width: 820px) {{
+    #sidebar {{ position:absolute; left:0; top:0; height:100%; z-index:300;
+                width:80vw; max-width:320px;
+                box-shadow:0 0 26px rgba(0,0,0,0.75); }}
+    #sidebar.collapsed {{ width:26px; }}
+    #toolbar {{ flex-wrap:wrap; justify-content:flex-end; gap:4px;
+                max-width:calc(100vw - 46px); }}
+    .tool-btn {{ padding:8px 11px; }}
+    #info-bar {{ font-size:10px; }}
+  }}
 </style>
 </head>
 <body>
@@ -3056,9 +3324,26 @@ def build_pcb_html(pcb, comp_info, timestamp, project_name):
     <div class="build-info">{view_w:.0f}×{view_h:.0f}mm</div>
     <div id="search-box" class="collapsed">
       <button id="pcb-search-toggle"><span id="pcb-search-caret">▸</span> Ara</button>
-      <input type="text" id="comp-search" placeholder="Komponent ara + Enter... ( / )">
+      <input type="text" id="comp-search" placeholder="Komponent / değer ara... ( / )">
+    </div>
+    <div class="sb-tabs">
+      <button class="sb-tab active" data-panel="layer-list">Katmanlar</button>
+      <button class="sb-tab" data-panel="bom-panel">BOM · Montaj</button>
     </div>
     <div id="layer-list"></div>
+    <div id="bom-panel" class="hidden">
+      <div id="bom-head">
+        <div id="bom-progress"><span id="bom-done">0</span>/<span id="bom-total">0</span>
+             yerleştirildi <button id="bom-reset" title="Tüm işaretleri temizle">Sıfırla</button></div>
+        <div id="bom-chips">
+          <button class="bom-chip active" data-side="">Tümü</button>
+          <button class="bom-chip" data-side="TOP">Üst</button>
+          <button class="bom-chip" data-side="BOTTOM">Alt</button>
+          <button class="bom-chip" data-side="todo">Kalan</button>
+        </div>
+      </div>
+      <div id="bom-list"></div>
+    </div>
     <div id="comp-popup">
       <div id="popup-resize" title="Sürükle: yeniden boyutlandır"></div>
       <div class="popup-hdr">
@@ -3135,6 +3420,7 @@ function fitView() {{
 }}
 let dragging=false, lastX=0, lastY=0, moved=false;
 wrap.addEventListener('mousedown', e => {{
+  if (gTouchActive()) return;   // dokunma jesti sürüyor (compat fare olayı)
   dragging=true; moved=false; lastX=e.clientX; lastY=e.clientY;
   wrap.classList.add('grabbing');
   svg.style.transition='none';
@@ -3175,6 +3461,35 @@ wrap.addEventListener('wheel', e => {{
     scale=ns; applyTransform();
   }});
 }}, {{ passive:false }});
+
+{_GESTURE_JS}
+// === Dokunmatik: tek parmak kaydır, iki parmak yakınlaştır =================
+installGesture(wrap, {{
+  down: () => {{ moved=false; }},
+  start: () => {{
+    moved=true; autoFit=false;
+    svg.style.transition='none';
+    wrap.classList.add('panning');
+    panInteract=true; pcbLodUpdate();
+  }},
+  end: () => {{
+    wrap.classList.remove('panning');
+    if (panInteract) {{ panInteract=false; pcbLodUpdate(); }}
+  }},
+  pan: (dx,dy) => {{ tx+=dx; ty+=dy; applyTransform(); }},
+  pinch: (f,cx,cy,mdx,mdy) => {{
+    autoFit=false;
+    svg.style.transition='none';
+    const r=wrap.getBoundingClientRect();
+    const mx=cx-r.left, my=cy-r.top, old=scale;
+    scale=Math.max(0.05,Math.min(80,scale*f));
+    // Pinch merkezine göre zoom + iki parmağın ortak kayması (aynı anda pan)
+    tx=mx-(mx-tx)*(scale/old)+mdx;
+    ty=my-(my-ty)*(scale/old)+mdy;
+    pcbLodTouchWheel();   // jest boyunca bitmap modu (akıcılık)
+    applyTransform();
+  }}
+}});
 
 // === LOD: etkileşim sırasında board bitmap'i ==============================
 // Şematikteki desenin PCB uyarlaması: pan sürüklemesi / tekerlek zoom serisi
@@ -3380,8 +3695,119 @@ document.getElementById('pcb-search-toggle').addEventListener('click', () =>
   setPcbSearchOpen(pcbSearchBox.classList.contains('collapsed')));
 
 (function restorePcbUi() {{
-  if (lsGet().pcbSidebar === false) setSbOpen(false);
+  const st = lsGet();
+  // Dar ekranda (telefon) panel varsayılan KAPALI — board tüm genişliği alsın
+  if (st.pcbSidebar === false || (st.pcbSidebar === undefined && window.innerWidth < 820))
+    setSbOpen(false);
 }})();
+
+// === BOM · Montaj paneli ===================================================
+// InteractiveHtmlBom (iBOM) tarzı montaj akışı: komponentler DEĞER + FOOTPRINT
+// ikilisine göre gruplanır; satıra tıkla → grubun TÜM komponentleri board'da
+// aynı anda vurgulanır (çoklu kutu + hepsini kapsayan odak). Soldaki ✓ kutusu
+// "yerleştirildi" işaretidir; durum proje bazlı localStorage'da saklanır
+// (sayfa yenilense/kapansa da kalır) ve üstte ilerleme sayacı gösterilir.
+const BOM_KEY = 'schviz-bom:' + {json.dumps(project_name)};
+function bomLoad() {{ try {{ return JSON.parse(localStorage.getItem(BOM_KEY)||'{{}}'); }}
+                      catch(e) {{ return {{}}; }} }}
+function bomSave() {{ try {{ localStorage.setItem(BOM_KEY, JSON.stringify(bomState)); }}
+                      catch(e) {{}} }}
+function bomEsc(s) {{ return String(s).replace(/[&<>"]/g,
+  c => ({{'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}})[c]); }}
+let bomState = bomLoad();
+let bomFilter = '', bomSide = '';    // bomSide: '' | 'TOP' | 'BOTTOM' | 'todo'
+const BOM_GROUPS = (function() {{
+  const m = new Map();
+  Object.keys(COMPONENTS).forEach(d => {{
+    const info = COMP_INFO[d] || {{}}, pc = COMPONENTS[d] || {{}};
+    const val = (info.value || '').trim(), fp = (pc.footprint || '').trim();
+    const key = val + '\\u0000' + fp;
+    let g = m.get(key);
+    if(!g) {{ g = {{key:key, val:val, fp:fp, desigs:[], top:0, bot:0}}; m.set(key, g); }}
+    g.desigs.push(d);
+    if((pc.layer||'TOP').toUpperCase().charAt(0)==='B') g.bot++; else g.top++;
+  }});
+  const arr = [...m.values()];
+  const nat = (a,b) => a.localeCompare(b, undefined, {{numeric:true}});
+  arr.forEach(g => g.desigs.sort(nat));
+  arr.sort((a,b) => b.desigs.length - a.desigs.length || nat(a.val, b.val));
+  return arr;
+}})();
+const BOM_TOTAL = Object.keys(COMPONENTS).length;
+function bomProgress() {{
+  let done = 0;
+  BOM_GROUPS.forEach(g => {{ if(bomState[g.key]) done += g.desigs.length; }});
+  document.getElementById('bom-done').textContent = done;
+  document.getElementById('bom-total').textContent = BOM_TOTAL;
+}}
+function bomRender() {{
+  const list = document.getElementById('bom-list');
+  const q = bomFilter.trim().toLowerCase();
+  let html = '', shown = 0;
+  BOM_GROUPS.forEach((g,i) => {{
+    if(bomSide==='TOP' && !g.top) return;
+    if(bomSide==='BOTTOM' && !g.bot) return;
+    if(bomSide==='todo' && bomState[g.key]) return;
+    if(q && !(g.val.toLowerCase().indexOf(q)>=0 || g.fp.toLowerCase().indexOf(q)>=0
+              || g.desigs.some(d => d.toLowerCase().indexOf(q)>=0))) return;
+    shown++;
+    const done = !!bomState[g.key];
+    html += '<div class="bom-row'+(done?' done':'')+'" data-i="'+i+'" data-key="'+bomEsc(g.key)+'">'
+      + '<span class="bom-chk">'+(done?'✓':'')+'</span>'
+      + '<span class="bom-qty">'+g.desigs.length+'</span>'
+      + '<span class="bom-mid"><span class="bom-val">'+bomEsc(g.val||'(değer yok)')+'</span>'
+      + (g.fp ? ' <span class="bom-fp">'+bomEsc(g.fp)+'</span>' : '')
+      + '<div class="bom-desigs">'+bomEsc(g.desigs.join(', '))+'</div></span></div>';
+  }});
+  list.innerHTML = shown ? html : '<div class="bom-empty">eşleşen yok</div>';
+  bomProgress();
+}}
+document.getElementById('bom-list').addEventListener('click', e => {{
+  const row = e.target.closest('.bom-row');
+  if(!row) return;
+  const g = BOM_GROUPS[+row.dataset.i];
+  if(e.target.classList.contains('bom-chk')) {{      // ✓ kutusu: montaj işareti
+    if(bomState[g.key]) delete bomState[g.key]; else bomState[g.key] = 1;
+    bomSave(); bomRender();
+    return;
+  }}
+  document.querySelectorAll('.bom-row.sel').forEach(r => r.classList.remove('sel'));
+  row.classList.add('sel');
+  if(g.desigs.length === 1) {{ showComp(g.desigs[0]); crossProbeOut(g.desigs[0]); }}
+  else highlightComps(g.desigs, true);               // grubun tamamı
+}});
+// Board'da bir komponent seçilince BOM satırını da işaretle/görünür kıl
+function bomMark(desig) {{
+  const g = BOM_GROUPS.find(x => x.desigs.indexOf(desig) >= 0);
+  if(!g) return;
+  document.querySelectorAll('.bom-row.sel').forEach(r => r.classList.remove('sel'));
+  const row = document.querySelector('.bom-row[data-i="'+BOM_GROUPS.indexOf(g)+'"]');
+  if(row) {{ row.classList.add('sel');
+             row.scrollIntoView({{block:'nearest'}}); }}
+}}
+// Sidebar sekmeleri: Katmanlar | BOM·Montaj
+document.querySelectorAll('.sb-tab').forEach(tb => tb.onclick = () => {{
+  document.querySelectorAll('.sb-tab').forEach(x => x.classList.toggle('active', x===tb));
+  const t = tb.dataset.panel;
+  document.getElementById('layer-list').classList.toggle('hidden', t!=='layer-list');
+  document.getElementById('bom-panel').classList.toggle('hidden', t!=='bom-panel');
+  if(t==='bom-panel') bomRender();
+}});
+document.querySelectorAll('.bom-chip').forEach(ch => ch.onclick = () => {{
+  bomSide = ch.dataset.side;
+  document.querySelectorAll('.bom-chip').forEach(x => x.classList.toggle('active', x===ch));
+  bomRender();
+}});
+document.getElementById('bom-reset').onclick = () => {{
+  if(!confirm('Tüm montaj işaretleri silinsin mi?')) return;
+  bomState = {{}}; bomSave(); bomRender();
+}};
+// Arama kutusu BOM sekmesinde grup filtresi olarak da çalışır
+pcbSearchInput.addEventListener('input', () => {{
+  bomFilter = pcbSearchInput.value;
+  if(!document.getElementById('bom-panel').classList.contains('hidden')) bomRender();
+}});
+bomRender();
 // === Arka plan rengi: üst toolbar'dan döngüyle değiştirilir (siyah↔gri↔açık).
 //     Nokta ızgarası rengi zemine göre kontrastlı seçilir. ===
 const BG_PRESETS = [
@@ -3512,6 +3938,7 @@ function showComp(desig) {{
   popup.classList.remove('collapsed');
   document.getElementById('pp-collapse').textContent='▾';
   highlightComp(desig);
+  if(typeof bomMark === 'function') bomMark(desig);   // BOM satırını da işaretle
 }}
 document.getElementById('pp-close').onclick=() => {{
   popup.classList.remove('open'); clearHighlight();
@@ -3524,18 +3951,16 @@ document.getElementById('pp-collapse').onclick=() => {{
 // Üst tutamaçtan dikey boyutlandırma
 (function(){{
   const handle=document.getElementById('popup-resize');
-  let rz=false, sy=0, sh=0;
-  handle.addEventListener('mousedown', e => {{
-    rz=true; sy=e.clientY; sh=popup.offsetHeight;
-    document.body.style.userSelect='none'; e.preventDefault();
-  }});
-  window.addEventListener('mousemove', e => {{
-    if(!rz) return;
-    let h=sh+(sy-e.clientY);                 // yukarı sürükle → büyüt
-    h=Math.max(70, Math.min(window.innerHeight*0.8, h));
-    popup.style.height=h+'px';
-  }});
-  window.addEventListener('mouseup', () => {{ rz=false; document.body.style.userSelect=''; }});
+  let sy=0, sh=0;
+  // installDrag: fare + dokunuş tek yoldan (pointer capture ile)
+  installDrag(handle,
+    e => {{ sy=e.clientY; sh=popup.offsetHeight; document.body.style.userSelect='none'; }},
+    e => {{
+      let h=sh+(sy-e.clientY);               // yukarı sürükle → büyüt
+      h=Math.max(70, Math.min(window.innerHeight*0.8, h));
+      popup.style.height=h+'px';
+    }},
+    () => {{ document.body.style.userSelect=''; }});
 }})();
 const SVGNS='http://www.w3.org/2000/svg';
 let highlightMarker=null;
@@ -3546,63 +3971,106 @@ function clearHighlight() {{
 // Komponentin tüm primitive'lerinin birleşik sınır kutusunu KÖK user-space'te
 // (mm) hesapla → tek temiz kutu + etiket çiz → komponente odaklan.
 // Not: getBBox() öğenin kendi yerel uzayını verir; getCTM ile kök uzaya çevrilir.
-function highlightComp(desig) {{
+// Bir elemanın ekran kutusunu KÖK user-space'e (mm) çevir.
+// getCTM yerine kendi tx/ty/scale'imiz kullanılır (Firefox getCTM farkına
+// bağışık). transform-origin:0 0 olduğundan:
+//   ekran_x_rel = tx + uzay_x*scale  →  uzay_x = (ekran_x_rel - tx)/scale
+function rootBox(el, vr) {{
+  const er=el.getBoundingClientRect();
+  if(!er.width && !er.height) return null;    // gizli katman → atla
+  return {{ x0:(er.left -vr.left -tx)/scale, y0:(er.top   -vr.top -ty)/scale,
+            x1:(er.right-vr.left -tx)/scale, y1:(er.bottom-vr.top -ty)/scale }};
+}}
+// Komponentin tüm primitive'lerinin birleşik sınır kutusu (kök uzay).
+function compBounds(desig, vr) {{
+  const els=[...document.querySelectorAll(`[data-component="${{desig}}"]`)];
+  let x0=1e9,y0=1e9,x1=-1e9,y1=-1e9;
+  els.forEach(el => {{
+    const b=rootBox(el, vr);
+    if(!b) return;
+    x0=Math.min(x0,b.x0); y0=Math.min(y0,b.y0);
+    x1=Math.max(x1,b.x1); y1=Math.max(y1,b.y1);
+  }});
+  return (x0>x1) ? null : {{x0,y0,x1,y1}};
+}}
+// Bir veya BİRDEN ÇOK komponenti vurgula (BOM grubu seçimi çoklu kullanır).
+// Tek komponentte ayrıca pin 1 sarı halka ile işaretlenir (iBOM'daki
+// "highlight first pin" karşılığı — kutup/yön kontrolünü kolaylaştırır).
+function highlightComps(desigs, focus) {{
   loadAllLazyLayers();             // komponent alt katmanda olabilir → tembelleri yükle
   clearHighlight();
   // PCB paneli gizli/0-boyut ise (ör. "Şematik" tek-panel modu) getBBox/getCTM
   // çalışmaz → marker oluşmaz, board kayardı. Komponenti beklet; panel görünür
   // olunca ResizeObserver uygular.
   const vr=wrap.getBoundingClientRect();
-  if(!vr.width || !vr.height) {{ pendingComp=desig; return; }}
-  const els=[...document.querySelectorAll(`[data-component="${{desig}}"]`)];
-  if(!els.length) return;
-  let x0=1e9,y0=1e9,x1=-1e9,y1=-1e9;
-  els.forEach(el => {{
-    // getCTM yerine ekran kutusunu kendi tx/ty/scale'imizle kök uzaya çevir
-    // (Firefox getCTM farkına bağışık). transform-origin:0 0 olduğundan:
-    //   ekran_x_rel = tx + uzay_x*scale  →  uzay_x = (ekran_x_rel - tx)/scale
-    const er=el.getBoundingClientRect();
-    if(!er.width && !er.height) return;   // gizli katman → atla
-    const ax0=(er.left -vr.left -tx)/scale, ay0=(er.top    -vr.top -ty)/scale;
-    const ax1=(er.right-vr.left -tx)/scale, ay1=(er.bottom -vr.top -ty)/scale;
-    x0=Math.min(x0,ax0); y0=Math.min(y0,ay0); x1=Math.max(x1,ax1); y1=Math.max(y1,ay1);
-  }});
-  if(x0>x1) return;
-  // Sıkı kutu: küçük oransal + küçük sabit pay
-  const pad=Math.max(x1-x0,y1-y0)*0.06+0.12;
-  const bx=x0-pad, by=y0-pad, bw=(x1-x0)+pad*2, bh=(y1-y0)+pad*2;
-
+  if(!vr.width || !vr.height) {{ pendingComp=desigs[0]; return; }}
   const g=document.createElementNS(SVGNS,'g');
   g.setAttribute('id','hl-marker');
-  const r=document.createElementNS(SVGNS,'rect');
-  r.setAttribute('x',bx); r.setAttribute('y',by);
-  r.setAttribute('width',bw); r.setAttribute('height',bh);
-  r.setAttribute('class','hl-box');
-  g.appendChild(r);
-  const t=document.createElementNS(SVGNS,'text');
-  t.setAttribute('class','hl-text'); t.textContent=desig;
-  g.appendChild(t);
-  g.dataset.bx=bx; g.dataset.by=by;
+  let ux0=1e9, uy0=1e9, ux1=-1e9, uy1=-1e9, n=0;
+  desigs.forEach(desig => {{
+    const b=compBounds(desig, vr);
+    if(!b) return;
+    n++;
+    // Sıkı kutu: küçük oransal + küçük sabit pay
+    const pad=Math.max(b.x1-b.x0,b.y1-b.y0)*0.06+0.12;
+    const bx=b.x0-pad, by=b.y0-pad, bw=(b.x1-b.x0)+pad*2, bh=(b.y1-b.y0)+pad*2;
+    const r=document.createElementNS(SVGNS,'rect');
+    r.setAttribute('x',bx); r.setAttribute('y',by);
+    r.setAttribute('width',bw); r.setAttribute('height',bh);
+    r.setAttribute('class','hl-box');
+    g.appendChild(r);
+    const t=document.createElementNS(SVGNS,'text');
+    t.setAttribute('class','hl-text'); t.textContent=desig;
+    t.dataset.bx=bx; t.dataset.by=by;
+    g.appendChild(t);
+    ux0=Math.min(ux0,bx); uy0=Math.min(uy0,by);
+    ux1=Math.max(ux1,bx+bw); uy1=Math.max(uy1,by+bh);
+  }});
+  if(!n) return;
+  // Gizli katmandaki komponentin ekran kutusu 0 olur → vurgulanamaz. Sessizce
+  // eksik göstermek yerine kullanıcıya söyle (Üst/Alt ile karşı yüz açılır).
+  if(n < desigs.length)
+    pcbHint((desigs.length-n)+' komponent gizli katmanda — "Üst/Alt" ile karşı yüzü aç');
+  if(desigs.length===1) {{
+    // Pin 1 işareti: pad numarası '1' (veya 'A1') olan pad'in merkezine halka.
+    // Aynı pad birden çok katmanda (bakır/maske/pasta) çizilidir; GİZLİ
+    // katmandaki kopya 0-boyut döndürür → görünür ilk kopya seçilir.
+    const p1s=[...document.querySelectorAll(
+      `[data-component="${{desigs[0]}}"][data-pad-number="1"],`+
+      `[data-component="${{desigs[0]}}"][data-pad-number="A1"]`)];
+    let pb=null;
+    for(const p of p1s) {{ pb=rootBox(p, vr); if(pb) break; }}
+    if(pb) {{
+      const c=document.createElementNS(SVGNS,'circle');
+      c.setAttribute('cx',(pb.x0+pb.x1)/2); c.setAttribute('cy',(pb.y0+pb.y1)/2);
+      c.setAttribute('r',Math.max(pb.x1-pb.x0, pb.y1-pb.y0)/2+0.18);
+      c.setAttribute('class','hl-pin1');
+      g.appendChild(c);
+    }}
+  }}
   svg.appendChild(g);
   highlightMarker=g;
   updateMarkerMetrics();        // stroke/rx/font ekran-sabit
-  focusBox(bx,by,bw,bh);
+  if(focus!==false) focusBox(ux0,uy0,ux1-ux0,uy1-uy0);
 }}
+function highlightComp(desig) {{ highlightComps([desig], true); }}
 // Zoom CSS transform ile yapıldığından non-scaling-stroke çalışmaz; stroke/rx/
 // font'u 1/scale ile ölçekleyerek ekran-pikselinde sabit tutuyoruz.
 function updateMarkerMetrics() {{
   if(!highlightMarker) return;
   const k=1/scale;
-  const box=highlightMarker.querySelector('.hl-box');
-  if(box) {{ box.setAttribute('stroke-width',1.6*k); box.setAttribute('rx',2.5*k); }}
-  const t=highlightMarker.querySelector('.hl-text');
-  if(t) {{
-    const fs=12*k;
+  highlightMarker.querySelectorAll('.hl-box').forEach(box => {{
+    box.setAttribute('stroke-width',1.6*k); box.setAttribute('rx',2.5*k);
+  }});
+  const fs=12*k;
+  highlightMarker.querySelectorAll('.hl-text').forEach(t => {{
     t.setAttribute('font-size',fs);
     t.setAttribute('stroke-width',0.18*fs);
-    t.setAttribute('x',+highlightMarker.dataset.bx);
-    t.setAttribute('y',(+highlightMarker.dataset.by)-3*k);
-  }}
+    t.setAttribute('x',+t.dataset.bx);
+    t.setAttribute('y',(+t.dataset.by)-3*k);
+  }});
+  const p=highlightMarker.querySelector('.hl-pin1');
+  if(p) p.setAttribute('stroke-width',1.6*k);
 }}
 // Komponenti görüş alanının ortasına getir ve rahat görünecek kadar yakınlaş
 // (Altium viewer gibi). Sadece gerekiyorsa yakınlaşır, kullanıcı daha
@@ -3649,9 +4117,17 @@ wrap.addEventListener('click', e => {{
 
 // === Bakır yol / net highlight: çift tıkla → net'i TÜM katmanlarda göster,
 //     gerisini karart. data-net render edilmiş bakır elemanlarda mevcut. ===
-const INFO_DEFAULT = 'Sürükle: kaydır · Tekerlek: zoom · Tıkla: komponent · Çift tıkla: bakır yol';
+const INFO_DEFAULT = 'Sürükle / tek parmak: kaydır · Tekerlek / iki parmak: zoom · '
+                   + 'Tıkla: komponent · Çift tıkla: bakır yol';
 const infoBar = document.getElementById('info-bar');
 infoBar.textContent = INFO_DEFAULT;
+// Geçici bilgi mesajı (4 sn) — net highlight aktif değilse varsayılana döner
+function pcbHint(msg) {{
+  if(!infoBar) return;
+  infoBar.textContent = msg;
+  clearTimeout(pcbHint._t);
+  pcbHint._t = setTimeout(() => {{ if(!netHlGroup) infoBar.textContent = INFO_DEFAULT; }}, 4000);
+}}
 function netAt(target) {{
   let el = target;
   while (el && el !== svg) {{
@@ -5056,6 +5532,7 @@ def build_html(sheets, net_list, components, timestamp,
     return f"""<!DOCTYPE html>
 <html lang="tr"><head>
 <meta charset="utf-8">
+{_MOBILE_META}
 <meta http-equiv="cache-control" content="no-cache">
 <title>Schematic Viz · {timestamp}</title>
 <style>
@@ -5063,6 +5540,9 @@ def build_html(sheets, net_list, components, timestamp,
   body {{ margin:0; background:#1a1a1a; color:#ddd;
           font-family: 'Consolas','Courier New', monospace;
           height:100vh; overflow:hidden; display:flex; user-select:none; }}
+  /* dvh: mobilde adres çubuğu açılıp kapanırken 100vh taşar (alt kısım ekran
+     dışında kalır) — destekleyen tarayıcılarda dinamik yükseklik kullanılır */
+  body {{ height:100dvh; }}
   #sidebar {{ width:320px; min-width:320px; background:#202020; padding:10px;
               overflow:hidden; display:flex; flex-direction:column;
               border-right:1px solid #333; position:relative;
@@ -5115,7 +5595,10 @@ def build_html(sheets, net_list, components, timestamp,
   .net-item.active.color-3 {{ background:#4a4a15; color:#ffeb3b; }}
   .badge {{ float:right; color:#666; font-size:10px; margin-left:4px; }}
   .comp-item .sheet-tag {{ float:right; color:#666; font-size:10px; }}
+  /* touch-action:none ŞART — yoksa mobil tarayıcı parmak jestini kendi alır
+     (sayfa kaydırma/zoom) ve installGesture'a pointermove hiç gelmez. */
   #viewport {{ flex:1; position:relative; overflow:hidden; cursor:grab;
+               touch-action:none;
                background: radial-gradient(circle at 50% 50%, #252525, #151515); }}
   #viewport.grabbing {{ cursor:grabbing; }}
   /* Pan sırasında SVG hit-testing kapalı: Chromium her mousemove'da binlerce
@@ -5357,6 +5840,25 @@ def build_html(sheets, net_list, components, timestamp,
                    border:1px solid #555; border-radius:3px; cursor:pointer;
                    font-family:inherit; }}
   .modal-close:hover {{ border-color:{inter_color}; color:{inter_color}; }}
+  /* === Mobil / dokunmatik düzen =============================================
+     Dar ekranda 320px'lik sabit sol panel kanvastan geriye hiçbir şey
+     bırakmıyordu → panel kanvasın ÜSTÜNE kayan katman olur (kapalıyken yine
+     26px şerit). Araç çubuğu sarar, dokunma hedefleri büyür. */
+  @media (max-width: 820px) {{
+    #sidebar {{ position:absolute; left:0; top:0; height:100%; z-index:300;
+                width:82vw; min-width:0; max-width:340px;
+                box-shadow:0 0 26px rgba(0,0,0,0.75); }}
+    #sidebar.collapsed {{ width:26px; min-width:26px; }}
+    #toolbar {{ flex-wrap:wrap; justify-content:flex-end; gap:4px;
+                max-width:calc(100vw - 46px); }}
+    .tool-btn {{ padding:8px 11px; font-size:12px; }}
+    #sheet-jump {{ max-width:120px; }}
+    #shortcuts, #brand {{ display:none; }}
+    #current-net {{ max-width:70%; font-size:12px; }}
+    .modal-content {{ min-width:0; width:92vw; padding:18px; }}
+  }}
+  /* Sürükleme tutamacı: dokunuşta tarayıcı kaydırması devreye girmesin */
+  #popup-resize {{ touch-action:none; }}
 </style>
 </head><body>
 <aside id="sidebar">
@@ -5455,6 +5957,14 @@ def build_html(sheets, net_list, components, timestamp,
       <tr><td>Not/kutuya tık + sürükle</td><td>Seç ve taşı · kutuda köşe tutamacı: boyutlandır</td></tr>
       <tr><td>Seçiliyken Del · mini bar −/+</td><td>Sil · yazı boyutu / kenar kalınlığı</td></tr>
       <tr><td>Nota çift tık</td><td>Yerinde düzenle (boş bırak = sil)</td></tr>
+    </table>
+    <h3>Dokunmatik (telefon / tablet)</h3>
+    <table>
+      <tr><td>Tek parmak sürükle</td><td>Kanvası kaydır (pan)</td></tr>
+      <tr><td>İki parmak (pinch)</td><td>Parmakların ortasına zoom + aynı anda kaydır</td></tr>
+      <tr><td>Tek dokunuş</td><td>Fare tıklaması ile aynı (net / designator / block)</td></tr>
+      <tr><td>Çift dokunuş</td><td>Çift tıklama ile aynı (sayfayı sığdır, notu düzenle)</td></tr>
+      <tr><td>Not / kutu araçları</td><td>Parmakla da çalışır (yaz, çiz, taşı, boyutlandır)</td></tr>
     </table>
     <h3>Renk Pickers</h3>
     <table>
@@ -5637,6 +6147,7 @@ function classifyNet(name) {{
 
 let panning = false, sx, sy, stx, sty, panMoved = false;
 viewport.addEventListener('mousedown', e => {{
+  if (gTouchActive()) return;   // dokunma jesti sürüyor (compat fare olayı)
   if (e.target.closest('.tool-btn') || e.target.closest('#detail-panel')) return;
   if (annoTool) return;   // not/kutu aracı aktif — pan yerine araç çalışır
   // SVG metni üzerinde pan BAŞLATMA → tarayıcının native metin seçimi çalışsın
@@ -5685,6 +6196,38 @@ viewport.addEventListener('wheel', e => {{
     applyT();
   }});
 }}, {{ passive: false }});
+
+{_GESTURE_JS}
+// === Dokunmatik: tek parmak kaydır, iki parmak yakınlaştır =================
+// Köprü (bridge) modu: not/kutu araçları aktifken veya mevcut bir nota
+// dokunulduğunda jest sentetik fare olaylarına çevrilir → annotation kodu
+// (mousedown/mousemove/mouseup tabanlı) mobilde de aynen çalışır.
+installGesture(viewport, {{
+  bridge: e => !!(annoTool || (e.target.closest &&
+                  (e.target.closest('#anno-layer') || e.target.closest('#anno-editor')))),
+  down: () => {{ panMoved = false; }},
+  start: () => {{
+    panMoved = true;
+    svgTip.style.display = 'none';
+    viewport.classList.add('panning');
+    panInteract = true; updateLod();
+  }},
+  end: () => {{
+    viewport.classList.remove('panning');
+    if (panInteract) {{ panInteract = false; updateLod(); }}
+  }},
+  pan: (dx, dy) => {{ tx += dx; ty += dy; applyT(); }},
+  pinch: (f, cx, cy, mdx, mdy) => {{
+    const r = viewport.getBoundingClientRect();
+    const mx = cx - r.left, my = cy - r.top, old = scale;
+    scale = Math.max(0.03, Math.min(8, scale * f));
+    // Pinch merkezine göre zoom + iki parmağın ortak kayması (aynı anda pan)
+    tx = mx - (mx - tx) * (scale / old) + mdx;
+    ty = my - (my - ty) * (scale / old) + mdy;
+    lodWheelTouch();   // jest boyunca bitmap modu (akıcılık)
+    applyT();
+  }}
+}});
 
 // Boş alana tıklama = komponent seçimini (spotlight kutusunu) iptal et.
 // Pan hareketi, metin seçimi, toolbar ve tıklanabilir öğeler hariç tutulur.
@@ -6080,18 +6623,16 @@ document.getElementById('popup-collapse').onclick = () => {{
 (function(){{
   const pp=document.getElementById('comp-popup');
   const handle=document.getElementById('popup-resize');
-  let rz=false, sy=0, sh=0;
-  handle.addEventListener('mousedown', e => {{
-    rz=true; sy=e.clientY; sh=pp.offsetHeight;
-    document.body.style.userSelect='none'; e.preventDefault();
-  }});
-  window.addEventListener('mousemove', e => {{
-    if(!rz) return;
-    let h=sh+(sy-e.clientY);                 // yukarı sürükle → büyüt
-    h=Math.max(60, Math.min(window.innerHeight*0.8, h));
-    pp.style.height=h+'px';
-  }});
-  window.addEventListener('mouseup', () => {{ rz=false; document.body.style.userSelect=''; }});
+  let sy=0, sh=0;
+  // installDrag: fare + dokunuş tek yoldan (pointer capture ile)
+  installDrag(handle,
+    e => {{ sy=e.clientY; sh=pp.offsetHeight; document.body.style.userSelect='none'; }},
+    e => {{
+      let h=sh+(sy-e.clientY);               // yukarı sürükle → büyüt
+      h=Math.max(60, Math.min(window.innerHeight*0.8, h));
+      pp.style.height=h+'px';
+    }},
+    () => {{ document.body.style.userSelect=''; }});
 }})();
 
 // Kopya butonu için delegated event
@@ -6236,7 +6777,10 @@ function lsSet(patch) {{ try {{
 }} catch (e) {{}} }}
 (function restoreUi() {{
   const st = lsGet();
-  if (st.sidebar === false) setSidebarOpen(false);
+  // Dar ekranda (telefon) panel varsayılan KAPALI — kanvas tüm genişliği alsın.
+  // Kullanıcının kaydedilmiş tercihi varsa ona uyulur.
+  if (st.sidebar === false || (st.sidebar === undefined && window.innerWidth < 820))
+    setSidebarOpen(false);
   if (st.lod === false) setLodEnabled(false);
   if (st.inter) {{ NET_COLORS[0] = st.inter;
     document.getElementById('inter-color-picker').value = st.inter; }}

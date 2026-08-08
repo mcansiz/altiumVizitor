@@ -11,7 +11,6 @@ APP_STYLE (QSS koyu tema) ile biçimlendirilir.
 
 @author Mikail Cansız
 @date 2026
-@version 2.9.27
 """
 # Schematic Viz Generator — viewer.py için PyQt5 masaüstü grafik arayüzü.
 # Copyright (C) 2026  Mikail Cansız <cansizmikail@gmail.com>

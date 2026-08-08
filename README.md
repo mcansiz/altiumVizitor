@@ -56,6 +56,15 @@ No web server, no installation, no internet required. Works directly via `file:/
 * **Annotation Tools**
   Add notes and highlights directly on schematics (PDF-like editing experience).
 
+* **Touch / Mobile Ready**
+  Works on phones and tablets: one-finger pan, two-finger pinch zoom, tap to select
+  (schematic, PCB and 3D views alike), responsive sidebars.
+
+* **BOM · Assembly Panel (PCB viewer)**
+  Components grouped by value + footprint; click a row to highlight the whole group
+  on the board, tick it off while assembling (progress is saved in the browser),
+  filter by Top/Bottom/Remaining, pin-1 marker on the selected part.
+
 * **Cross-platform**
   Works on Windows and Linux. Fully OS-independent via `pathlib`.
 
@@ -143,6 +152,9 @@ python3 gui.py
 | `Esc`   | Clear selection     |
 | `?`     | Show help           |
 | `1-4`   | Switch views        |
+
+Touch: one finger = pan (rotate in 3D), two fingers = pinch zoom, tap = click,
+double tap = double click.
 
 ---
 
@@ -235,6 +247,8 @@ Projeyi seçin, bir düğmeye basın — çıktı olarak **çift tıkla açılan
 - **Excel &amp; CSV çıktıları** — MCU pin listesi, IC bağlantı haritası, BOM, Pick &amp; Place.
 - **AI/LLM dostu JSON** — Gerçek elektriksel bağlantı (pin → net), BOM ve varyant verisiyle kompakt dışa aktarma.
 - **Not &amp; kutu araçları** — Şematik üzerine PDF editörü tarzı not/işaret ekleme, kaydetme.
+- **Dokunmatik / mobil** — Telefon ve tablette çalışır: tek parmak kaydırma, iki parmak yakınlaştırma, dokunarak seçme (şematik, PCB ve 3D); dar ekranda kayan sol panel.
+- **BOM · Montaj paneli (PCB)** — Değer + footprint'e göre gruplanmış liste; satıra dokun → grubun tamamı board'da vurgulanır, ✓ ile montaj takibi (tarayıcıda saklanır), Üst/Alt/Kalan filtreleri, seçili parçada pin-1 işareti.
 - **Cross-platform** — Windows ve Linux; kodun tamamı `pathlib` ile OS-bağımsız.
 
 ---
@@ -327,6 +341,9 @@ python3 gui.py
 | `Esc`           | Seçimi/aracı temizle                        |
 | `?`             | Kısayol yardımını aç                        |
 | `1 / 2 / 3 / 4` | Birleşik görünümde Şematik / Böl / PCB / 3D |
+
+**Dokunmatik:** tek parmak sürükle = kaydır (3D'de döndür) · iki parmak = yakınlaştır
+(pinch) + kaydır · tek dokunuş = tıklama · çift dokunuş = çift tıklama.
 
 
 ---

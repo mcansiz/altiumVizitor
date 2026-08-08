@@ -5,7 +5,7 @@ Wavenumber'ın ticari "viz sch 1.0" ürününün açık-kaynak alternatifi.
 [altium_monkey](https://github.com/wavenumber-eng/altium_monkey) kütüphanesi
 (Eli Hughes / Wavenumber) üzerine kurulu.
 
-**Mevcut sürüm**: `APP_VERSION` sabiti **`viewer.py`'de** tutulur (şu an 2.9.42);
+**Mevcut sürüm**: `APP_VERSION` sabiti **`viewer.py`'de** tutulur (şu an 2.10.0);
 `gui.py` oradan import eder (v2.9.29'da taşındı — HTML çıktıları da sürümü
 gösterebilsin diye, tek kaynak). Yeni özellik/düzeltme ekleyince bu sabiti
 güncelle (semver: major.minor.patch). Sürüm pencere başlığında, alt durum
@@ -126,6 +126,39 @@ py -3.12 -m PyInstaller --noconfirm --onefile --windowed --name "SchematicViz" ^
 Fresh Windows'ta exe açılmazsa **MS VC++ Redistributable** gerekir:
 https://aka.ms/vs/17/release/vc_redist.x64.exe
 
+## Dokunmatik / Mobil Destek (v2.10.0+)
+
+Tüm HTML çıktıları telefon ve tablette çalışır. Ortak altyapı `viewer.py`'deki
+**`_GESTURE_JS`** sabiti (`installGesture` + `installDrag` + `gTouchActive`) ve
+**`_MOBILE_META`** (viewport meta etiketi); dört şablona da (şematik, PCB, 3D,
+birleşik kabuk) enjekte edilir — f-string'lerde `{_GESTURE_JS}`, 3D'nin raw
+şablonunda `__GESTURE__`/`__VIEWPORT__` placeholder'ı ile.
+
+- **Jestler**: tek parmak sürükle = pan (3D'de döndürme), iki parmak = pinch
+  zoom + aynı anda kaydırma, tek dokunuş = tıklama, çift dokunuş = çift tıklama.
+- **`installDrag`**: ayraç/tutamaç gibi basit sürükleme öğeleri (birleşik
+  kabuğun ayracı, popup boyutlandırma tutamaçları) — `setPointerCapture` ile
+  fare + parmak tek yoldan.
+- **Mobil düzen**: `@media (max-width:820px)` — sol paneller kanvasın ÜSTÜNE
+  kayan katman olur (varsayılan kapalı; ilk açılışta `innerWidth < 820` ise
+  otomatik katlanır), toolbar'lar sarar, dokunma hedefleri büyür, birleşik
+  kabuğun üst çubuğunda açıklama/rozet gizlenir. `100dvh` eklendi (mobil adres
+  çubuğu açılıp kapanırken `100vh` taşıyordu).
+
+**ÜÇ KRİTİK KURAL** (bkz. Çözülen Sorunlar):
+1. Jest yüzeyine CSS'te **`touch-action:none`** verilmeli — yoksa tarayıcı
+   jesti kendi alır (sayfa kaydırma/zoom) ve `pointermove` hiç gelmez.
+2. `pointerdown`da **preventDefault ÇAĞIRMA** — Chromium'da dokunuş sonundaki
+   `click`i de bastırır (parmakla komponent/net seçilemez olur). preventDefault
+   yalnız `pointermove`da yapılır.
+3. Uyumluluk (compat) fare olaylarına karşı mevcut `mousedown` handler'ları
+   **`gTouchActive()`** ile korunur (çift pan olmasın).
+4. Köprü (bridge) modunda sentetik `mousedown` DOKUNULAN ÖĞEYE, sonraki
+   `mousemove`/`mouseup` **JEST YÜZEYİNE** gönderilir: mousedown handler'ı
+   çoğu zaman yeniden render eder (`annoSetSel` → `annoRender`) ve ilk hedef
+   DOM'dan KOPAR; kopuk düğüme gönderilen olay window'a bubble ETMEZ
+   (not/kutu taşıma bu yüzden hiç ilerlemiyordu).
+
 ## Kritik Kurallar
 
 ### PyQt6 değil, PyQt5
@@ -216,6 +249,34 @@ Bir değişiklik yaptıktan sonra:
   `B` sol paneli gizle/göster, `0` reset view, `F` fit last, `Esc` clear
 - PyInstaller paketi için gui.ui dosyası `sys._MEIPASS` üzerinden bulunur
   (gui.py'de fonksiyonla)
+
+### PCB Viewer: BOM · Montaj paneli (v2.10.0+)
+
+InteractiveHtmlBom (KiCad iBOM) tarzı montaj akışı. Sol panelde iki sekme:
+**Katmanlar** | **BOM · Montaj**.
+
+- **Gruplama**: komponentler `COMP_INFO[d].value` + `COMPONENTS[d].footprint`
+  ikilisine göre gruplanır (`BOM_GROUPS`), adede göre sıralanır. Satırda
+  ✓ kutusu, adet, değer, footprint ve designator listesi var.
+- **Grup vurgulama**: satıra tıkla → grubun TÜM komponentleri aynı anda
+  vurgulanır (`highlightComps(desigs)` — her komponente bir kutu + etiket,
+  hepsini kapsayan odak). Tek komponentli grupta popup açılır + cross-probe.
+- **Pin 1 işareti**: tek komponent vurgusunda `data-pad-number="1"` (veya A1)
+  pad'inin merkezine sarı halka (iBOM "highlight first pin"). Aynı pad birden
+  çok katmanda çizili olduğundan GÖRÜNÜR ilk kopya seçilir (gizli katmandaki
+  kopya 0-boyut döner).
+- **Montaj checklist'i**: ✓ kutusu "yerleştirildi" işaretidir; durum
+  `schviz-bom:<proje>` anahtarıyla localStorage'da saklanır (sayfa yenilense de
+  kalır), üstte `N/M yerleştirildi` sayacı ve Sıfırla düğmesi vardır.
+- **Filtreler**: Tümü / Üst / Alt / **Kalan** (işaretlenmemişler) çipleri +
+  arama kutusu (BOM sekmesinde grup filtresi olarak da çalışır: değer,
+  footprint veya designator alt-dizesi).
+- **Çift yönlü senkron**: board'da komponent seçilince `bomMark()` ilgili
+  satırı işaretleyip görünür kılar.
+- **Bilinen kısıt**: GİZLİ katmandaki komponentin ekran kutusu 0 olduğundan
+  vurgulanamaz (ör. alt yüz kapalıyken 35'lik grubun 17'si çizilir). Sessiz
+  kalmamak için `pcbHint()` info-bar'da "N komponent gizli katmanda — Üst/Alt
+  ile karşı yüzü aç" uyarısını gösterir.
 
 ### PCB Viewer'a taşınan UX özellikleri (v2.9.26+)
 
@@ -310,6 +371,54 @@ mesajına bak.
   bu API olmayabilir (graceful fallback var, "veri yok" der).
 
 ## Çözülen Sorunlar (tarihçe)
+
+- **Mobil tarayıcıda (Android Firefox) parmakla yakınlaştırma ve benzeri
+  hiçbir etkileşim çalışmıyordu (v2.10.0, kullanıcı bildirimi)**: Dört
+  görüntüleyicinin de pan/zoom kodu YALNIZCA `mousedown`/`mousemove`/`wheel`
+  ile yazılmıştı; faresi olmayan cihazda hiçbiri tetiklenmiyordu (şematikte
+  kaydırma/zoom, PCB'de aynısı, 3D'de döndürme, birleşik kabukta ayraç).
+  Üstüne `<meta name="viewport">` de yoktu → mobil tarayıcı 980px'lik sanal
+  düzen genişliği varsayıp arayüzü minicik gösteriyor, `100vh` yerleşimi
+  taşıyordu. **Çözüm**: ortak `_GESTURE_JS` (`installGesture`: pointer
+  olaylarıyla tek parmak pan + iki parmak pinch; `installDrag`: pointer
+  capture'lı basit sürükleme) + `_MOBILE_META` dört şablona da enjekte edildi;
+  masaüstü fare kod yolu OLDUĞU GİBİ korundu. **Üç kritik ayrıntı, CDP
+  dokunma emülasyonuyla ölçülerek bulundu**: (1) Jest yüzeyine
+  `touch-action:none` verilmezse tarayıcı jesti kendi alır, `pointermove`
+  akışı hiç başlamaz. (2) `pointerdown`da `preventDefault()` compat fare
+  olaylarını bastırıyor AMA Chromium'da dokunuş sonundaki `click`i de
+  bastırıyor → ilk denemede parmakla net/komponent seçmek İMKÂNSIZ oldu
+  (teşhis: olay günlüğünde `click` hiç yoktu); preventDefault yalnız
+  `pointermove`a alındı, compat olaylara karşı mevcut `mousedown`
+  handler'larına `gTouchActive()` koruması eklendi (çift pan yok — ölçüm:
+  100px sürüklemede tx tam 100). (3) Not/kutu araçları mouse tabanlı
+  olduğundan jest "köprü" (bridge) modunda sentetik fare olayları üretir →
+  annotation kodu değişmeden mobilde de çalışır. Mobil düzen: `@media
+  (max-width:820px)` ile sol paneller kayan katman (dar ekranda varsayılan
+  kapalı), toolbar sarma, `100dvh`. **Doğrulama** (headless Edge + CDP,
+  390×844 `mobile:true` + `setTouchEmulationEnabled`): şematik 9/9, PCB 7/7,
+  birleşik (mod düğmeleri + iframe içi pan/pinch + 3D döndürme/pinch + ayraç
+  sürükleme) 11/11 PASS. **Test notu**: iç viewer'ların `let`/`const`
+  değişkenleri `iframe.contentWindow` üstünde GÖRÜNMEZ (global lexical scope)
+  → CDP'de `Runtime.executionContextCreated` ile o frame'in context id'si
+  alınıp orada değerlendirme yapılmalı (ilk test yanlış yere yazıp "pan
+  çalışmıyor" sanmıştı). Ayrıca fit ölçeği < 0.85 iken şematikte LOD bitmap
+  SVG'yi örttüğünden dokunmayla eleman seçmek için önce yakınlaşmak gerekir
+  (tasarım gereği; o zoom'da yazı zaten okunmaz).
+
+- **PCB: BOM · Montaj paneli — iBOM tarzı grup seçimi + checklist (v2.10.0,
+  kullanıcı isteği)**: Kullanıcı InteractiveHtmlBom tabanlı bir viewer'ın
+  board görünümü/seçimini örnek gösterdi. Eklenenler: sol panelde
+  Katmanlar/BOM sekmeleri, değer+footprint gruplaması, satıra tıkla → grubun
+  TÜM komponentlerini aynı anda vurgula, ✓ ile montaj işareti
+  (localStorage `schviz-bom:<proje>`) + ilerleme sayacı, Tümü/Üst/Alt/Kalan
+  filtreleri, aramanın BOM'u da filtrelemesi, board seçimiyle satırın
+  senkronu, tek komponentte pin-1 halkası. Çoklu vurgu için `highlightComp`
+  → `highlightComps(desigs)` genelleştirildi (`rootBox`/`compBounds`
+  yardımcıları ayrıldı; `updateMarkerMetrics` artık tüm kutu/etiketlerde
+  döner). Doğrulama: headless Edge + CDP 16/16 PASS (gruplama toplamı =
+  komponent sayısı, çoklu kutu, pin-1, checklist kalıcılığı sayfa
+  yenilemesinden sonra da, filtreler, arama).
 
 - **Şematik: çok satırlı metin çerçeveleri (DESIGN NOTE kutuları) görünmüyordu —
   sayfalar arası SVG id çakışması (v2.9.42, kullanıcı bildirimi)**: Kırmızı

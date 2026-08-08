@@ -12,7 +12,7 @@ bağımsızdır (Three.js gömülü, harici bağımlılık yok).
 
 @author Mikail Cansız
 @date 2026
-@version 2.10.0
+@version 2.15.1
 """
 # Schematic Viz Generator — Altium projelerini interaktif HTML görüntüleyiciye dönüştürür.
 # Copyright (C) 2026  Mikail Cansız <cansizmikail@gmail.com>
@@ -32,8 +32,10 @@ bağımsızdır (Three.js gömülü, harici bağımlılık yok).
 # You should have received a copy of the GNU Affero General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 from pathlib import Path
+import codecs
 import json
 import re
+import sys
 import datetime
 import xml.etree.ElementTree as ET
 from typing import Callable
@@ -43,11 +45,90 @@ from altium_monkey.altium_schdoc import AltiumSchDoc
 
 # Uygulama sürümü — tek kaynak burası; gui.py buradan import eder.
 # HTML çıktılarında sağ üst köşedeki rozette görünür (build saati yerine).
-APP_VERSION = "2.10.0"
+APP_VERSION = "2.15.1"
 
 # Dikey pin adlarının doğru render edildiği minimum altium_monkey sürümü.
 # Bu sürümden öncesinde STM32 gibi IC'lerde dikey pinler yatay çiziliyordu.
 MIN_RECOMMENDED_AM = "2026.6.21"
+
+# --- Altium metin çözümlemesi: cp1252'ye sığmayan içerik yüzünden sayfa kaybı --
+# altium_monkey, `%UTF8%` öneki YOKSA kaydı KATI cp1252 ile çözer. Altium'da
+# datasheet'ten yapıştırılan metinler (ör. parametre değeri "－55℃＋125℃") ANSI
+# alanına UTF-8 olarak yazılabiliyor; bu baytlar cp1252'de tanımsız olduğu için
+# `ValueError: Failed to decode cp1252 content` fırlıyor ve O SAYFA TAMAMEN
+# açılamıyordu (gerçek projede 67 sayfanın 5'i + BOM/varyant verisi kayıptı).
+# Aşağıdaki yama, kütüphanenin katı yolu başarısız olduğunda sırayla dener:
+#   1) UTF-8 (öneki olmayan UTF-8 içerik → METİN AYNEN KURTARILIR)
+#   2) Windows davranışı: cp1252'de tanımsız baytlar kendi kod noktalarına düşer
+# Böylece hiçbir kayıt kaybolmaz. Yama bir kez uygulanır ve `decode_byte_array`
+# adını DOĞRUDAN import etmiş modüllerde de değiştirilir.
+def _viz_cp1252_fallback(err):
+    """@brief cp1252'de tanımsız baytı kendi kod noktasına çevirir (Windows gibi)."""
+    return (chr(err.object[err.start]), err.start + 1)
+
+
+try:
+    codecs.lookup_error("viz_cp1252_fallback")
+except LookupError:
+    codecs.register_error("viz_cp1252_fallback", _viz_cp1252_fallback)
+
+
+def patch_altium_text_decoding(log=None):
+    """@brief altium_monkey metin çözücüsünü toleranslı hale getirir.
+
+    @details
+    Katı cp1252 çözümü başarısız olursa UTF-8, o da olmazsa kayıpsız cp1252
+    fallback denenir → bozuk tek bir parametre yüzünden koca sayfa (ve BOM /
+    varyant verisi) düşmez. Kütüphane davranışı BAŞARILI durumda değişmez;
+    yalnız istisna yolunda devreye girer.
+
+    @param log Opsiyonel log callback'i (yalnız yama uygulanınca bir kez yazar)
+    @return True (yama etkin) / False (altium_monkey yapısı beklenenden farklı)
+    """
+    try:
+        import altium_monkey.altium_utilities as U
+    except Exception:
+        return False
+    orig = getattr(U, "decode_byte_array", None)
+    if orig is None:
+        return False
+    if getattr(orig, "_viz_patched", False):
+        return True
+    pipes = getattr(U, "_process_pipe_escapes_bytes", None)
+
+    def patched(byte_array, *args, **kwargs):
+        try:
+            return orig(byte_array, *args, **kwargs)
+        except (ValueError, UnicodeDecodeError):
+            data = bytes(byte_array or b"")
+            if not data:
+                return ""
+            # 1) %UTF8% önekisiz UTF-8 (en sık gerçek sebep) — metin aynen kurtulur.
+            #    Önce pipe-escape işlenmiş hali (kütüphaneyle aynı sıra), sonra ham.
+            for cand in ((pipes(data) if pipes else data), data):
+                try:
+                    return cand.decode("utf-8")
+                except (UnicodeDecodeError, Exception):
+                    pass
+            # 2) Son çare: Windows'un ANSI davranışı — hiç hata vermez.
+            src = pipes(data) if pipes else data
+            return src.decode("cp1252", errors="viz_cp1252_fallback")
+
+    patched._viz_patched = True
+    U.decode_byte_array = patched
+    # `from altium_monkey.altium_utilities import decode_byte_array` yapan
+    # modüllerde de ismi değiştir (modül-global referans yamalanmazsa eski
+    # katı sürüm çalışmaya devam ederdi).
+    n = 0
+    for name, mod in list(sys.modules.items()):
+        if not name.startswith("altium_monkey"):
+            continue
+        if getattr(mod, "decode_byte_array", None) is orig:
+            mod.decode_byte_array = patched
+            n += 1
+    if log:
+        log(f"  · metin çözücü toleranslı moda alındı (cp1252 → UTF-8 fallback, {n} modül)")
+    return True
 
 # Mobil/dokunmatik ekranlarda kullanılacak `<head>` etiketleri. Viewport meta'sı
 # OLMADAN mobil tarayıcı 980px'lik sanal bir düzen genişliği varsayar: arayüz
@@ -639,6 +720,8 @@ def _collect_data(project_path: str, log, with_pcb=False, progress=None):
     @param progress İlerleme callback'i (yüzde:int, etiket:str)
     @return Üretilen sonuç.
     """
+    patch_altium_text_decoding()   # cp1252'ye sığmayan metin sayfayı düşürmesin
+
     prog = progress or (lambda frac, label: None)
     log(f"Proje: {project_path}")
     _check_altium_monkey_version(log)
@@ -803,9 +886,16 @@ def _collect_data(project_path: str, log, with_pcb=False, progress=None):
     # bulunduğu sayfayı ve part_id'sini koru (tıklama eşleşmesi için).
     merged = {}
     for c in components:
-        # Birleştirme anahtarı: designator (aynı designator = aynı komponent).
-        # unique_id de aynı olur ama designator daha sağlam (parça parça okunur).
-        key = c["designator"]
+        # Birleştirme anahtarı: designator (aynı designator = aynı komponent;
+        # multi-part IC2A/IC2B/IC2C bu sayede tek IC2'de birleşir).
+        # AMA anotasyonsuz tasarımlarda designator YER TUTUCUDUR ("C?", "R?"):
+        # o zaman tüm sayfalardaki "C?" tek komponente çökerdi (gerçek projede
+        # 67 sayfa → 18 komponent görünüyordu). Yer tutucu designator'larda
+        # kimlik olarak Altium'un UniqueId'si kullanılır — aynı sayfada bile
+        # benzersiz, aynı komponentin parçalarında ise ortak.
+        des = c["designator"]
+        uid = c.get("unique_id") or ""
+        key = (des + chr(0) + uid) if (des.endswith("?") and uid) else des
         if key not in merged:
             merged[key] = {
                 "designator": c["designator"],
@@ -1953,7 +2043,439 @@ def _recolor_pcb_layer(svg, color, role):
     svg = re.sub(r'(fill|stroke)="(#[0-9A-Fa-f]{6})"', repl, svg)
     svg = re.sub(r'(fill|stroke):#[0-9A-Fa-f]{6}',
                  lambda m: '%s:%s' % (m.group(0).split(":")[0], color), svg)
+    # Bakır DOLGUSU (pour) yarı-saydam: pour, izler ve pad'lerle AYNI renkte
+    # olduğundan board tek düze bir renk bloğu gibi görünüyordu (ör. baştan sona
+    # kırmızı). Pour 0.55 opaklıkta çizilince üzerindeki izler/pad'ler (tam
+    # parlaklık) belirginleşir — Altium'daki okunabilirliğe yaklaşır.
+    if role in ("copper", "inner"):
+        svg = re.sub(
+            r'(<path\b(?![^>]*\bfill-opacity=)[^>]*\bdata-primitive="shapebased-region")',
+            r'\1 fill-opacity="0.55"', svg)
     return svg
+
+
+# Geometri (canvas) görüntüleyicide kullanılan katman stilleri: numerik Altium
+# katman id'si → (görünen ad, rol, renk, varsayılan açık).
+_GEO_LAYER_STYLE = {
+    "TOP": ("Top Copper", "copper", "#e04040", True),
+    "BOTTOM": ("Bottom Copper", "copper", "#4060e0", False),
+    "TOP_OVERLAY": ("Top Silkscreen", "silk", "#e8e8e8", True),
+    "BOTTOM_OVERLAY": ("Bottom Silkscreen", "silk", "#9a9a9a", False),
+    "TOP_SOLDER": ("Top Solder Mask", "mask", "#1a6b3a", False),
+    "BOTTOM_SOLDER": ("Bottom Solder Mask", "mask", "#0d4d28", False),
+    "TOP_PASTE": ("Top Paste", "paste", "#b0b0b0", False),
+    "BOTTOM_PASTE": ("Bottom Paste", "paste", "#808080", False),
+    "MULTI_LAYER": ("Multi-Layer (Pads)", "copper", "#d4a020", True),
+    "KEEPOUT": ("Keepout", "mech", "#7a5cff", False),
+}
+_GEO_ROLE_ORDER = {"mask": 0, "paste": 1, "plane": 2, "inner": 3,
+                   "copper": 4, "mech": 5, "silk": 6, "drill": 7}
+
+
+def _build_surface_from_geometry(geo, log=print):
+    """@brief 3D board yüzey dokusunu HAM GEOMETRİDEN üret (hızlı PCB modu).
+
+    @details
+    Klasik yol dokuyu katman SVG'lerinden (`to_layer_svgs`) türetir; hızlı modda
+    o adım hiç çalışmadığı için 3D board çıplak yeşil kalıyordu (izler ve
+    designator yazıları görünmüyordu). Bu fonksiyon aynı dokuyu
+    `extract_pcb_geometry()` çıktısından çizer → hızlı modda da bakır izler,
+    altın pad'ler, silkscreen çizim ve YAZILARI 3D board üzerinde görünür.
+
+    Hizalama (kritik): geometri koordinatları board sınır kutusunun sol-üstü
+    (0,0), Y aşağı +. 3D dünya ise board bbox MERKEZİNE göre, Y yukarı +:
+        X_dünya = X_geo − W/2      Y_dünya = H/2 − Y_geo
+    Bu, düzlemin dünyada [−W/2, W/2] × [−H/2, H/2] aralığını kaplaması demek →
+    `surf.cx = surf.cy = 0`, `w=W`, `h=H` ve SVG viewBox "0 0 W H".
+    (`addSurface` içindeki delik-delme eşlemesi de bu formülü kullanır.)
+
+    @param geo extract_pcb_geometry() çıktısı
+    @param log Log mesajı callback'i
+    @return {"top","bot","gz","ok","cx","cy","w","h"} veya None
+    """
+    import gzip, base64, math
+    COPPER = "#c07a35"; GOLD = "#e0b030"; SILK = "#f0f0f0"; DRILL = "#141414"
+    try:
+        W, H = float(geo["w"]), float(geo["h"])
+        if W <= 0 or H <= 0:
+            return None
+        idx = {l["name"]: l["i"] for l in geo["layers"]}
+        multi = idx.get("Multi-Layer (Pads)", -1)
+        n = lambda v: ("%.4f" % v).rstrip("0").rstrip(".")
+
+        def poly_d(pts):
+            d = ["M", n(pts[0]), n(pts[1])]
+            for i in range(2, len(pts), 2):
+                d += ["L", n(pts[i]), n(pts[i + 1])]
+            d.append("Z")
+            return " ".join(d)
+
+        def arc_el(a, color, opacity):
+            # a = [layer, cx, cy, r, a1, a2, w, net, comp]; Y ters çevrildiği için
+            # açılar da terslenir (canvas renderer ile aynı kural).
+            cx, cy, r, a1, a2, w = a[1], a[2], a[3], a[4], a[5], a[6]
+            span = (a2 - a1) % 360.0
+            st = 'stroke="%s" stroke-width="%s" fill="none" opacity="%s"' % (color, n(w), opacity)
+            if span < 0.01 or span > 359.99:
+                return '<circle cx="%s" cy="%s" r="%s" %s/>' % (n(cx), n(cy), n(r), st)
+            p = lambda ang: (cx + r * math.cos(-ang * math.pi / 180.0),
+                             cy + r * math.sin(-ang * math.pi / 180.0))
+            x1, y1 = p(a2)
+            x2, y2 = p(a1)
+            large = 1 if span > 180.0 else 0
+            return ('<path d="M %s %s A %s %s 0 %d 1 %s %s" %s/>'
+                    % (n(x1), n(y1), n(r), n(r), large, n(x2), n(y2), st))
+
+        def pad_el(p, color, opacity):
+            _, x, y, pw, ph, sh, rot, hole = p[0], p[1], p[2], p[3], p[4], p[5], p[6], p[7]
+            fill = 'fill="%s" opacity="%s"' % (color, opacity)
+            if sh == 1 and abs(pw - ph) < 1e-6:
+                body = '<circle cx="%s" cy="%s" r="%s" %s/>' % (n(x), n(y), n(pw / 2), fill)
+                return body                      # dairesel pad: dönüş anlamsız
+            rx = (min(pw, ph) / 2.0) if sh == 1 else (min(pw, ph) * 0.25 if sh == 9 else 0)
+            body = ('<rect x="%s" y="%s" width="%s" height="%s" rx="%s" %s/>'
+                    % (n(x - pw / 2), n(y - ph / 2), n(pw), n(ph), n(rx), fill))
+            if abs(rot) > 0.01:
+                body = '<g transform="rotate(%s %s %s)">%s</g>' % (n(rot), n(x), n(y), body)
+            return body
+
+        def strokes(items, color, opacity, layer_ids):
+            """Aynı kalınlıktaki izleri tek path'te topla (dosya küçülür)."""
+            byw = {}
+            for t in items:
+                if t[0] not in layer_ids:
+                    continue
+                byw.setdefault(round(t[5], 4), []).append(t)
+            out = []
+            for w, ts in byw.items():
+                d = "".join("M%s %sL%s %s" % (n(t[1]), n(t[2]), n(t[3]), n(t[4])) for t in ts)
+                out.append('<path d="%s" stroke="%s" stroke-width="%s" fill="none" '
+                           'stroke-linecap="round" opacity="%s"/>'
+                           % (d, color, n(w), opacity))
+            return out
+
+        def side(copper_name, silk_name):
+            ci = idx.get(copper_name, -2)
+            si = idx.get(silk_name, -2)
+            out = []
+            # 1) bakır dolgu (pour) — sönük
+            for r in geo["regions"]:
+                if r[0] == ci and len(r[2]) >= 6:
+                    out.append('<path d="%s" fill="%s" fill-opacity="0.5"/>'
+                               % (poly_d(r[2]), COPPER))
+            # 2) bakır izler + yaylar — sönük
+            out += strokes(geo["tracks"], COPPER, "0.5", {ci})
+            for a in geo["arcs"]:
+                if a[0] == ci:
+                    out.append(arc_el(a, COPPER, "0.5"))
+            # 3) pad'ler — opak altın (bu yüzün bakırı + multi-layer)
+            for p in geo["pads"]:
+                if p[0] == ci or p[0] == multi:
+                    out.append(pad_el(p, GOLD, "0.95"))
+            # 4) silkscreen: çizim + YAZILAR
+            out += strokes(geo["tracks"], SILK, "1", {si})
+            for a in geo["arcs"]:
+                if a[0] == si:
+                    out.append(arc_el(a, SILK, "1"))
+            for t in geo["texts"]:
+                if t[0] != si:
+                    continue
+                d = " ".join(poly_d(poly) for poly in t[1])
+                out.append('<path d="%s" fill="%s" fill-rule="evenodd"/>' % (d, SILK))
+            for t in geo.get("stexts", []):
+                if t[0] != si:
+                    continue
+                seg = t[2]
+                d = "".join("M%s %sL%s %s" % (n(seg[i]), n(seg[i + 1]), n(seg[i + 2]), n(seg[i + 3]))
+                            for i in range(0, len(seg), 4))
+                out.append('<path d="%s" stroke="%s" stroke-width="%s" fill="none" '
+                           'stroke-linecap="round"/>' % (d, SILK, n(t[1])))
+            # 5) delikler EN ÜSTTE (Altium'daki altın halka + koyu delik görünümü)
+            for v in geo["vias"]:
+                if v[3] > 0:
+                    out.append('<circle cx="%s" cy="%s" r="%s" fill="%s"/>'
+                               % (n(v[0]), n(v[1]), n(v[3] / 2), DRILL))
+            for p in geo["pads"]:
+                if p[7] > 0:
+                    out.append('<circle cx="%s" cy="%s" r="%s" fill="%s"/>'
+                               % (n(p[1]), n(p[2]), n(p[7] / 2), DRILL))
+            svg = ('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 %s %s">%s</svg>'
+                   % (n(W), n(H), "".join(out)))
+            return base64.b64encode(gzip.compress(svg.encode("utf-8"), 8)).decode()
+
+        top = side("Top Copper", "Top Silkscreen")
+        bot = side("Bottom Copper", "Bottom Silkscreen")
+    except Exception as e:
+        log(f"  · geometriden yüzey dokusu üretilemedi: {e}")
+        return None
+    log(f"  ✓ 3D yüzey dokusu (geometriden): top {len(top)//1024}KB + "
+        f"bot {len(bot)//1024}KB (gzip)")
+    # ok=1 yalnız sınır kutusu board OUTLINE'ından geldiyse: delik alfa-delmesi
+    # dünya koordinatlı, kayık dokuda hilal artefaktı yapardı.
+    return {"top": top, "bot": bot, "gz": 1, "ok": 1 if geo.get("obb") else 0,
+            "cx": 0.0, "cy": 0.0, "w": round(W, 3), "h": round(H, 3)}
+
+def extract_pcb_geometry(pcb, log=print):
+    """@brief PCB'nin HAM GEOMETRİSİNİ kompakt JSON'a çıkar (canvas görüntüleyici).
+
+    @details
+    SVG katmanlarını gömen klasik yol büyük board'larda devasa çıktı üretiyor
+    (BRK-210: sıkıştırmasız 65 MB, gzip'li 8 MB). Bu fonksiyon bunun yerine
+    primitive'lerin KENDİSİNİ çıkarır (iz, yay, pad, via, region, metin) —
+    aynı board için ~1 MB ham / ~250 KB gzip. Tarayıcı tarafında `<canvas>`'a
+    çizilir: dosya küçük, her zoom'da akıcı, LOD hilesi gerekmez.
+    (KiCad InteractiveHtmlBom'un yaklaşımının Altium karşılığı.)
+
+    Koordinatlar **mm** ve board sınır kutusunun sol-üstü (0,0) olacak şekilde
+    ötelenir; Y ekranla aynı yönde (aşağı +) olsun diye ters çevrilir.
+    Metinler `render_pcb_text` ile poligona dönüştürülür (Altium ile birebir
+    glif; canvas'ta font sorunu olmaz).
+
+    @param pcb AltiumPcbDoc nesnesi
+    @param log Log mesajı callback'i
+    @return Geometri sözlüğü (JSON'a hazır) veya {"available": False}
+    """
+    try:
+        from altium_monkey.altium_pcb_layer_ref import PcbLayer
+    except Exception as e:
+        log(f"  ! katman referansı okunamadı: {e}")
+        return {"available": False}
+
+    MM = 0.0254
+    # --- Board sınırları (mil) ---
+    obb = True          # sınır kutusu board OUTLINE'ından mı geldi (3D doku hizası)
+    try:
+        bb = pcb.board.outline.bounding_box            # (x0, y0, x1, y1) mil
+        bx0, by0, bx1, by1 = [float(v) for v in bb]
+    except Exception:
+        obb = False
+        xs = [p.x_mils for p in pcb.pads] or [0]
+        ys = [p.y_mils for p in pcb.pads] or [0]
+        bx0, by0, bx1, by1 = min(xs), min(ys), max(xs), max(ys)
+    W = (bx1 - bx0) * MM
+    H = (by1 - by0) * MM
+
+    def X(x_mils):
+        return round((float(x_mils) - bx0) * MM, 4)
+
+    def Y(y_mils):
+        # Altium Y yukarı +, ekran/canvas Y aşağı + → ters çevir
+        return round((by1 - float(y_mils)) * MM, 4)
+
+    def D(v_mils):
+        return round(float(v_mils) * MM, 4)
+
+    # DİKKAT: render_pcb_text() çıktısı MİLİMETRE'dir (kayıt x_mils=2962.6 →
+    # 75.25 mm ile birebir doğrulandı). Mil sanılıp D()'den geçirilirse metinler
+    # board'un ~25 kat uzağına düşer ve görünmez olur — ayrı dönüşüm kullan.
+    def XM(x_mm):
+        return round(float(x_mm) - bx0 * MM, 4)
+
+    def YM(y_mm):
+        return round(by1 * MM - float(y_mm), 4)
+
+    # --- Katman kaydı: numerik id → sıralı indeks ---
+    layers, lidx = [], {}
+
+    def layer_of(num):
+        if num in lidx:
+            return lidx[num]
+        try:
+            nm = PcbLayer(int(num)).name
+        except Exception:
+            nm = f"LAYER_{num}"
+        st = _GEO_LAYER_STYLE.get(nm)
+        if st is None:
+            if nm.startswith("MID"):
+                st = (nm.replace("_", " ").title(), "inner",
+                      _gen_distinct_color(len(layers)), False)
+            elif nm.startswith("INTERNAL_PLANE"):
+                st = (nm.replace("_", " ").title(), "plane",
+                      _gen_distinct_color(len(layers) + 3), False)
+            elif nm.startswith("MECHANICAL"):
+                st = (nm.replace("_", " ").title(), "mech",
+                      _gen_distinct_color(len(layers) + 7), False)
+            else:
+                st = (nm.replace("_", " ").title(), "other",
+                      _gen_distinct_color(len(layers) + 11), False)
+        i = len(layers)
+        lidx[num] = i
+        layers.append({"i": i, "num": int(num), "name": st[0], "role": st[1],
+                       "color": st[2], "on": bool(st[3])})
+        return i
+
+    ni = lambda o: (o.net_index if getattr(o, "net_index", None) is not None else -1)
+    ci = lambda o: (o.component_index
+                    if getattr(o, "component_index", None) is not None else -1)
+
+    tracks = [[layer_of(t.layer), X(t.start_x_mils), Y(t.start_y_mils),
+               X(t.end_x_mils), Y(t.end_y_mils), D(t.width_mils), ni(t), ci(t)]
+              for t in pcb.tracks]
+    # Yay: Altium açıları saat yönünün TERSİ ve Y yukarı; Y ters çevrildiği için
+    # canvas'ta açılar da terslenir → JS tarafında -a2..-a1 aralığı çizilir.
+    arcs = [[layer_of(a.layer), X(a.center_x_mils), Y(a.center_y_mils),
+             D(a.radius_mils), round(float(a.start_angle), 2),
+             round(float(a.end_angle), 2), D(a.width_mils), ni(a), ci(a)]
+            for a in (getattr(pcb, "arcs", None) or [])]
+    vias = [[X(v.x_mils), Y(v.y_mils), D(v.diameter_mils), D(v.hole_size_mils), ni(v)]
+            for v in pcb.vias]
+
+    pads = []
+    for p in pcb.pads:
+        try:
+            w = D(p.top_width / 10000.0)
+            h = D(p.top_height / 10000.0)
+        except Exception:
+            continue
+        pads.append([layer_of(p.layer), X(p.x_mils), Y(p.y_mils), w, h,
+                     int(getattr(p, "effective_top_shape", 1) or 1),
+                     round(-float(getattr(p, "rotation", 0) or 0), 1),   # Y ters → açı ters
+                     D(p.hole_size_mils), ni(p), ci(p),
+                     str(getattr(p, "designator", "") or "")])
+
+    regions = []
+    for r in pcb.regions:
+        vs = []
+        for v in (r.outline_vertices or []):
+            vs.append(X(v.x_raw / 10000.0))
+            vs.append(Y(v.y_raw / 10000.0))
+        if len(vs) < 6:
+            continue
+        holes = []
+        for hv in (getattr(r, "hole_vertices", None) or []):
+            hp = []
+            for v in hv:
+                hp.append(X(v.x_raw / 10000.0))
+                hp.append(Y(v.y_raw / 10000.0))
+            if len(hp) >= 6:
+                holes.append(hp)
+        regions.append([layer_of(r.layer), ni(r), vs, holes])
+
+    # --- Metinler: Altium iki ayrı yolla çizer, İKİSİ DE gerekli ---
+    #  • TrueType  → `characters` (glif poligonları)  → dolgu olarak çizilir
+    #  • Stroke (varsayılan Altium fontu) → `lines` (çizgi parçaları) → kalem
+    #    kalınlığıyla çizilir. Board'ların çoğunda designator/comment yazıları
+    #    STROKE'tur; yalnız `characters` işlenirse silkscreen yazıları TAMAMEN
+    #    kaybolur (BRK-210'da 966 metnin 660'ı stroke).
+    texts, stexts, t_err = [], [], 0
+    try:
+        from altium_monkey import altium_text_to_polygon as _ttp
+        for t in pcb.texts:
+            # Altium'un görünürlük kuralına uy: komponentin "Comment"/"Designator"
+            # gösterimi kapalıysa o yazı board'a BASILMAZ. Bu filtre olmadan
+            # silkscreen, gizli yorum yazılarıyla (değer/açıklama) dolup taşar.
+            cidx = getattr(t, "component_index", None)
+            if cidx is not None and 0 <= cidx < len(pcb.components):
+                comp = pcb.components[cidx]
+                if getattr(t, "is_comment", False) and not getattr(comp, "comment_on", True):
+                    continue
+                # Designator görünürlüğü Altium'da `NameOn` alanıdır — bu
+                # dosyalarda `designator_on` HER komponentte False geliyor
+                # (kullanılmayan/legacy alan); ona bakılırsa tüm designator
+                # yazıları kaybolur. Doğrusu `name_on`.
+                if getattr(t, "is_designator", False) and not getattr(comp, "name_on", True):
+                    continue
+            try:
+                res = _ttp.render_pcb_text(t)
+            except Exception:
+                t_err += 1
+                continue
+            if not res:
+                continue
+            if getattr(res, "characters", None):
+                polys = []
+                for ch in res.characters:
+                    for g in ch:
+                        pts = []
+                        for x, y in g.outline:
+                            pts.append(XM(x))
+                            pts.append(YM(y))
+                        if len(pts) >= 6:
+                            polys.append(pts)
+                if polys:
+                    texts.append([layer_of(t.layer), polys])
+            elif getattr(res, "lines", None):
+                segs = []
+                for ln in res.lines:
+                    x1, y1, x2, y2 = ln
+                    segs.append(XM(x1)); segs.append(YM(y1))
+                    segs.append(XM(x2)); segs.append(YM(y2))
+                if segs:
+                    stexts.append([layer_of(t.layer),
+                                   round(float(res.stroke_width_mm or 0.15), 3), segs])
+    except Exception as e:
+        log(f"  · metin poligonları atlandı: {e}")
+
+    # --- Komponentler: designator + katman + sınır kutusu (hit-test/vurgulama) ---
+    comps = []
+    boxes = {}      # component_index -> [x0, y0, x1, y1] (mm)
+
+    def grow(c, x, y, r=0.0):
+        b = boxes.get(c)
+        if b is None:
+            boxes[c] = [x - r, y - r, x + r, y + r]
+        else:
+            b[0] = min(b[0], x - r); b[1] = min(b[1], y - r)
+            b[2] = max(b[2], x + r); b[3] = max(b[3], y + r)
+    for t in tracks:
+        if t[7] >= 0:
+            grow(t[7], t[1], t[2], t[5] / 2); grow(t[7], t[3], t[4], t[5] / 2)
+    for a in arcs:
+        if a[8] >= 0:
+            grow(a[8], a[1], a[2], a[3] + a[6] / 2)
+    for p in pads:
+        if p[9] >= 0:
+            grow(p[9], p[1], p[2], max(p[3], p[4]) / 2)
+    for i, c in enumerate(pcb.components):
+        d = getattr(c, "designator", "") or ""
+        if not d:
+            continue
+        b = boxes.get(i)
+        try:
+            x_mil, y_mil = pcb.get_component_pnp_position_mils(i, origin_relative=False)
+            cx, cy = X(x_mil), Y(y_mil)
+        except Exception:
+            cx = (b[0] + b[2]) / 2 if b else 0
+            cy = (b[1] + b[3]) / 2 if b else 0
+        comps.append({
+            "i": i, "d": d,
+            "l": "BOTTOM" if str(getattr(c, "layer", "TOP")).upper().startswith("B") else "TOP",
+            "x": cx, "y": cy,
+            "r": round(float(str(getattr(c, "rotation", 0) or 0).strip() or 0), 1),
+            "fp": getattr(c, "footprint", "") or "",
+            "b": [round(v, 3) for v in b] if b else None,
+        })
+
+    outline = []
+    try:
+        for pt in pcb.board.outline.points_mils:
+            outline.append(X(pt[0]))
+            outline.append(Y(pt[1]))
+    except Exception:
+        outline = [0, 0, round(W, 3), 0, round(W, 3), round(H, 3), 0, round(H, 3)]
+
+    layers.sort(key=lambda l: _GEO_ROLE_ORDER.get(l["role"], 9))
+    remap = {l["i"]: k for k, l in enumerate(layers)}
+    for k, l in enumerate(layers):
+        l["i"] = k
+    for coll, idx in ((tracks, 0), (arcs, 0), (pads, 0), (regions, 0)):
+        for row in coll:
+            row[idx] = remap[row[idx]]
+    for row in texts:
+        row[0] = remap[row[0]]
+    for row in stexts:
+        row[0] = remap[row[0]]
+
+    log(f"  ✓ geometri: {len(tracks)} iz · {len(arcs)} yay · {len(pads)} pad · "
+        f"{len(vias)} via · {len(regions)}+{len(stexts)} region/metin · "
+        f"{len(layers)} katman" + (f" ({t_err} metin atlandı)" if t_err else ""))
+    return {
+        "available": True, "w": round(W, 3), "h": round(H, 3), "obb": obb,
+        "layers": layers, "nets": [getattr(n, "name", "") for n in pcb.nets],
+        "comps": comps, "outline": outline,
+        "tracks": tracks, "arcs": arcs, "vias": vias, "pads": pads,
+        "regions": regions, "texts": texts, "stexts": stexts,
+    }
 
 
 def collect_pcb_layers(project_path, log, max_layer_mb=8):
@@ -2132,10 +2654,36 @@ def collect_pcb_layers(project_path, log, max_layer_mb=8):
         except Exception as e:
             log(f"  · yüzey dokusu atlandı: {e}")
             board3d["surf"] = None
+    # Net listesi (görüntüleyicideki "Netler" paneli için): ad + bağlı pad/iz
+    # sayısı. Ad taraması SVG üzerinden yapılsaydı tüm katmanların DOM'a
+    # yüklenmesi gerekirdi — burada bir kez, ucuza çıkarılır.
+    nets_out = []
+    try:
+        pad_n, trk_n = {}, {}
+        for p in pcb.pads:
+            ni = getattr(p, "net_index", None)
+            if ni is not None:
+                pad_n[ni] = pad_n.get(ni, 0) + 1
+        for t in list(pcb.tracks) + list(getattr(pcb, "arcs", []) or []):
+            ni = getattr(t, "net_index", None)
+            if ni is not None:
+                trk_n[ni] = trk_n.get(ni, 0) + 1
+        for i, n in enumerate(pcb.nets):
+            name = getattr(n, "name", "") or ""
+            if not name:
+                continue
+            nets_out.append({"name": name, "pads": pad_n.get(i, 0),
+                             "tracks": trk_n.get(i, 0)})
+        nets_out.sort(key=lambda d: (-d["pads"], d["name"]))
+        log(f"  ✓ {len(nets_out)} net listelendi")
+    except Exception as e:
+        log(f"  · net listesi çıkarılamadı: {e}")
+
     result.update({
         "available": True,
         "layers": layers_out,
         "components": comps,
+        "nets": nets_out,
         "view_w": view_w, "view_h": view_h,
         "pcb_name": pcb_path.name,
         "board3d": board3d,
@@ -2248,6 +2796,7 @@ def generate_combined_viewer(
     intra_sheet_color: str = "#ff9800",
     log: Callable[[str], None] = print,
     progress: Callable[[int, str], None] = None,
+    fast_pcb: bool = False,
 ):
     """@brief Şematik + PCB tek HTML'de yan yana, çift yönlü cross-probe.
     
@@ -2266,6 +2815,10 @@ def generate_combined_viewer(
     @param intra_sheet_color Sayfa içi bağlantı rengi (hex)
     @param log Log mesajı callback'i (str alır)
     @param progress İlerleme callback'i (yüzde:int, etiket:str)
+    @param fast_pcb PCB panelinde geometri (canvas) görüntüleyiciyi kullan —
+           katman SVG'leri hiç render edilmez: üretim çok daha hızlı, dosya
+           küçük. KARŞILIĞI: 3D board yüzey dokusu (bakır/silk) atlanır
+           (board düz yeşil kalır) ve mask/paste katmanları listelenmez.
     @return Üretilen sonuç.
     """
     prog = progress or (lambda percent, label: None)
@@ -2302,33 +2855,74 @@ def generate_combined_viewer(
         project_name=data["project_name"],
     )
 
-    # 2) PCB HTML (tam katmanlı görüntüleyici)
-    # to_layer_svgs() tek bloklu, süresi kestirilemeyen ağır çağrı → marquee.
-    prog(-1, "PCB katmanları render ediliyor (uzun sürebilir)…")
-    pcb_layers = collect_pcb_layers(project_path, log)
-    have_pcb = pcb_layers.get("available", False)
-    prog(86, "PCB HTML oluşturuluyor")
-    if have_pcb:
-        comp_info = {
-            c["designator"]: {
-                "value": c.get("value", ""),
-                "description": c.get("description", ""),
-                "sheet": c.get("sheet_name", ""),
-            }
-            for c in data.get("components", [])
+    comp_info = {
+        c["designator"]: {
+            "value": c.get("value", ""),
+            "description": c.get("description", ""),
+            "sheet": c.get("sheet_name", ""),
         }
-        pcb_html = build_pcb_html(pcb_layers, comp_info, timestamp,
-                                  Path(project_path).stem)
+        for c in data.get("components", [])
+    }
+    empty_pcb_html = ("<!DOCTYPE html><html><body style='background:#0a0a0a;"
+                      "color:#888;font-family:sans-serif;display:flex;"
+                      "align-items:center;justify-content:center;height:100vh;'>"
+                      "<div>Bu projede okunabilir PCB dosyası bulunamadı.</div>"
+                      "</body></html>")
+
+    if fast_pcb:
+        # --- HIZLI YOL: PCB paneli geometri (canvas) görüntüleyici -----------
+        # Katman SVG'leri HİÇ render edilmez (to_layer_svgs atlanır) — üretimin
+        # en pahalı adımı buydu. 3D verisi PCB'den doğrudan çıkarılır; yüzey
+        # dokusu katman SVG'lerine dayandığından bu modda ÜRETİLMEZ.
+        prog(60, "PCB geometrisi çıkarılıyor (hızlı mod)")
+        from altium_monkey.altium_pcbdoc import AltiumPcbDoc
+        pcb_doc, pcb_path = None, None
+        for cand_path in _resolve_pcbdoc_paths(project_path, log):
+            try:
+                cand = AltiumPcbDoc.from_file(str(cand_path))
+            except Exception as e:
+                log(f"  · {cand_path.name} okunamadı: {e}")
+                continue
+            if getattr(cand, "components", None):
+                pcb_doc, pcb_path = cand, cand_path
+                break
+            if pcb_doc is None:
+                pcb_doc, pcb_path = cand, cand_path
+        geo = extract_pcb_geometry(pcb_doc, log) if pcb_doc else {"available": False}
+        have_pcb = bool(geo.get("available"))
+        if have_pcb:
+            pcb_html = build_pcb_canvas_html(geo, comp_info, timestamp,
+                                             Path(project_path).stem, pcb_path.name)
+        else:
+            log("  · PCB yok — birleşik görünümde sağ panel boş olacak.")
+            pcb_html = empty_pcb_html
+        prog(80, "3D verisi")
+        board3d = _extract_3d(pcb_doc, log) if pcb_doc else {}
+        # 3D board yüzey dokusu: klasik yolda katman SVG'lerinden gelir; hızlı
+        # modda o adım yok → aynı dokuyu GEOMETRİDEN çiziyoruz (izler, pad'ler,
+        # silkscreen çizim + yazıları 3D board üzerinde görünsün).
+        if board3d.get("available") and have_pcb:
+            try:
+                board3d["surf"] = _build_surface_from_geometry(geo, log)
+            except Exception as e:
+                log(f"  · yüzey dokusu atlandı: {e}")
+                board3d["surf"] = None
     else:
-        log("  · PCB yok — birleşik görünümde sağ panel boş olacak.")
-        pcb_html = ("<!DOCTYPE html><html><body style='background:#0a0a0a;"
-                    "color:#888;font-family:sans-serif;display:flex;"
-                    "align-items:center;justify-content:center;height:100vh;'>"
-                    "<div>Bu projede okunabilir PCB dosyası bulunamadı.</div>"
-                    "</body></html>")
+        # --- KLASİK YOL: tam katmanlı SVG görüntüleyici ----------------------
+        # to_layer_svgs() tek bloklu, süresi kestirilemeyen ağır çağrı → marquee.
+        prog(-1, "PCB katmanları render ediliyor (uzun sürebilir)…")
+        pcb_layers = collect_pcb_layers(project_path, log)
+        have_pcb = pcb_layers.get("available", False)
+        prog(86, "PCB HTML oluşturuluyor")
+        if have_pcb:
+            pcb_html = build_pcb_html(pcb_layers, comp_info, timestamp,
+                                      Path(project_path).stem)
+        else:
+            log("  · PCB yok — birleşik görünümde sağ panel boş olacak.")
+            pcb_html = empty_pcb_html
+        board3d = pcb_layers.get("board3d", {}) if have_pcb else {}
 
     # 3) 3D görünüm HTML'i (board + komponent gövdeleri)
-    board3d = pcb_layers.get("board3d", {}) if have_pcb else {}
     have_3d = bool(board3d and board3d.get("available"))
     td_html = build_3d_html(board3d, timestamp, Path(project_path).stem) if have_3d else ""
 
@@ -3100,29 +3694,33 @@ def build_pcb_html(pcb, comp_info, timestamp, project_name):
     # LAZY_SVG'de tutulur ve ilk gösterimde enjekte edilir → başlangıç DOM/parse maliyeti
     # düşer. Net-highlight / pad-label gibi çapraz-katman işlemler tüm gizli katmanları da
     # taradığından, onlar tetiklendiğinde loadAllLazyLayers() ile hepsi bir kerede yüklenir.
+    # Katman SVG'leri HTML'e HAM gömüldüğünde çıktı devleşiyordu (BRK-210: 65 MB;
+    # tarayıcı açılışı yavaş, bellek yüksek). Artık TÜM katman içerikleri tek bir
+    # gzip+base64 blob'unda taşınır ve runtime'da DecompressionStream ile açılır
+    # (birleşik görünümün iç-HTML gömme deseninin aynısı) → ~6-8× küçülme.
+    # Yerleşim aynı kalır: her katman için boş <g> placeholder; içerik açıldıktan
+    # sonra varsayılan AÇIK katmanlara hemen, diğerlerine ilk gösterimde enjekte
+    # edilir (ensureLayerLoaded — mevcut tembel yükleme yolu).
+    import gzip as _gzip, base64 as _b64
     layer_divs = []
     layer_meta = []
-    lazy_svgs = {}
+    layer_src = {}
     for i, lyr in enumerate(pcb["layers"]):
-        inner = _extract_svg_inner(lyr["svg"])
-        if lyr["default_on"]:
-            layer_divs.append(
-                f'<g class="pcb-layer" id="layer-{i}" '
-                f'data-layer="{lyr["name"]}" style="display:block">{inner}</g>'
-            )
-        else:
-            # boş placeholder; içerik LAZY_SVG[i]'de, ilk gösterimde enjekte
-            layer_divs.append(
-                f'<g class="pcb-layer" id="layer-{i}" data-lazy="1" '
-                f'data-layer="{lyr["name"]}" style="display:none"></g>'
-            )
-            lazy_svgs[i] = inner
+        layer_src[i] = _extract_svg_inner(lyr["svg"])
+        layer_divs.append(
+            f'<g class="pcb-layer" id="layer-{i}" data-lazy="1" '
+            f'data-layer="{lyr["name"]}" '
+            f'style="display:{"block" if lyr["default_on"] else "none"}"></g>'
+        )
         layer_meta.append({
             "id": i, "name": lyr["name"], "display": lyr["display"],
             "role": lyr["role"], "color": lyr["color"],
             "default_on": lyr["default_on"],
         })
     layers_svg = "\n".join(layer_divs)
+    layer_gz = _b64.b64encode(
+        _gzip.compress(json.dumps(layer_src, separators=(",", ":")).encode("utf-8"), 6)
+    ).decode()
 
     return f"""<!DOCTYPE html>
 <html lang="tr"><head>
@@ -3194,16 +3792,32 @@ def build_pcb_html(pcb, comp_info, timestamp, project_name):
              font-size:11px; padding:6px 4px; cursor:pointer; border-radius:3px;
              font-family:inherit; }}
   .sb-tab.active {{ background:#2a4a6a; color:#4ec9b0; border-color:#4ec9b0; }}
-  #bom-panel {{ flex:1; display:flex; flex-direction:column; overflow:hidden; }}
-  #bom-panel.hidden, #layer-list.hidden {{ display:none; }}
+  #bom-panel, #net-panel {{ flex:1; display:flex; flex-direction:column; overflow:hidden; }}
+  #bom-panel.hidden, #layer-list.hidden, #net-panel.hidden {{ display:none; }}
+  /* Netler paneli — şematikteki net listesinin PCB karşılığı */
+  #net-head {{ padding:6px 8px; border-bottom:1px solid #2a2a2a; flex-shrink:0; }}
+  #net-count {{ font-size:11px; color:#888; display:block; margin-bottom:5px; }}
+  #net-chips {{ display:flex; gap:3px; }}
+  #net-list {{ flex:1; overflow-y:auto; padding:4px; }}
+  .net-row {{ display:flex; align-items:center; gap:6px; padding:4px 6px;
+              border-radius:4px; cursor:pointer; font-size:11px;
+              font-family:Consolas,monospace; }}
+  .net-row:hover {{ background:#222; }}
+  .net-row.sel {{ background:#2a4a6a; color:#4ec9b0; }}
+  .net-row .nn {{ flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }}
+  .net-row.power .nn {{ color:#ff8a65; }}
+  .net-row.ground .nn {{ color:#81c784; }}
+  .net-row .nc {{ color:#666; font-size:10px; flex-shrink:0; }}
   #bom-head {{ padding:6px 8px; border-bottom:1px solid #2a2a2a; flex-shrink:0; }}
   #bom-progress {{ font-size:11px; color:#888; margin-bottom:5px;
                    display:flex; align-items:center; gap:6px; }}
   #bom-done {{ color:#4ec9b0; font-weight:bold; }}
-  #bom-reset {{ margin-left:auto; background:#1a1a1a; border:1px solid #333;
+  #bom-progress button {{ background:#1a1a1a; border:1px solid #333;
                 color:#888; font-size:10px; padding:2px 7px; border-radius:3px;
                 cursor:pointer; font-family:inherit; }}
-  #bom-reset:hover {{ color:#ff8a65; border-color:#ff8a65; }}
+  #bom-progress button:hover {{ color:#4ec9b0; border-color:#4ec9b0; }}
+  #bom-export {{ margin-left:auto; }}
+  #bom-reset:hover {{ color:#ff8a65 !important; border-color:#ff8a65 !important; }}
   #bom-chips {{ display:flex; gap:3px; }}
   .bom-chip {{ flex:1; background:#1a1a1a; border:1px solid #333; color:#777;
                font-size:10px; padding:3px 0; cursor:pointer; border-radius:9px;
@@ -3296,12 +3910,39 @@ def build_pcb_html(pcb, comp_info, timestamp, project_name):
   #hl-marker {{ pointer-events:none; }}
   /* İlk pin (pin 1) işareti — iBOM'daki "highlight first pin" karşılığı */
   #hl-marker .hl-pin1 {{ fill:none; stroke:#ffd54f; }}
+  /* Ölçüm aracı: iki nokta arası mesafe (mm + mil) */
+  #measure-layer {{ pointer-events:none; }}
+  #measure-layer .m-line {{ stroke:#ffeb3b; stroke-linecap:round; }}
+  #measure-layer .m-tick {{ stroke:#ffeb3b; fill:none; }}
+  #measure-layer .m-text {{ fill:#ffeb3b; font-family:Consolas,monospace;
+    font-weight:bold; paint-order:stroke; stroke:#1a1a00; stroke-linejoin:round; }}
+  #canvas-wrap.measuring {{ cursor:crosshair; }}
   #hl-marker .hl-box {{ fill:none; stroke:#00e5ff; stroke-linejoin:round;
     animation:hlpulse 1.1s ease-in-out infinite; }}
   #hl-marker .hl-text {{ fill:#00e5ff; font-family:Consolas,monospace;
     font-weight:bold; paint-order:stroke; stroke:#04222a;
     stroke-linejoin:round; }}
   @keyframes hlpulse {{ 0%,100%{{stroke-opacity:0.5}} 50%{{stroke-opacity:1}} }}
+  /* Kısayol / yardım penceresi */
+  #pcb-help {{ position:fixed; inset:0; background:rgba(0,0,0,0.75); z-index:1000;
+               display:none; align-items:center; justify-content:center; }}
+  #pcb-help.open {{ display:flex; }}
+  .help-box {{ background:#222; color:#ddd; padding:20px 24px; border-radius:6px;
+               max-width:560px; width:92vw; max-height:86vh; overflow-y:auto;
+               box-shadow:0 8px 40px rgba(0,0,0,0.6); }}
+  .help-box h3 {{ margin:0 0 8px; color:#4ec9b0; font-size:12px; font-weight:normal;
+                  text-transform:uppercase; letter-spacing:1.4px; }}
+  .help-box h3:not(:first-child) {{ margin-top:14px; }}
+  .help-box table {{ width:100%; border-collapse:collapse; }}
+  .help-box td {{ padding:4px 8px; font-size:12px; vertical-align:top; }}
+  .help-box td:first-child {{ width:180px; color:#aaa; }}
+  .help-box kbd {{ background:#111; padding:2px 7px; border-radius:3px;
+                   border:1px solid #555; font-family:Consolas,monospace;
+                   font-size:11px; color:#fff; }}
+  .modal-close {{ margin-top:14px; padding:6px 14px; background:#1a1a1a; color:#ddd;
+                  border:1px solid #555; border-radius:3px; cursor:pointer;
+                  font-family:inherit; }}
+  .modal-close:hover {{ border-color:#4ec9b0; color:#4ec9b0; }}
   /* === Mobil / dokunmatik düzen: sol panel board'un ÜSTÜNE kayan katman ===
      (240px sabit panel telefon ekranında board'a yer bırakmıyordu) */
   @media (max-width: 820px) {{
@@ -3328,13 +3969,30 @@ def build_pcb_html(pcb, comp_info, timestamp, project_name):
     </div>
     <div class="sb-tabs">
       <button class="sb-tab active" data-panel="layer-list">Katmanlar</button>
+      <button class="sb-tab" data-panel="net-panel">Netler</button>
       <button class="sb-tab" data-panel="bom-panel">BOM · Montaj</button>
     </div>
     <div id="layer-list"></div>
+    <div id="net-panel" class="hidden">
+      <div id="net-head">
+        <span id="net-count"></span>
+        <div id="net-chips">
+          <button class="bom-chip active" data-nf="">Tümü</button>
+          <button class="bom-chip" data-nf="power">Güç</button>
+          <button class="bom-chip" data-nf="ground">GND</button>
+          <button class="bom-chip" data-nf="signal">Sinyal</button>
+        </div>
+      </div>
+      <div id="net-list"></div>
+    </div>
     <div id="bom-panel" class="hidden">
       <div id="bom-head">
         <div id="bom-progress"><span id="bom-done">0</span>/<span id="bom-total">0</span>
-             yerleştirildi <button id="bom-reset" title="Tüm işaretleri temizle">Sıfırla</button></div>
+             yerleştirildi
+             <button id="bom-export" title="Montaj işaretlerini dosyaya kaydet">Dışa</button>
+             <button id="bom-import" title="Kaydedilmiş işaretleri yükle">İçe</button>
+             <button id="bom-reset" title="Tüm işaretleri temizle">Sıfırla</button>
+             <input type="file" id="bom-file" accept=".json,application/json" hidden></div>
         <div id="bom-chips">
           <button class="bom-chip active" data-side="">Tümü</button>
           <button class="bom-chip" data-side="TOP">Üst</button>
@@ -3368,13 +4026,57 @@ def build_pcb_html(pcb, comp_info, timestamp, project_name):
       <button class="tool-btn active" id="lod-toggle"
               title="LOD: gezinirken board bitmap çizilir (Chromium'da akıcılık). Kapatınca her zaman canlı SVG.">LOD</button>
       <button class="tool-btn" id="flip-btn">Üst/Alt</button>
+      <button class="tool-btn" id="rot-btn"
+              title="Board'u 90° döndür ( R )">⟳</button>
+      <button class="tool-btn" id="mir-btn"
+              title="Board'u çevir — alt yüzden bakış (ayna) ( X )">Çevir</button>
+      <button class="tool-btn" id="measure-btn"
+              title="Ölçüm: iki noktaya tıkla → mesafe (mm + mil). Esc iptal">Ölç</button>
       <button class="tool-btn" id="pin-btn" title="Pad pin no + net adı">Pin</button>
       <button class="tool-btn" id="bg-btn" title="Arka plan rengini değiştir">Zemin</button>
+      <button class="tool-btn" id="png-btn"
+              title="Görünümü PNG olarak indir (görünür katmanlar + vurgu)">Görüntü</button>
       <button class="tool-btn" id="all-on">Hepsi</button>
       <button class="tool-btn" id="all-off">Temizle</button>
+      <button class="tool-btn" id="help-btn" title="Kısayollar / yardım ( ? )">?</button>
     </div>
     <div class="comp-hover-label" id="hover-label"></div>
     <div id="info-bar">Sürükle: kaydır · Tekerlek: zoom · Komponente tıkla: detay</div>
+    <div id="pcb-help">
+      <div class="help-box">
+        <h3>Fare / Klavye</h3>
+        <table>
+          <tr><td>Sürükle</td><td>Board'u kaydır</td></tr>
+          <tr><td>Tekerlek</td><td>İmleç altına zoom</td></tr>
+          <tr><td>Komponente tıkla</td><td>Detay paneli + şematik/3D cross-probe</td></tr>
+          <tr><td>Bakır ize çift tıkla</td><td>O net'i tüm katmanlarda vurgula</td></tr>
+          <tr><td>Boşluğa tıkla</td><td>Vurguyu temizle</td></tr>
+          <tr><td><kbd>M</kbd></td><td>Ölçüm aracı — iki nokta arası mm/mil;
+              pad/via üzerine tıklarsan MERKEZİNE yapışır</td></tr>
+          <tr><td>Görüntü</td><td>O anki görünümü PNG olarak indir</td></tr>
+          <tr><td><kbd>R</kbd> · ⟳</td><td>Board'u 90° döndür</td></tr>
+          <tr><td><kbd>X</kbd> · Çevir</td><td>Alt yüzden bakış (ayna) — "Üst/Alt" ile birlikte kullan</td></tr>
+          <tr><td><kbd>/</kbd></td><td>Aramayı aç (komponent · net · değer)</td></tr>
+          <tr><td><kbd>B</kbd></td><td>Sol paneli gizle / göster</td></tr>
+          <tr><td><kbd>F</kbd></td><td>Board'u ekrana sığdır</td></tr>
+          <tr><td><kbd>Esc</kbd></td><td>Vurgu / ölçüm / yardım kapat</td></tr>
+          <tr><td><kbd>?</kbd></td><td>Bu pencere</td></tr>
+        </table>
+        <h3>Dokunmatik</h3>
+        <table>
+          <tr><td>Tek parmak sürükle</td><td>Kaydır</td></tr>
+          <tr><td>İki parmak</td><td>Yakınlaştır (pinch) + kaydır</td></tr>
+          <tr><td>Tek dokunuş / çift dokunuş</td><td>Tıklama / çift tıklama ile aynı</td></tr>
+        </table>
+        <h3>Paneller</h3>
+        <table>
+          <tr><td>Katmanlar</td><td>Göster/gizle · ↑ ile en üste getir · renk = çizim rengi</td></tr>
+          <tr><td>Netler</td><td>Ada göre ara, tıkla → net vurgusu (Güç/GND/Sinyal filtresi)</td></tr>
+          <tr><td>BOM · Montaj</td><td>Değer+footprint grubu; tıkla → grubu vurgula, ✓ ile montaj takibi</td></tr>
+        </table>
+        <button class="modal-close" id="help-close">Kapat</button>
+      </div>
+    </div>
   </div>
 </div>
 <script>
@@ -3382,17 +4084,29 @@ const LAYERS = {json.dumps(layer_meta)};
 const COMPONENTS = {json.dumps(pcb["components"])};
 const COMP_INFO = {json.dumps(comp_info)};
 const VIEW_W = {view_w}, VIEW_H = {view_h};
-// Tembel katman içerikleri (varsayılan kapalı katmanlar) — ilk gösterimde enjekte.
-let LAZY_SVG = {json.dumps(lazy_svgs)};
+// Katman içerikleri gzip+base64 gömülü (ham gömmede çıktı 65 MB'a çıkıyordu) —
+// açılışta DecompressionStream ile çözülür, sonra varsayılan AÇIK katmanlar
+// hemen, diğerleri ilk gösterimde (ensureLayerLoaded) DOM'a enjekte edilir.
+const LAYER_GZ = "{layer_gz}";
+let LAZY_SVG = {{}};
+let layerDataReady = false;
 
 const wrap = document.getElementById('canvas-wrap');
 const svg = document.getElementById('pcb-svg');
 const lodCanvas = document.getElementById('lod-canvas');
+// gzip+base64 → metin. DecompressionStream yoksa null (çok eski tarayıcı).
+async function gunzipB64(b64) {{
+  const bin = Uint8Array.from(atob(b64), c => c.charCodeAt(0));
+  if (typeof DecompressionStream === 'undefined') return null;
+  const st = new Blob([bin]).stream().pipeThrough(new DecompressionStream('gzip'));
+  return await new Response(st).text();
+}}
 // Bir katmanın içeriğini (tembelse) DOM'a enjekte et.
 function ensureLayerLoaded(id) {{
   const g=document.getElementById('layer-'+id);
   if(g && g.dataset.lazy) {{
     if(LAZY_SVG[id]!==undefined) {{ g.innerHTML=LAZY_SVG[id]; delete LAZY_SVG[id]; }}
+    else if(!layerDataReady) return;      // veri henüz çözülmedi → placeholder kalsın
     delete g.dataset.lazy;
   }}
 }}
@@ -3402,21 +4116,79 @@ function loadAllLazyLayers() {{
   for(const k in LAZY_SVG) ensureLayerLoaded(+k);
 }}
 let scale = 1, tx = 0, ty = 0;
+// === Board yönü: 90° adımlarla döndürme + ayna (alt yüzden bakış) ==========
+// Ekran = t + scale · M · p   (M = R(rot)·diag(mir,1), p = kök/mm koordinat)
+// 90°'nin katları + ayna seçildiği için eksene hizalı kutular (getBoundingClientRect)
+// kök uzayda YİNE eksene hizalı kalır → mevcut AABB matematiği aynen geçerli.
+let rot = 0, mir = 1;
+function rotCos() {{ return Math.cos(rot*Math.PI/180); }}
+function rotSin() {{ return Math.sin(rot*Math.PI/180); }}
+// kök(mm) → ekran (wrap'e göre px)
+function rootToScreen(x, y) {{
+  const c = rotCos(), s = rotSin(), mx = x*mir;
+  return {{ x: tx + scale*(mx*c - y*s), y: ty + scale*(mx*s + y*c) }};
+}}
+// ekran (client px) → kök(mm)
+function screenToRoot(clientX, clientY) {{
+  const vr = wrap.getBoundingClientRect();
+  const dx = (clientX - vr.left - tx)/scale, dy = (clientY - vr.top - ty)/scale;
+  const c = rotCos(), s = rotSin();
+  return {{ x: (dx*c + dy*s)*mir, y: -dx*s + dy*c }};
+}}
+// Kök noktayı görüş alanının ortasına al
+function centerOnRoot(rx, ry) {{
+  const r = wrap.getBoundingClientRect();
+  const c = rotCos(), s = rotSin(), mx = rx*mir;
+  tx = r.width/2 - scale*(mx*c - ry*s);
+  ty = r.height/2 - scale*(mx*s + ry*c);
+}}
 function applyTransform() {{
-  svg.style.transform = `translate(${{tx}}px, ${{ty}}px) scale(${{scale}})`;
+  svg.style.transform = `translate(${{tx}}px, ${{ty}}px) scale(${{scale*mir}}, ${{scale}})`
+                      + ` rotate(${{rot*mir}}deg)`;
   lodCanvas.style.transform = svg.style.transform;   // bitmap svg ile senkron
   updateMarkerMetrics();
+  // Ölçüm katmanı highlight'tan bağımsız (updateMarkerMetrics highlight yoksa
+  // erken çıkıyor) → ayrı çağrılır ki çizgi/yazı her zoom'da ekran-sabit kalsın
+  if (typeof updateMeasureMetrics === 'function') updateMeasureMetrics();
   updatePadLabelVis();
+  updateUprightTexts();
+}}
+// Döndürme/ayna sonrası yazılar ters/aynalı okunmasın diye kendi merkezleri
+// etrafında geri döndürülür (marker etiketi, ölçüm yazısı, pad etiketleri).
+function updateUprightTexts() {{
+  const inv = -rot*mir, needsFix = (rot !== 0 || mir !== 1);
+  svg.querySelectorAll('.upright').forEach(t => {{
+    if (!needsFix) {{ t.removeAttribute('transform'); return; }}
+    const x = +t.getAttribute('x') || 0, y = +t.getAttribute('y') || 0;
+    t.setAttribute('transform',
+      'rotate(' + inv + ' ' + x + ' ' + y + ') '
+      + (mir === -1 ? 'translate(' + (2*x) + ' 0) scale(-1 1)' : ''));
+  }});
 }}
 let autoFit=true;   // kullanıcı pan/zoom/seçim yapana kadar her yeniden boyutta sığdır
 function fitView() {{
   const r = wrap.getBoundingClientRect();
   if(!r.width || !r.height) return;
   const pad = 40;
-  scale = Math.min((r.width-pad*2)/VIEW_W, (r.height-pad*2)/VIEW_H);
-  tx = (r.width - VIEW_W*scale)/2;
-  ty = (r.height - VIEW_H*scale)/2;
+  // 90/270°'de board'un ekran kutusu devrilir (en↔boy)
+  const RW = (rot % 180 === 0) ? VIEW_W : VIEW_H;
+  const RH = (rot % 180 === 0) ? VIEW_H : VIEW_W;
+  scale = Math.min((r.width-pad*2)/RW, (r.height-pad*2)/RH);
+  centerOnRoot(VIEW_W/2, VIEW_H/2);
   applyTransform();
+}}
+// Döndür / çevir: görüş merkezindeki nokta yerinde kalır (kullanıcı kaybolmasın)
+function setOrient(newRot, newMir) {{
+  const r = wrap.getBoundingClientRect();
+  const c = screenToRoot(r.left + r.width/2, r.top + r.height/2);
+  rot = ((newRot % 360) + 360) % 360;
+  mir = newMir;
+  autoFit = false;
+  centerOnRoot(c.x, c.y);
+  applyTransform();
+  if (typeof pcbLodInvalidate === 'function') pcbLodInvalidate();
+  const t = 'Yön: ' + rot + '°' + (mir === -1 ? ' · ayna (alt yüzden bakış)' : '');
+  if (typeof pcbHint === 'function') pcbHint(t);
 }}
 let dragging=false, lastX=0, lastY=0, moved=false;
 wrap.addEventListener('mousedown', e => {{
@@ -3785,14 +4557,17 @@ function bomMark(desig) {{
   if(row) {{ row.classList.add('sel');
              row.scrollIntoView({{block:'nearest'}}); }}
 }}
-// Sidebar sekmeleri: Katmanlar | BOM·Montaj
-document.querySelectorAll('.sb-tab').forEach(tb => tb.onclick = () => {{
-  document.querySelectorAll('.sb-tab').forEach(x => x.classList.toggle('active', x===tb));
-  const t = tb.dataset.panel;
-  document.getElementById('layer-list').classList.toggle('hidden', t!=='layer-list');
-  document.getElementById('bom-panel').classList.toggle('hidden', t!=='bom-panel');
-  if(t==='bom-panel') bomRender();
-}});
+// Sidebar sekmeleri: Katmanlar | Netler | BOM·Montaj
+const SB_PANELS = ['layer-list', 'net-panel', 'bom-panel'];
+function sbShowPanel(t) {{
+  document.querySelectorAll('.sb-tab').forEach(x =>
+    x.classList.toggle('active', x.dataset.panel === t));
+  SB_PANELS.forEach(p => document.getElementById(p).classList.toggle('hidden', p !== t));
+  if(t === 'bom-panel') bomRender();
+  if(t === 'net-panel') netRender();
+}}
+document.querySelectorAll('.sb-tab').forEach(tb =>
+  tb.onclick = () => sbShowPanel(tb.dataset.panel));
 document.querySelectorAll('.bom-chip').forEach(ch => ch.onclick = () => {{
   bomSide = ch.dataset.side;
   document.querySelectorAll('.bom-chip').forEach(x => x.classList.toggle('active', x===ch));
@@ -3802,12 +4577,96 @@ document.getElementById('bom-reset').onclick = () => {{
   if(!confirm('Tüm montaj işaretleri silinsin mi?')) return;
   bomState = {{}}; bomSave(); bomRender();
 }};
-// Arama kutusu BOM sekmesinde grup filtresi olarak da çalışır
+// Montaj işaretlerini dosyaya aktar / dosyadan al — localStorage tarayıcıya
+// bağlı olduğundan başka makineye/kişiye devretmenin tek yolu bu.
+// Anahtar = "değer\\u0000footprint" olduğundan aynı BOM'da birebir eşleşir;
+// dosyada ayrıca designator listesi de saklanır (insan okunur + doğrulanabilir).
+document.getElementById('bom-export').onclick = () => {{
+  const items = BOM_GROUPS.filter(g => bomState[g.key])
+    .map(g => ({{ key:g.key, value:g.val, footprint:g.fp, designators:g.desigs }}));
+  const blob = new Blob([JSON.stringify(
+    {{ project:{json.dumps(project_name)}, pcb:{json.dumps(pcb.get("pcb_name",""))},
+       total:BOM_TOTAL, placed:items.reduce((s,i)=>s+i.designators.length,0),
+       items:items }}, null, 2)], {{type:'application/json'}});
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = {json.dumps(project_name)} + '_montaj.json';
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(a.href), 5000);
+  pcbHint(items.length + ' grup dosyaya aktarıldı');
+}};
+document.getElementById('bom-import').onclick = () =>
+  document.getElementById('bom-file').click();
+document.getElementById('bom-file').onchange = e => {{
+  const f = e.target.files && e.target.files[0];
+  if(!f) return;
+  const rd = new FileReader();
+  rd.onload = () => {{
+    let d = null;
+    try {{ d = JSON.parse(rd.result); }} catch(err) {{}}
+    if(!d || !Array.isArray(d.items)) {{ pcbHint('Geçersiz dosya'); return; }}
+    const known = new Set(BOM_GROUPS.map(g => g.key));
+    let ok = 0, miss = 0;
+    d.items.forEach(it => {{
+      if(known.has(it.key)) {{ bomState[it.key] = 1; ok++; }} else miss++;
+    }});
+    bomSave(); bomRender();
+    pcbHint(ok + ' grup yüklendi' + (miss ? ' · ' + miss + ' grup bu board\\'da yok' : ''));
+  }};
+  rd.readAsText(f);
+  e.target.value = '';        // aynı dosya tekrar seçilebilsin
+}};
+// Arama kutusu BOM/Netler sekmelerinde de filtre olarak çalışır
 pcbSearchInput.addEventListener('input', () => {{
   bomFilter = pcbSearchInput.value;
   if(!document.getElementById('bom-panel').classList.contains('hidden')) bomRender();
+  if(!document.getElementById('net-panel').classList.contains('hidden')) netRender();
 }});
 bomRender();
+
+// === Netler paneli =========================================================
+// Şematikteki net listesinin PCB karşılığı: ada göre ara, tıkla → o net TÜM
+// katmanlarda vurgulanır (bakır izi çift tıklamakla aynı sonuç, ama net adını
+// bilip yerini aramak zorunda kalmadan).
+const NETS = {json.dumps(pcb.get("nets", []))};
+let netTypeF = '';
+function netKind(n) {{
+  const s = n.toUpperCase();
+  if(/^A?GND/.test(s) || s === 'VSS' || s === 'DGND' || /GND$/.test(s)) return 'ground';
+  if(/^[+\\-]?\\d*\\.?\\d+V/.test(s) || /^V(CC|DD|IN|OUT|BAT|REF|SS)/.test(s)
+     || /^\\+/.test(s)) return 'power';
+  return 'signal';
+}}
+function netRender() {{
+  const list = document.getElementById('net-list');
+  const q = bomFilter.trim().toLowerCase();
+  let html = '', shown = 0;
+  NETS.forEach(n => {{
+    const k = netKind(n.name);
+    if(netTypeF && k !== netTypeF) return;
+    if(q && n.name.toLowerCase().indexOf(q) < 0) return;
+    shown++;
+    html += '<div class="net-row '+k+'" data-net="'+bomEsc(n.name)+'">'
+          + '<span class="nn">'+bomEsc(n.name)+'</span>'
+          + '<span class="nc">'+n.pads+' pad · '+n.tracks+' iz</span></div>';
+  }});
+  list.innerHTML = shown ? html : '<div class="bom-empty">eşleşen yok</div>';
+  document.getElementById('net-count').textContent =
+    shown + ' / ' + NETS.length + ' net' + (q ? ' (filtreli)' : '');
+}}
+document.getElementById('net-list').addEventListener('click', e => {{
+  const row = e.target.closest('.net-row');
+  if(!row) return;
+  document.querySelectorAll('.net-row.sel').forEach(r => r.classList.remove('sel'));
+  row.classList.add('sel');
+  highlightNet(row.dataset.net);
+}});
+document.querySelectorAll('#net-chips .bom-chip').forEach(ch => ch.onclick = () => {{
+  netTypeF = ch.dataset.nf;
+  document.querySelectorAll('#net-chips .bom-chip').forEach(x =>
+    x.classList.toggle('active', x === ch));
+  netRender();
+}});
 // === Arka plan rengi: üst toolbar'dan döngüyle değiştirilir (siyah↔gri↔açık).
 //     Nokta ızgarası rengi zemine göre kontrastlı seçilir. ===
 const BG_PRESETS = [
@@ -3853,9 +4712,11 @@ function buildPadLabels() {{
     const er=el.getBoundingClientRect();
     if(!er.width || !er.height) return;
     seen.add(key);
-    const cx=(er.left+er.width/2 - vr.left - tx)/scale;   // kök koordinat merkezi
-    const cy=(er.top +er.height/2 - vr.top  - ty)/scale;
-    const padW=er.width/scale, padH=er.height/scale;
+    // Kök kutu (döndürme/ayna dahil) → merkez + gerçek pad en/boy
+    const rb=rootBox(el, vr);
+    if(!rb) return;
+    const cx=(rb.x0+rb.x1)/2, cy=(rb.y0+rb.y1)/2;
+    const padW=rb.x1-rb.x0, padH=rb.y1-rb.y0;
     const small=Math.min(padW,padH);
     if(small<=0) return;
     const net=el.getAttribute('data-net')||'';
@@ -3872,6 +4733,7 @@ function buildPadLabels() {{
       t.setAttribute('fill','#fff');
       t.setAttribute('stroke','#000'); t.setAttribute('stroke-width',size*0.16);
       t.setAttribute('paint-order','stroke'); t.setAttribute('stroke-linejoin','round');
+      t.classList.add('upright');    // döndürme/aynada düz okunur kalsın
       t.textContent=txt; return t;
     }};
     if(net) {{
@@ -3978,8 +4840,11 @@ function clearHighlight() {{
 function rootBox(el, vr) {{
   const er=el.getBoundingClientRect();
   if(!er.width && !er.height) return null;    // gizli katman → atla
-  return {{ x0:(er.left -vr.left -tx)/scale, y0:(er.top   -vr.top -ty)/scale,
-            x1:(er.right-vr.left -tx)/scale, y1:(er.bottom-vr.top -ty)/scale }};
+  // Döndürme/ayna 90°'nin katları olduğundan ekran AABB'si kök uzayda YİNE
+  // AABB'dir; iki köşeyi çevirip min/max almak yeterli (tam doğru).
+  const a=screenToRoot(er.left, er.top), b=screenToRoot(er.right, er.bottom);
+  return {{ x0:Math.min(a.x,b.x), y0:Math.min(a.y,b.y),
+            x1:Math.max(a.x,b.x), y1:Math.max(a.y,b.y) }};
 }}
 // Komponentin tüm primitive'lerinin birleşik sınır kutusu (kök uzay).
 function compBounds(desig, vr) {{
@@ -4020,7 +4885,7 @@ function highlightComps(desigs, focus) {{
     r.setAttribute('class','hl-box');
     g.appendChild(r);
     const t=document.createElementNS(SVGNS,'text');
-    t.setAttribute('class','hl-text'); t.textContent=desig;
+    t.setAttribute('class','hl-text upright'); t.textContent=desig;
     t.dataset.bx=bx; t.dataset.by=by;
     g.appendChild(t);
     ux0=Math.min(ux0,bx); uy0=Math.min(uy0,by);
@@ -4072,6 +4937,158 @@ function updateMarkerMetrics() {{
   const p=highlightMarker.querySelector('.hl-pin1');
   if(p) p.setAttribute('stroke-width',1.6*k);
 }}
+
+// === Ölçüm aracı ===========================================================
+// İki noktaya tıkla → aradaki mesafe mm ve mil olarak, Δx/Δy ile birlikte.
+// Nokta koordinatları KÖK uzayda (viewBox = mm) tutulur; çizgi/yazı kalınlığı
+// her zoom'da 1/scale ile ölçeklenir (ekran-sabit, marker'larla aynı desen).
+let measureOn = false, mPts = [], mPreview = null, measureLayer = null;
+const measureBtn = document.getElementById('measure-btn');
+function toRootXY(clientX, clientY) {{
+  return screenToRoot(clientX, clientY);       // döndürme/ayna dahil
+}}
+// Ölçümde pad/via merkezine YAPIŞ (snap): pad-pad mesafesi ölçmek göz kararı
+// tıklamayla hatalı olurdu. İmlecin altındaki eleman pad/via ise merkezi alınır.
+function snapXY(clientX, clientY) {{
+  const el = document.elementFromPoint(clientX, clientY);
+  if (el && el.getAttribute) {{
+    const prim = el.getAttribute('data-primitive') || '';
+    if (prim === 'pad' || prim === 'via' || el.hasAttribute('data-pad-number')) {{
+      const b = rootBox(el, wrap.getBoundingClientRect());
+      if (b) return {{ x:(b.x0+b.x1)/2, y:(b.y0+b.y1)/2, snap:true }};
+    }}
+  }}
+  return toRootXY(clientX, clientY);
+}}
+function setMeasure(on) {{
+  measureOn = on;
+  measureBtn.classList.toggle('active', on);
+  wrap.classList.toggle('measuring', on);
+  if(!on) {{ mPts = []; mPreview = null; drawMeasure(); }}
+  else infoBar.textContent = 'Ölçüm: iki noktaya tıkla (Esc iptal)';
+}}
+measureBtn.onclick = () => setMeasure(!measureOn);
+function drawMeasure() {{
+  if(measureLayer) {{ measureLayer.remove(); measureLayer = null; }}
+  const pts = mPts.slice();
+  if(pts.length === 1 && mPreview) pts.push(mPreview);
+  if(pts.length < 2) return;
+  const [a, b] = pts;
+  const dx = b.x - a.x, dy = b.y - a.y, d = Math.hypot(dx, dy);
+  const g = document.createElementNS(SVGNS,'g');
+  g.setAttribute('id','measure-layer');
+  const ln = document.createElementNS(SVGNS,'line');
+  ln.setAttribute('x1',a.x); ln.setAttribute('y1',a.y);
+  ln.setAttribute('x2',b.x); ln.setAttribute('y2',b.y);
+  ln.setAttribute('class','m-line');
+  g.appendChild(ln);
+  [a, b].forEach(p => {{
+    const c = document.createElementNS(SVGNS,'circle');
+    c.setAttribute('cx',p.x); c.setAttribute('cy',p.y);
+    c.setAttribute('class','m-tick');
+    g.appendChild(c);
+  }});
+  const t = document.createElementNS(SVGNS,'text');
+  t.setAttribute('class','m-text upright');
+  t.textContent = d.toFixed(3)+' mm  ('+(d/0.0254).toFixed(1)+' mil)  '
+                + 'Δx '+dx.toFixed(3)+'  Δy '+dy.toFixed(3);
+  t.dataset.mx = (a.x+b.x)/2; t.dataset.my = (a.y+b.y)/2;
+  g.appendChild(t);
+  svg.appendChild(g);
+  measureLayer = g;
+  updateMeasureMetrics();
+  const snapped = pts.filter(p => p.snap).length;
+  infoBar.textContent = 'Ölçüm: ' + d.toFixed(3) + ' mm / ' + (d/0.0254).toFixed(1)
+                      + ' mil · Δx ' + dx.toFixed(3) + ' Δy ' + dy.toFixed(3)
+                      + (snapped ? ' · ' + snapped + ' nokta pad merkezine yapıştı' : '')
+                      + (mPts.length === 2 ? ' · yeni ölçüm için tıkla, Esc kapatır' : '');
+}}
+function updateMeasureMetrics() {{
+  if(!measureLayer) return;
+  const k = 1/scale;
+  measureLayer.querySelectorAll('.m-line').forEach(l => l.setAttribute('stroke-width',1.6*k));
+  measureLayer.querySelectorAll('.m-tick').forEach(c => {{
+    c.setAttribute('r',3.5*k); c.setAttribute('stroke-width',1.4*k); }});
+  const t = measureLayer.querySelector('.m-text');
+  if(t) {{
+    const fs = 12*k;
+    t.setAttribute('font-size',fs);
+    t.setAttribute('stroke-width',0.2*fs);
+    t.setAttribute('x',+t.dataset.mx); t.setAttribute('y',(+t.dataset.my) - 5*k);
+    t.setAttribute('text-anchor','middle');
+  }}
+}}
+// === PNG dışa aktarma ======================================================
+// O anki GÖRÜNÜM (görünür katmanlar + net/komponent vurgusu + ölçüm) yüksek
+// çözünürlüklü PNG olarak indirilir — rapor/e-posta için. LOD bitmap'iyle aynı
+// desen: görünür <g>'ler serileştirilip tek SVG olarak Image'a, oradan canvas'a.
+document.getElementById('png-btn').onclick = () => {{
+  loadAllLazyLayers();
+  const vr = wrap.getBoundingClientRect();
+  // Ekranda görünen bölgenin KÖK uzaydaki kutusu (döndürme/ayna dahil)
+  const c1 = screenToRoot(vr.left, vr.top), c2 = screenToRoot(vr.right, vr.bottom);
+  const x0 = Math.min(c1.x,c2.x), y0 = Math.min(c1.y,c2.y);
+  const rw = Math.abs(c2.x-c1.x), rh = Math.abs(c2.y-c1.y);
+  const cx = x0+rw/2, cy = y0+rh/2;
+  // Görüntü ekrandaki gibi dursun: 90/270°'de en↔boy devrilir
+  const w = (rot % 180 === 0) ? rw : rh, h = (rot % 180 === 0) ? rh : rw;
+  const parts = [];
+  for (const ch of svg.children) {{
+    if (ch.style && ch.style.display === 'none') continue;
+    parts.push(new XMLSerializer().serializeToString(ch));
+  }}
+  const k = 4000 / Math.max(w, h);      // uzun kenar 4000px (yakın zoom'da ~1000+ DPI)
+  const W = Math.max(1, Math.round(w*k)), H = Math.max(1, Math.round(h*k));
+  const gOpen = '<g transform="rotate('+(rot*mir)+' '+cx+' '+cy+')'
+              + (mir === -1 ? ' translate('+(2*cx)+' 0) scale(-1 1)' : '') + '">';
+  const src = '<svg xmlns="http://www.w3.org/2000/svg" width="'+W+'" height="'+H
+            + '" viewBox="'+(cx-w/2)+' '+(cy-h/2)+' '+w+' '+h+'">'
+            + '<rect x="'+(cx-w/2)+'" y="'+(cy-h/2)+'" width="'+w+'" height="'+h
+            + '" fill="'+ (getComputedStyle(wrap).backgroundColor || '#0a0a0a') +'"/>'
+            + gOpen + parts.join('') + '</g></svg>';
+  const img = new Image();
+  let url = '', tried = false;
+  const fin = ok => {{
+    if (url) {{ URL.revokeObjectURL(url); url=''; }}
+    if (!ok) {{ pcbHint('PNG üretilemedi'); return; }}
+    const cv = document.createElement('canvas');
+    cv.width = W; cv.height = H;
+    cv.getContext('2d').drawImage(img, 0, 0, W, H);
+    cv.toBlob(b => {{
+      if (!b) {{ pcbHint('PNG üretilemedi'); return; }}
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(b);
+      a.download = {json.dumps(project_name)} + '_pcb.png';
+      a.click();
+      setTimeout(() => URL.revokeObjectURL(a.href), 5000);
+      pcbHint('PNG indirildi (' + W + '×' + H + ')');
+    }}, 'image/png');
+  }};
+  img.onload = () => fin(true);
+  img.onerror = () => {{
+    if (tried) {{ fin(false); return; }}
+    tried = true;
+    if (url) {{ URL.revokeObjectURL(url); url=''; }}
+    img.src = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(src);
+  }};
+  url = URL.createObjectURL(new Blob([src], {{type:'image/svg+xml;charset=utf-8'}}));
+  img.src = url;
+}};
+
+// Ölçüm tıklaması komponent/net seçimini TETİKLEMEMELİ → capture fazında yakala
+wrap.addEventListener('click', e => {{
+  if(!measureOn || moved) return;
+  e.stopPropagation();
+  if(mPts.length >= 2) mPts = [];         // üçüncü tık: yeni ölçüme başla
+  mPts.push(snapXY(e.clientX, e.clientY));
+  mPreview = null;
+  drawMeasure();
+}}, true);
+wrap.addEventListener('mousemove', e => {{
+  if(!measureOn || mPts.length !== 1) return;
+  mPreview = snapXY(e.clientX, e.clientY);
+  drawMeasure();
+}});
 // Komponenti görüş alanının ortasına getir ve rahat görünecek kadar yakınlaş
 // (Altium viewer gibi). Sadece gerekiyorsa yakınlaşır, kullanıcı daha
 // yakındaysa o zoom'u korur.
@@ -4090,8 +5107,7 @@ function focusBox(bx,by,bw,bh) {{
     ns=Math.max(scale, Math.min(ns, 12));
   }}
   scale=ns;
-  tx=r.width/2 - cx*scale;
-  ty=r.height/2 - cy*scale;
+  centerOnRoot(cx, cy);          // döndürme/ayna dahil merkezleme
   svg.style.transition='transform 0.35s ease';
   applyTransform();
   clearTimeout(focusBox._t);
@@ -4244,6 +5260,8 @@ window.addEventListener('keydown', e => {{
     return;
   }}
   if (e.key === 'Escape') {{
+    if (pcbHelp.classList.contains('open')) {{ pcbHelp.classList.remove('open'); return; }}
+    if (measureOn) {{ setMeasure(false); infoBar.textContent = INFO_DEFAULT; return; }}
     clearNetHighlight();
     clearHighlight();
     popup.classList.remove('open');
@@ -4251,6 +5269,23 @@ window.addEventListener('keydown', e => {{
   else if (e.key === 'b' || e.key === 'B')
     setSbOpen(sbEl.classList.contains('collapsed'));
   else if (e.key === '/') {{ e.preventDefault(); setPcbSearchOpen(true); }}
+  else if (e.key === 'm' || e.key === 'M') setMeasure(!measureOn);
+  else if (e.key === 'f' || e.key === 'F') {{ autoFit = true; fitView(); }}
+  else if (e.key === 'r' || e.key === 'R') setOrient(rot + 90, mir);
+  else if (e.key === 'x' || e.key === 'X') setOrient(rot, -mir);
+  else if (e.key === '?') pcbHelp.classList.toggle('open');
+}});
+document.getElementById('rot-btn').onclick = () => setOrient(rot + 90, mir);
+document.getElementById('mir-btn').onclick = () => {{
+  setOrient(rot, -mir);
+  document.getElementById('mir-btn').classList.toggle('active', mir === -1);
+}};
+
+// === Kısayol / jest yardımı (?) ============================================
+const pcbHelp = document.getElementById('pcb-help');
+document.getElementById('help-btn').onclick = () => pcbHelp.classList.add('open');
+pcbHelp.addEventListener('click', e => {{
+  if (e.target === pcbHelp || e.target.id === 'help-close') pcbHelp.classList.remove('open');
 }});
 
 // === Cross-probe köprüsü (birleşik görünüm için) ===
@@ -4272,6 +5307,25 @@ window.addEventListener('message', ev => {{
 
 renderLayerList();
 document.getElementById('pin-btn').classList.add('active');  // pad etiketleri varsayılan açık
+
+// === Katman verisini aç (gzip) ve varsayılan açık katmanları yerleştir ======
+// Gömme sıkıştırıldığı için (65 MB → ~10 MB) içerik açılışta asenkron çözülür;
+// çözülene kadar board boş görünür (birkaç yüz ms). Sonrasında sığdırma
+// tekrarlanır ve LOD bitmap'i tazelenir.
+(async function initLayers() {{
+  let txt = null;
+  try {{ txt = await gunzipB64(LAYER_GZ); }} catch(e) {{ txt = null; }}
+  if (txt === null) {{
+    infoBar.textContent = 'Bu tarayıcı sıkıştırılmış katmanları açamıyor '
+                        + '(DecompressionStream gerekli) — lütfen tarayıcıyı güncelleyin.';
+    return;
+  }}
+  LAZY_SVG = JSON.parse(txt);
+  layerDataReady = true;
+  LAYERS.forEach(l => {{ if (l.default_on) ensureLayerLoaded(l.id); }});
+  if (autoFit) fitView(); else applyTransform();
+  if (typeof pcbLodInvalidate === 'function') pcbLodInvalidate();
+}})();
 // İlk sığdırma: iframe/flex layout boyutu tam oturduktan sonra çalışsın.
 // (srcdoc iframe ilk render'da getBoundingClientRect 0 verebilir → board
 //  ekran dışına düşerdi.) rAF + küçük gecikme ile garanti altına al.
@@ -4295,6 +5349,1085 @@ new ResizeObserver(() => {{
 </script>
 </body></html>"""
 
+
+_PCB_CANVAS_TPL = r"""<!DOCTYPE html>
+<html lang="tr"><head>
+<meta charset="utf-8">
+__MOBILE_META__
+<title>PCB (geometri) · __PROJECT__ · __TIME__</title>
+<style>
+  * { margin:0; padding:0; box-sizing:border-box; }
+  body { background:#0a0a0a; color:#ddd; font-family:'Segoe UI',sans-serif;
+         overflow:hidden; height:100vh; }
+  #app { display:flex; height:100vh; }
+  body, #app { height:100dvh; }
+  #sidebar { width:250px; background:#161616; border-right:1px solid #333;
+             display:flex; flex-direction:column; flex-shrink:0; position:relative;
+             overflow:hidden; transition:width .18s ease; }
+  #sidebar.collapsed { width:26px; }
+  #sidebar.collapsed > *:not(#sb-toggle) { display:none !important; }
+  #sb-toggle { position:absolute; top:9px; right:8px; width:20px; height:20px;
+               padding:0; background:#1a1a1a; border:1px solid #333; color:#888;
+               font-size:11px; line-height:18px; text-align:center; cursor:pointer;
+               border-radius:3px; z-index:5; }
+  #sidebar.collapsed #sb-toggle { position:static; margin:6px auto 0; display:block; }
+  #sidebar h2 { font-size:13px; padding:12px 32px 12px 12px; border-bottom:1px solid #333;
+                color:#4ec9b0; text-transform:uppercase; letter-spacing:1px; }
+  .sub { font-size:10px; color:#666; padding:4px 12px; }
+  .sb-tabs { display:flex; gap:4px; padding:6px 8px 0; }
+  .sb-tab { flex:1; background:#1a1a1a; border:1px solid #333; color:#888;
+            font-size:11px; padding:6px 4px; cursor:pointer; border-radius:3px;
+            font-family:inherit; }
+  .sb-tab.active { background:#2a4a6a; color:#4ec9b0; border-color:#4ec9b0; }
+  .panel { flex:1; overflow-y:auto; padding:6px; }
+  /* .hidden HER ZAMAN kazanmali: .panel.nopad kurali sonra geldigi icin ayni
+     ozgullukte gizlemeyi eziyordu (BOM paneli Katmanlar sekmesinde de
+     goruluyordu). */
+  .panel.hidden, #chips.hidden { display:none !important; }
+  #search-box { padding:8px 12px; border-bottom:1px solid #333; }
+  #search-box input { width:100%; background:#0d0d0d; border:1px solid #333; color:#ddd;
+                      padding:6px 8px; border-radius:4px; font-size:12px; }
+  .layer-item { display:flex; align-items:center; padding:6px 8px; cursor:pointer;
+                border-radius:4px; font-size:12px; user-select:none; }
+  .layer-item:hover { background:#222; }
+  .layer-item.off { opacity:0.42; }
+  .sw { width:14px; height:14px; border-radius:3px; margin-right:8px;
+        border:1px solid #444; flex-shrink:0; }
+  .ln { flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .lc { color:#4ec9b0; font-size:13px; }
+  .ltop { background:transparent; border:1px solid #444; color:#999; cursor:pointer;
+          border-radius:4px; font-size:11px; line-height:1; padding:2px 5px;
+          margin:0 6px 0 4px; flex-shrink:0; font-family:inherit; }
+  .ltop:hover { border-color:#4ec9b0; color:#4ec9b0; }
+  .ltop.on { background:#2a4a6a; border-color:#4ec9b0; color:#4ec9b0; }
+  .layer-item.off .lc { visibility:hidden; }
+  .row { display:flex; align-items:center; gap:6px; padding:4px 6px; border-radius:4px;
+         cursor:pointer; font-size:11px; font-family:Consolas,monospace; }
+  .row:hover { background:#222; }
+  .row.sel { background:#2a4a6a; color:#4ec9b0; }
+  .row .nm { flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .row .ct { color:#666; font-size:10px; }
+  .row.power .nm { color:#ff8a65; }
+  .row.ground .nm { color:#81c784; }
+  .empty { color:#555; font-size:11px; padding:10px 6px; font-style:italic; }
+  .panel.nopad { padding:0; display:flex; flex-direction:column; }
+  #bom-head { padding:6px 8px; border-bottom:1px solid #2a2a2a; flex-shrink:0; }
+  #bom-prog { font-size:11px; color:#888; margin-bottom:5px; display:flex;
+              align-items:center; gap:5px; }
+  #bom-done { color:#4ec9b0; font-weight:bold; }
+  #bom-prog button { background:#1a1a1a; border:1px solid #333; color:#888;
+                     font-size:10px; padding:2px 7px; border-radius:3px; cursor:pointer;
+                     font-family:inherit; }
+  #bom-prog button:hover { color:#4ec9b0; border-color:#4ec9b0; }
+  #bom-exp { margin-left:auto; }
+  #bom-rst:hover { color:#ff8a65 !important; border-color:#ff8a65 !important; }
+  #bom-chips { display:flex; gap:3px; }
+  #bom-list { flex:1; overflow-y:auto; padding:4px; }
+  .brow { display:flex; align-items:flex-start; gap:6px; padding:5px 6px; border-radius:4px;
+          cursor:pointer; font-size:11px; border-bottom:1px solid #202020; }
+  .brow:hover { background:#222; }
+  .brow.sel { background:#2a4a6a; }
+  .brow.done { opacity:0.5; }
+  .brow.done .bv { text-decoration:line-through; }
+  .bchk { width:16px; height:16px; flex-shrink:0; border:1px solid #555; border-radius:3px;
+          color:#4ec9b0; font-size:12px; line-height:14px; text-align:center; background:#111; }
+  .brow.done .bchk { background:#1d4d33; border-color:#4ec9b0; }
+  .bq { color:#4ec9b0; min-width:22px; flex-shrink:0; text-align:right; }
+  .bm { flex:1; min-width:0; }
+  .bv { color:#eee; font-weight:bold; }
+  .bf { color:#666; font-size:10px; }
+  .bd { color:#999; font-size:10px; word-break:break-word; font-family:Consolas,monospace; }
+  #chips { display:flex; gap:3px; padding:0 8px 6px; }
+  .chip { flex:1; background:#1a1a1a; border:1px solid #333; color:#777; font-size:10px;
+          padding:3px 0; cursor:pointer; border-radius:9px; font-family:inherit; }
+  .chip.active { border-color:#4ec9b0; color:#4ec9b0; }
+  #wrap { flex:1; position:relative; overflow:hidden; touch-action:none;
+          cursor:crosshair; background:#0a0a0a; }
+  #cv { display:block; width:100%; height:100%; }
+  #toolbar { position:absolute; top:10px; right:10px; display:flex; gap:6px; z-index:50;
+             flex-wrap:wrap; justify-content:flex-end; max-width:calc(100% - 20px); }
+  .tb { background:rgba(30,30,30,0.92); border:1px solid #444; color:#ddd;
+        padding:6px 12px; border-radius:5px; cursor:pointer; font-size:12px;
+        font-family:inherit; }
+  .tb:hover { border-color:#4ec9b0; color:#4ec9b0; }
+  .tb.active { background:#2a4a6a; border-color:#4ec9b0; color:#4ec9b0; }
+  #info { position:absolute; bottom:10px; left:10px; background:rgba(20,20,20,0.85);
+          padding:5px 12px; border-radius:4px; font-size:11px; color:#888; z-index:40; }
+  #stat { position:absolute; bottom:10px; right:10px; background:rgba(20,20,20,0.85);
+          padding:5px 10px; border-radius:4px; font-size:10px; color:#666; z-index:40; }
+  #popup { display:none; flex-direction:column; flex-shrink:0; background:#161616;
+           border-top:1px solid #333; max-height:55%; overflow:hidden; font-size:12px; }
+  #popup.open { display:flex; }
+  .ph { padding:8px 10px; background:#2a4a6a; display:flex; align-items:center; gap:6px; }
+  .ph .d { font-weight:bold; color:#4ec9b0; font-size:14px; font-family:Consolas,monospace;
+           flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .px { background:none; border:none; color:#aaa; cursor:pointer; font-size:18px; }
+  .pb { padding:10px 12px; overflow-y:auto; }
+  .pr { display:flex; padding:3px 0; border-bottom:1px solid #282828; }
+  .pk { color:#888; min-width:92px; }
+  .pv { color:#eee; flex:1; word-break:break-word; }
+  #help { position:fixed; inset:0; background:rgba(0,0,0,0.75); z-index:1000;
+          display:none; align-items:center; justify-content:center; }
+  #help.open { display:flex; }
+  .hb { background:#222; padding:20px 24px; border-radius:6px; max-width:560px;
+        width:92vw; max-height:86vh; overflow-y:auto; }
+  .hb h3 { color:#4ec9b0; font-size:12px; font-weight:normal; margin:0 0 8px;
+           text-transform:uppercase; letter-spacing:1.4px; }
+  .hb h3:not(:first-child) { margin-top:14px; }
+  .hb table { width:100%; border-collapse:collapse; }
+  .hb td { padding:4px 8px; font-size:12px; vertical-align:top; }
+  .hb td:first-child { width:190px; color:#aaa; }
+  .hb kbd { background:#111; padding:2px 7px; border-radius:3px; border:1px solid #555;
+            font-family:Consolas,monospace; font-size:11px; color:#fff; }
+  .cls { margin-top:14px; padding:6px 14px; background:#1a1a1a; color:#ddd;
+         border:1px solid #555; border-radius:3px; cursor:pointer; font-family:inherit; }
+  @media (max-width: 820px) {
+    #sidebar { position:absolute; left:0; top:0; height:100%; z-index:300;
+               width:80vw; max-width:320px; box-shadow:0 0 26px rgba(0,0,0,0.75); }
+    #sidebar.collapsed { width:26px; }
+    .tb { padding:8px 11px; }
+  }
+</style>
+</head>
+<body>
+<div id="app">
+  <div id="sidebar">
+    <button id="sb-toggle" title="Paneli gizle ( B )">&#9666;</button>
+    <h2>PCB · __PCBNAME__</h2>
+    <div class="sub" id="dims"></div>
+    <div id="search-box"><input id="q" placeholder="Komponent / net ara..."></div>
+    <div class="sb-tabs">
+      <button class="sb-tab active" data-p="p-layers">Katmanlar</button>
+      <button class="sb-tab" data-p="p-nets">Netler</button>
+      <button class="sb-tab" data-p="p-comps">Komponentler</button>
+      <button class="sb-tab" data-p="p-bom">BOM</button>
+    </div>
+    <div id="chips" class="hidden">
+      <button class="chip active" data-nf="">Tümü</button>
+      <button class="chip" data-nf="power">Güç</button>
+      <button class="chip" data-nf="ground">GND</button>
+      <button class="chip" data-nf="signal">Sinyal</button>
+    </div>
+    <div id="p-layers" class="panel"></div>
+    <div id="p-nets" class="panel hidden"></div>
+    <div id="p-comps" class="panel hidden"></div>
+    <div id="p-bom" class="panel hidden nopad">
+      <div id="bom-head">
+        <div id="bom-prog"><span id="bom-done">0</span>/<span id="bom-total">0</span> yerleştirildi
+          <button id="bom-exp" title="Montaj işaretlerini dosyaya kaydet">Dışa</button>
+          <button id="bom-imp" title="Kaydedilmiş işaretleri yükle">İçe</button>
+          <button id="bom-rst" title="Tüm işaretleri temizle">Sıfırla</button>
+          <input type="file" id="bom-file" accept=".json,application/json" hidden>
+        </div>
+        <div id="bom-chips">
+          <button class="chip active" data-bf="">Tümü</button>
+          <button class="chip" data-bf="TOP">Üst</button>
+          <button class="chip" data-bf="BOTTOM">Alt</button>
+          <button class="chip" data-bf="todo">Kalan</button>
+        </div>
+      </div>
+      <div id="bom-list"></div>
+    </div>
+    <div id="popup">
+      <div class="ph"><span class="d" id="pd"></span>
+        <button class="px" id="pclose">&times;</button></div>
+      <div class="pb" id="pbody"></div>
+    </div>
+  </div>
+  <div id="wrap">
+    <canvas id="cv"></canvas>
+    <div id="toolbar">
+      <button class="tb" id="b-in">+</button>
+      <button class="tb" id="b-out">&minus;</button>
+      <button class="tb" id="b-fit">Sığdır</button>
+      <button class="tb" id="b-rot" title="90° döndür ( R )">&#10227;</button>
+      <button class="tb" id="b-mir" title="Alt yüzden bakış / ayna ( X )">Çevir</button>
+      <button class="tb" id="b-flip" title="Üst / alt katman setini değiştir ( T )">Üst/Alt</button>
+      <button class="tb" id="b-all" title="Tüm katmanları göster">Hepsi</button>
+      <button class="tb" id="b-none" title="Tüm katmanları gizle">Temizle</button>
+      <button class="tb" id="b-meas" title="Ölçüm ( M )">Ölç</button>
+      <button class="tb active" id="b-pin" title="Pad no + net ( P )">Pin</button>
+      <button class="tb" id="b-bg" title="Zemin rengi">Zemin</button>
+      <button class="tb" id="b-png" title="Görünümü PNG indir">Görüntü</button>
+      <button class="tb" id="b-help" title="Yardım ( ? )">?</button>
+    </div>
+    <div id="info">Sürükle / tek parmak: kaydır · Tekerlek / iki parmak: zoom · Tıkla: komponent · Çift tık: net</div>
+    <div id="stat"></div>
+    <div id="help"><div class="hb">
+      <h3>Fare / Klavye</h3>
+      <table>
+        <tr><td>Sürükle</td><td>Kaydır</td></tr>
+        <tr><td>Tekerlek</td><td>İmleç altına zoom</td></tr>
+        <tr><td>Tıkla</td><td>Komponent seç (detay + cross-probe)</td></tr>
+        <tr><td>Çift tıkla</td><td>Altındaki net'i vurgula</td></tr>
+        <tr><td><kbd>M</kbd></td><td>Ölçüm (mm/mil, pad merkezine yapışır)</td></tr>
+        <tr><td><kbd>R</kbd> / <kbd>X</kbd></td><td>Döndür / çevir (ayna)</td></tr>
+        <tr><td><kbd>P</kbd> · <kbd>T</kbd></td><td>Pad etiketleri · Üst/Alt katman seti</td></tr>
+        <tr><td><kbd>F</kbd> · <kbd>B</kbd> · <kbd>Esc</kbd> · <kbd>?</kbd></td>
+            <td>Sığdır · panel · temizle · yardım</td></tr>
+      </table>
+      <h3>Dokunmatik</h3>
+      <table>
+        <tr><td>Tek parmak</td><td>Kaydır</td></tr>
+        <tr><td>İki parmak</td><td>Yakınlaştır + kaydır</td></tr>
+        <tr><td>Dokun / çift dokun</td><td>Komponent / net</td></tr>
+      </table>
+      <h3>Bu görünüm hakkında</h3>
+      <table>
+        <tr><td>BOM · Montaj</td><td>Değer+footprint grubuna tıkla → grubun tamamı
+            vurgulanır; ✓ ile montaj takibi (tarayıcıda saklanır, Dışa/İçe ile taşınır)</td></tr>
+        <tr><td>Geometri tabanlı</td><td>Board SVG olarak değil, ham geometri (iz/pad/via/
+            region/metin) olarak gömülür ve canvas'a çizilir → dosya çok küçük,
+            her zoom'da akıcı.</td></tr>
+      </table>
+      <button class="cls" id="hclose">Kapat</button>
+    </div></div>
+  </div>
+</div>
+<script>
+__GESTURE__
+</script>
+<script>
+const GEO_GZ = "__GEO_GZ__";
+const COMP_INFO = __COMPINFO__;
+const PROJECT = __PROJECTJSON__;
+let G = null;                       // geometri (gzip'ten çözülür)
+const cv = document.getElementById('cv'), ctx = cv.getContext('2d');
+const wrap = document.getElementById('wrap');
+const info = document.getElementById('info');
+const stat = document.getElementById('stat');
+const popup = document.getElementById('popup');
+const INFO_DEFAULT = info.textContent;
+
+// === Görünüm dönüşümü: ekran = t + s·R(rot)·diag(mir,1)·p  (p: mm) ===
+let scale = 4, tx = 0, ty = 0, rot = 0, mir = 1;
+let BG = ['#0a0a0a', '#2b2f36', '#7d838c', '#e8e8e8'], bgi = 0;
+const rad = () => rot * Math.PI / 180;
+function w2s(x, y) {
+  const c = Math.cos(rad()), s = Math.sin(rad()), mx = x * mir;
+  return { x: tx + scale * (mx * c - y * s), y: ty + scale * (mx * s + y * c) };
+}
+function s2w(cx, cy) {
+  const r = wrap.getBoundingClientRect();
+  const dx = (cx - r.left - tx) / scale, dy = (cy - r.top - ty) / scale;
+  const c = Math.cos(rad()), s = Math.sin(rad());
+  return { x: (dx * c + dy * s) * mir, y: -dx * s + dy * c };
+}
+function centerOn(x, y) {
+  const r = wrap.getBoundingClientRect();
+  const c = Math.cos(rad()), s = Math.sin(rad()), mx = x * mir;
+  tx = r.width / 2 - scale * (mx * c - y * s);
+  ty = r.height / 2 - scale * (mx * s + y * c);
+}
+function fit() {
+  const r = wrap.getBoundingClientRect();
+  if (!r.width || !G) return;
+  const RW = (rot % 180 === 0) ? G.w : G.h, RH = (rot % 180 === 0) ? G.h : G.w;
+  scale = Math.min((r.width - 60) / RW, (r.height - 60) / RH);
+  centerOn(G.w / 2, G.h / 2);
+  draw();
+}
+
+// === Çizim ================================================================
+let vis = [];                 // katman görünürlüğü
+let selComp = null, selComps = [], selNet = -1, padLabels = true;
+let topLayer = -1;          // "↑" ile en üste alınan katman (-1 = normal sıra)
+// selComp: popup'taki komponent (tekil) · selComps: vurgulanan tüm komponentler
+// (BOM grubu seçiminde bir grubun TAMAMI aynı anda vurgulanır)
+let mPts = [], mPrev = null, measureOn = false;
+let byLayer = [];             // katman → {tracks, arcs, pads, regions, texts}
+
+function prep() {
+  byLayer = G.layers.map(() => ({ tracks: [], arcs: [], pads: [], regions: [], texts: [], stexts: [] }));
+  G.tracks.forEach(t => byLayer[t[0]].tracks.push(t));
+  G.arcs.forEach(a => byLayer[a[0]].arcs.push(a));
+  G.pads.forEach(p => byLayer[p[0]].pads.push(p));
+  G.regions.forEach(r => byLayer[r[0]].regions.push(r));
+  G.texts.forEach(t => byLayer[t[0]].texts.push(t));
+  (G.stexts || []).forEach(t => byLayer[t[0]].stexts.push(t));
+  vis = G.layers.map(l => !!l.on);
+}
+function padPath(p) {                       // pad şekli (1 yuvarlak, 2 dik., 3 sekizgen, 9 yuv.dik.)
+  const [, x, y, w, h, sh, r] = p;
+  ctx.save(); ctx.translate(x, y); ctx.rotate(r * Math.PI / 180);
+  ctx.beginPath();
+  if (sh === 1 && Math.abs(w - h) < 1e-6) ctx.arc(0, 0, w / 2, 0, 7);
+  else if (sh === 1) {                      // oval (stadyum)
+    const rr = Math.min(w, h) / 2;
+    ctx.moveTo(-w / 2 + rr, -h / 2);
+    ctx.arcTo(w / 2, -h / 2, w / 2, h / 2, rr);
+    ctx.arcTo(w / 2, h / 2, -w / 2, h / 2, rr);
+    ctx.arcTo(-w / 2, h / 2, -w / 2, -h / 2, rr);
+    ctx.arcTo(-w / 2, -h / 2, w / 2, -h / 2, rr);
+  } else if (sh === 9) {
+    const rr = Math.min(w, h) * 0.25;
+    ctx.moveTo(-w / 2 + rr, -h / 2);
+    ctx.arcTo(w / 2, -h / 2, w / 2, h / 2, rr);
+    ctx.arcTo(w / 2, h / 2, -w / 2, h / 2, rr);
+    ctx.arcTo(-w / 2, h / 2, -w / 2, -h / 2, rr);
+    ctx.arcTo(-w / 2, -h / 2, w / 2, -h / 2, rr);
+  } else if (sh === 3) {                    // sekizgen
+    const a = Math.min(w, h) * 0.29;
+    ctx.moveTo(-w / 2 + a, -h / 2); ctx.lineTo(w / 2 - a, -h / 2);
+    ctx.lineTo(w / 2, -h / 2 + a); ctx.lineTo(w / 2, h / 2 - a);
+    ctx.lineTo(w / 2 - a, h / 2); ctx.lineTo(-w / 2 + a, h / 2);
+    ctx.lineTo(-w / 2, h / 2 - a); ctx.lineTo(-w / 2, -h / 2 + a);
+  } else ctx.rect(-w / 2, -h / 2, w, h);
+  ctx.closePath(); ctx.fill();
+  ctx.restore();
+}
+function polyPath(pts) {
+  ctx.moveTo(pts[0], pts[1]);
+  for (let i = 2; i < pts.length; i += 2) ctx.lineTo(pts[i], pts[i + 1]);
+  ctx.closePath();
+}
+function drawLayer(li, netOnly) {
+  const L = G.layers[li], B = byLayer[li];
+  ctx.fillStyle = L.color; ctx.strokeStyle = L.color;
+  ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+  // bakır dolgu (pour) yarı saydam → üstündeki izler/pad'ler belirgin kalsın
+  if (B.regions.length) {
+    ctx.save();
+    ctx.globalAlpha = (L.role === 'copper' || L.role === 'inner') ? 0.55 : 0.8;
+    B.regions.forEach(r => {
+      if (netOnly >= 0 && r[1] !== netOnly) return;
+      ctx.beginPath(); polyPath(r[2]);
+      (r[3] || []).forEach(h => polyPath(h));
+      ctx.fill('evenodd');
+    });
+    ctx.restore();
+  }
+  let cw = -1;
+  B.tracks.forEach(t => {
+    if (netOnly >= 0 && t[6] !== netOnly) return;
+    if (t[5] !== cw) { if (cw >= 0) ctx.stroke(); cw = t[5]; ctx.lineWidth = cw; ctx.beginPath(); }
+    ctx.moveTo(t[1], t[2]); ctx.lineTo(t[3], t[4]);
+  });
+  if (cw >= 0) ctx.stroke();
+  B.arcs.forEach(a => {
+    if (netOnly >= 0 && a[7] !== netOnly) return;
+    ctx.lineWidth = a[6] || 0.05;
+    ctx.beginPath();
+    // Y ters çevrildiği için açı yönü de ters (Altium CCW → canvas CW)
+    ctx.arc(a[1], a[2], a[3], -a[5] * Math.PI / 180, -a[4] * Math.PI / 180);
+    ctx.stroke();
+  });
+  B.pads.forEach(p => { if (netOnly < 0 || p[8] === netOnly) padPath(p); });
+  if (netOnly < 0) {
+    B.texts.forEach(t => {                 // TrueType: glif poligonlari (dolgu)
+      ctx.beginPath();
+      t[1].forEach(poly => polyPath(poly));
+      ctx.fill('evenodd');
+    });
+    B.stexts.forEach(t => {                // Stroke font: cizgi parcalari (kalem)
+      ctx.lineWidth = t[1];
+      ctx.beginPath();
+      const s = t[2];
+      for (let i = 0; i < s.length; i += 4) { ctx.moveTo(s[i], s[i+1]); ctx.lineTo(s[i+2], s[i+3]); }
+      ctx.stroke();
+    });
+  }
+}
+function draw() {
+  if (!G) return;
+  const r = wrap.getBoundingClientRect();
+  const dpr = Math.min(window.devicePixelRatio || 1, 2);
+  if (cv.width !== Math.round(r.width * dpr) || cv.height !== Math.round(r.height * dpr)) {
+    cv.width = Math.round(r.width * dpr); cv.height = Math.round(r.height * dpr);
+  }
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  ctx.fillStyle = BG[bgi]; ctx.fillRect(0, 0, r.width, r.height);
+  ctx.save();
+  ctx.translate(tx, ty); ctx.scale(scale * mir, scale); ctx.rotate(rad() * mir);
+  // board gövdesi (FR4)
+  ctx.beginPath(); polyPath(G.outline);
+  ctx.fillStyle = '#0e3b21'; ctx.fill();
+  ctx.strokeStyle = '#c8b400'; ctx.lineWidth = 0.15; ctx.stroke();
+  // Çizim sırası = katman sırası; "↑" ile seçilen katman EN SONA alınır
+  // (canvas'ta sonra çizilen üstte kalır).
+  G.layers.forEach((L, i) => { if (vis[i] && i !== topLayer) drawLayer(i, -1); });
+  if (topLayer >= 0 && vis[topLayer]) drawLayer(topLayer, -1);
+  // delikler en üstte (pad/via içleri)
+  ctx.fillStyle = '#0b0b0b';
+  G.vias.forEach(v => { if (v[3] > 0) { ctx.beginPath(); ctx.arc(v[0], v[1], v[3] / 2, 0, 7); ctx.fill(); } });
+  G.pads.forEach(p => { if (p[7] > 0) { ctx.beginPath(); ctx.arc(p[1], p[2], p[7] / 2, 0, 7); ctx.fill(); } });
+  // net vurgusu: board karartılır, net parlak renkte tekrar çizilir
+  if (selNet >= 0) {
+    ctx.fillStyle = 'rgba(0,0,0,0.62)';
+    ctx.beginPath(); polyPath(G.outline); ctx.fill();
+    ctx.save(); ctx.globalCompositeOperation = 'lighter';
+    G.layers.forEach((L, i) => { if (vis[i]) drawLayer(i, selNet); });
+    ctx.restore();
+    G.vias.forEach(v => {
+      if (v[4] !== selNet) return;
+      ctx.fillStyle = '#ffd54f'; ctx.beginPath(); ctx.arc(v[0], v[1], v[2] / 2, 0, 7); ctx.fill();
+    });
+  }
+  ctx.restore();
+  drawOverlay(r);
+  stat.textContent = (G.tracks.length + G.pads.length + G.vias.length) + ' primitif · '
+    + scale.toFixed(1) + ' px/mm' + (rot ? ' · ' + rot + '°' : '') + (mir < 0 ? ' · ayna' : '');
+}
+// Ekran uzayında çizilenler: seçim kutusu, pad etiketleri, ölçüm
+function drawOverlay(r) {
+  ctx.save();
+  if (selComps.length) {
+    ctx.textAlign = 'left'; ctx.textBaseline = 'alphabetic';
+    selComps.forEach(d => {
+      const c = G.comps.find(x => x.d === d);
+      if (!c || !c.b) return;
+      const p = [w2s(c.b[0], c.b[1]), w2s(c.b[2], c.b[1]), w2s(c.b[2], c.b[3]), w2s(c.b[0], c.b[3])];
+      const x0 = Math.min(...p.map(q => q.x)) - 3, y0 = Math.min(...p.map(q => q.y)) - 3;
+      const x1 = Math.max(...p.map(q => q.x)) + 3, y1 = Math.max(...p.map(q => q.y)) + 3;
+      ctx.strokeStyle = '#00e5ff'; ctx.lineWidth = 1.8;
+      ctx.strokeRect(x0, y0, x1 - x0, y1 - y0);
+      ctx.font = 'bold 12px Consolas,monospace';
+      ctx.strokeStyle = '#04222a'; ctx.lineWidth = 3;
+      ctx.strokeText(d, x0, y0 - 4);
+      ctx.fillStyle = '#00e5ff'; ctx.fillText(d, x0, y0 - 4);
+    });
+    // Tek komponent seçiliyse pin 1'i sarı halkayla işaretle (iBOM'daki
+    // "highlight first pin" — kutup/yön kontrolünü kolaylaştırır)
+    if (selComps.length === 1) {
+      const c = G.comps.find(x => x.d === selComps[0]);
+      const p1 = c && G.pads.find(p => p[9] === c.i && (p[10] === '1' || p[10] === 'A1'));
+      if (p1) {
+        const s = w2s(p1[1], p1[2]);
+        ctx.strokeStyle = '#ffd54f'; ctx.lineWidth = 1.8;
+        ctx.beginPath();
+        ctx.arc(s.x, s.y, Math.max(4, Math.max(p1[3], p1[4]) * scale / 2 + 2), 0, 7);
+        ctx.stroke();
+      }
+    }
+  }
+  if (padLabels && scale > 28) {
+    ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    G.pads.forEach(p => {
+      const s = w2s(p[1], p[2]);
+      if (s.x < -20 || s.y < -20 || s.x > r.width + 20 || s.y > r.height + 20) return;
+      const px = Math.min(p[3], p[4]) * scale;
+      if (px < 9) return;
+      const fs = Math.max(6, Math.min(px * 0.42, 15));
+      const net = p[8] >= 0 ? G.nets[p[8]] : '';
+      ctx.font = 'bold ' + fs + 'px Consolas,monospace';
+      ctx.strokeStyle = '#000'; ctx.lineWidth = fs * 0.3; ctx.fillStyle = '#fff';
+      const dy = net ? -fs * 0.55 : 0;
+      ctx.strokeText(p[10], s.x, s.y + dy); ctx.fillText(p[10], s.x, s.y + dy);
+      if (net) {
+        ctx.font = (fs * 0.82) + 'px Consolas,monospace';
+        ctx.strokeText(net, s.x, s.y + fs * 0.6); ctx.fillText(net, s.x, s.y + fs * 0.6);
+      }
+    });
+  }
+  const pts = mPts.slice();
+  if (pts.length === 1 && mPrev) pts.push(mPrev);
+  if (pts.length === 2) {
+    const a = w2s(pts[0].x, pts[0].y), b = w2s(pts[1].x, pts[1].y);
+    const d = Math.hypot(pts[1].x - pts[0].x, pts[1].y - pts[0].y);
+    ctx.strokeStyle = '#ffeb3b'; ctx.lineWidth = 1.6;
+    ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y); ctx.stroke();
+    [a, b].forEach(q => { ctx.beginPath(); ctx.arc(q.x, q.y, 3.5, 0, 7); ctx.stroke(); });
+    const txt = d.toFixed(3) + ' mm (' + (d / 0.0254).toFixed(1) + ' mil)';
+    ctx.font = 'bold 12px Consolas,monospace'; ctx.textAlign = 'center';
+    ctx.strokeStyle = '#1a1a00'; ctx.lineWidth = 3;
+    ctx.strokeText(txt, (a.x + b.x) / 2, (a.y + b.y) / 2 - 6);
+    ctx.fillStyle = '#ffeb3b'; ctx.fillText(txt, (a.x + b.x) / 2, (a.y + b.y) / 2 - 6);
+    info.textContent = 'Ölçüm: ' + txt + ' · Δx ' + (pts[1].x - pts[0].x).toFixed(3)
+                     + ' Δy ' + (pts[1].y - pts[0].y).toFixed(3) + ' · Esc kapatır';
+  }
+  ctx.restore();
+}
+
+// === Hit-test =============================================================
+function compAt(w) {
+  let best = null, ba = 1e18;
+  G.comps.forEach(c => {
+    if (!c.b) return;
+    if (w.x < c.b[0] || w.x > c.b[2] || w.y < c.b[1] || w.y > c.b[3]) return;
+    const a = (c.b[2] - c.b[0]) * (c.b[3] - c.b[1]);
+    if (a < ba) { ba = a; best = c; }
+  });
+  return best;
+}
+function segDist(px, py, x1, y1, x2, y2) {
+  const dx = x2 - x1, dy = y2 - y1, L = dx * dx + dy * dy;
+  let t = L ? ((px - x1) * dx + (py - y1) * dy) / L : 0;
+  t = Math.max(0, Math.min(1, t));
+  return Math.hypot(px - (x1 + t * dx), py - (y1 + t * dy));
+}
+function netAt(w) {
+  const tol = 3 / scale;
+  for (const p of G.pads) {
+    if (p[8] < 0) continue;
+    if (Math.abs(w.x - p[1]) <= p[3] / 2 + tol && Math.abs(w.y - p[2]) <= p[4] / 2 + tol) return p[8];
+  }
+  for (const v of G.vias) {
+    if (v[4] >= 0 && Math.hypot(w.x - v[0], w.y - v[1]) <= v[2] / 2 + tol) return v[4];
+  }
+  let best = -1, bd = 1e9;
+  G.tracks.forEach(t => {
+    if (t[6] < 0 || !vis[t[0]]) return;
+    const d = segDist(w.x, w.y, t[1], t[2], t[3], t[4]) - t[5] / 2;
+    if (d < bd && d <= tol) { bd = d; best = t[6]; }
+  });
+  return best;
+}
+function padAt(w) {                       // ölçümde merkeze yapışma
+  const tol = 6 / scale;
+  let best = null, bd = 1e9;
+  for (const p of G.pads) {
+    const d = Math.hypot(w.x - p[1], w.y - p[2]);
+    if (d < bd && (Math.abs(w.x - p[1]) <= p[3] / 2 + tol) && (Math.abs(w.y - p[2]) <= p[4] / 2 + tol)) {
+      bd = d; best = p;
+    }
+  }
+  for (const v of G.vias) {
+    const d = Math.hypot(w.x - v[0], w.y - v[1]);
+    if (d < bd && d <= v[2] / 2 + tol) { bd = d; best = [0, v[0], v[1]]; }
+  }
+  return best;
+}
+
+// === Etkileşim ============================================================
+let dragging = false, lx = 0, ly = 0, moved = false;
+wrap.addEventListener('mousedown', e => {
+  if (gTouchActive()) return;
+  dragging = true; moved = false; lx = e.clientX; ly = e.clientY;
+});
+window.addEventListener('mousemove', e => {
+  if (!dragging) return;
+  if (Math.abs(e.clientX - lx) > 2 || Math.abs(e.clientY - ly) > 2) moved = true;
+  tx += e.clientX - lx; ty += e.clientY - ly; lx = e.clientX; ly = e.clientY;
+  draw();
+});
+window.addEventListener('mouseup', () => { dragging = false; });
+wrap.addEventListener('wheel', e => {
+  e.preventDefault();
+  const r = wrap.getBoundingClientRect(), mx = e.clientX - r.left, my = e.clientY - r.top;
+  const f = e.deltaY < 0 ? 1.15 : 1 / 1.15, old = scale;
+  scale = Math.max(0.2, Math.min(400, scale * f));
+  tx = mx - (mx - tx) * (scale / old); ty = my - (my - ty) * (scale / old);
+  draw();
+}, { passive: false });
+wrap.addEventListener('mousemove', e => {
+  if (measureOn && mPts.length === 1) {
+    const w = s2w(e.clientX, e.clientY), p = padAt(w);
+    mPrev = p ? { x: p[1], y: p[2] } : w;
+    draw();
+  }
+});
+wrap.addEventListener('click', e => {
+  if (moved) return;
+  const w = s2w(e.clientX, e.clientY);
+  if (measureOn) {
+    if (mPts.length >= 2) mPts = [];
+    const p = padAt(w);
+    mPts.push(p ? { x: p[1], y: p[2], snap: true } : w);
+    mPrev = null; draw(); return;
+  }
+  const c = compAt(w);
+  if (c) { showComp(c.d); crossOut(c.d); }
+  else { selComp = null; selComps = []; selNet = -1; popup.classList.remove('open'); info.textContent = INFO_DEFAULT; draw(); }
+});
+wrap.addEventListener('dblclick', e => {
+  if (measureOn) return;
+  const n = netAt(s2w(e.clientX, e.clientY));
+  if (n >= 0) selectNet(n);
+});
+installGesture(wrap, {
+  down: () => { moved = false; },
+  start: () => { moved = true; },
+  pan: (dx, dy) => { tx += dx; ty += dy; draw(); },
+  pinch: (f, cx, cy, mdx, mdy) => {
+    const r = wrap.getBoundingClientRect(), mx = cx - r.left, my = cy - r.top, old = scale;
+    scale = Math.max(0.2, Math.min(400, scale * f));
+    tx = mx - (mx - tx) * (scale / old) + mdx;
+    ty = my - (my - ty) * (scale / old) + mdy;
+    draw();
+  }
+});
+
+// === Paneller =============================================================
+function esc(s) { return String(s).replace(/[&<>"]/g, c => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;' })[c]); }
+function netKind(n) {
+  const s = n.toUpperCase();
+  if (/^A?GND/.test(s) || s === 'VSS' || /GND$/.test(s)) return 'ground';
+  if (/^[+\-]?\d*\.?\d+V/.test(s) || /^V(CC|DD|IN|OUT|BAT|REF|SS)/.test(s) || /^\+/.test(s)) return 'power';
+  return 'signal';
+}
+let netTypeF = '', qs = '';
+function renderLayers() {
+  document.getElementById('p-layers').innerHTML = G.layers.map((l, i) =>
+    '<div class="layer-item' + (vis[i] ? '' : ' off') + '" data-i="' + i + '">'
+    + '<span class="sw" style="background:' + l.color + '"></span>'
+    + '<span class="ln">' + esc(l.name) + '</span>'
+    + '<button class="ltop' + (topLayer === i ? ' on' : '') + '" data-top="' + i
+    + '" title="Bu katmanı en üste getir (tekrar bas: normal sıra)">&#8593;</button>'
+    + '<span class="lc">&#10003;</span></div>').join('');
+}
+function renderNets() {
+  const q = qs.toLowerCase();
+  const cnt = {};
+  G.pads.forEach(p => { if (p[8] >= 0) cnt[p[8]] = (cnt[p[8]] || 0) + 1; });
+  let html = '', n = 0;
+  G.nets.forEach((nm, i) => {
+    if (!nm) return;
+    const k = netKind(nm);
+    if (netTypeF && k !== netTypeF) return;
+    if (q && nm.toLowerCase().indexOf(q) < 0) return;
+    n++;
+    html += '<div class="row ' + k + (selNet === i ? ' sel' : '') + '" data-net="' + i + '">'
+         + '<span class="nm">' + esc(nm) + '</span><span class="ct">' + (cnt[i] || 0) + ' pad</span></div>';
+  });
+  document.getElementById('p-nets').innerHTML = n ? html : '<div class="empty">eşleşen yok</div>';
+}
+function renderComps() {
+  const q = qs.toLowerCase();
+  let html = '', n = 0;
+  G.comps.slice().sort((a, b) => a.d.localeCompare(b.d, undefined, { numeric: true })).forEach(c => {
+    if (q && c.d.toLowerCase().indexOf(q) < 0
+        && ((COMP_INFO[c.d] || {}).value || '').toLowerCase().indexOf(q) < 0) return;
+    n++;
+    html += '<div class="row' + (selComp === c.d ? ' sel' : '') + '" data-comp="' + esc(c.d) + '">'
+         + '<span class="nm">' + esc(c.d) + '</span><span class="ct">'
+         + esc((COMP_INFO[c.d] || {}).value || '') + ' · ' + c.l[0] + '</span></div>';
+  });
+  document.getElementById('p-comps').innerHTML = n ? html : '<div class="empty">eşleşen yok</div>';
+}
+document.getElementById('p-layers').addEventListener('click', e => {
+  const tb = e.target.closest('.ltop');
+  if (tb) {                                  // ↑ : bu katmanı en üste getir
+    const i = +tb.dataset.top;
+    topLayer = (topLayer === i) ? -1 : i;     // tekrar basınca normal sıraya dön
+    if (topLayer >= 0) vis[topLayer] = true;
+    renderLayers(); draw();
+    info.textContent = topLayer >= 0
+      ? G.layers[topLayer].name + ' en üstte' : 'Katman sırası normal';
+    return;
+  }
+  const it = e.target.closest('.layer-item'); if (!it) return;
+  const i = +it.dataset.i; vis[i] = !vis[i]; renderLayers(); draw();
+});
+document.getElementById('p-nets').addEventListener('click', e => {
+  const r = e.target.closest('.row'); if (!r) return;
+  selectNet(+r.dataset.net);
+});
+document.getElementById('p-comps').addEventListener('click', e => {
+  const r = e.target.closest('.row'); if (!r) return;
+  showComp(r.dataset.comp); crossOut(r.dataset.comp);
+});
+document.querySelectorAll('.sb-tab').forEach(tb => tb.onclick = () => {
+  document.querySelectorAll('.sb-tab').forEach(x => x.classList.toggle('active', x === tb));
+  ['p-layers', 'p-nets', 'p-comps', 'p-bom'].forEach(p =>
+    document.getElementById(p).classList.toggle('hidden', p !== tb.dataset.p));
+  document.getElementById('chips').classList.toggle('hidden', tb.dataset.p !== 'p-nets');
+  if (tb.dataset.p === 'p-nets') renderNets();
+  if (tb.dataset.p === 'p-comps') renderComps();
+  if (tb.dataset.p === 'p-bom') bomRender();
+});
+document.querySelectorAll('#chips .chip').forEach(ch => ch.onclick = () => {
+  netTypeF = ch.dataset.nf;
+  document.querySelectorAll('#chips .chip').forEach(x => x.classList.toggle('active', x === ch));
+  renderNets();
+});
+document.getElementById('q').addEventListener('input', e => {
+  qs = e.target.value; renderNets(); renderComps(); bomRender();
+});
+function selectNet(i) {
+  selNet = i; selComp = null; selComps = [];
+  popup.classList.remove('open');
+  info.textContent = 'Net: ' + G.nets[i] + ' · Esc temizler';
+  renderNets(); draw();
+}
+function showComp(d) {
+  const c = G.comps.find(x => x.d === d);
+  if (!c) return;
+  selComp = d; selComps = [d]; selNet = -1;
+  setSb(true);
+  document.getElementById('pd').textContent = d;
+  const inf = COMP_INFO[d] || {};
+  const row = (k, v) => v ? '<div class="pr"><span class="pk">' + k + '</span><span class="pv">' + esc(v) + '</span></div>' : '';
+  document.getElementById('pbody').innerHTML =
+    row('Değer', inf.value) + row('Açıklama', inf.description) + row('Şema Sayfası', inf.sheet)
+    + row('Footprint', c.fp) + row('Katman', c.l)
+    + row('Konum (mm)', 'X=' + c.x.toFixed(2) + ' Y=' + c.y.toFixed(2))
+    + (c.r ? row('Dönüş', c.r + '°') : '');
+  popup.classList.add('open');
+  // görünürde değilse ortala
+  const s = w2s(c.x, c.y), r = wrap.getBoundingClientRect();
+  if (s.x < 0 || s.y < 0 || s.x > r.width || s.y > r.height) centerOn(c.x, c.y);
+  renderComps(); bomMark(d); draw();
+}
+document.getElementById('pclose').onclick = () => {
+  popup.classList.remove('open'); selComp = null; selComps = []; draw();
+};
+
+// === Toolbar / kısayollar =================================================
+const sb = document.getElementById('sidebar');
+function setSb(open) {
+  sb.classList.toggle('collapsed', !open);
+  document.getElementById('sb-toggle').textContent = open ? '\u25C2' : '\u25B8';
+}
+document.getElementById('sb-toggle').onclick = () => setSb(sb.classList.contains('collapsed'));
+function zoomBy(f) {
+  const r = wrap.getBoundingClientRect(), old = scale;
+  scale = Math.max(0.2, Math.min(400, scale * f));
+  tx = r.width / 2 - (r.width / 2 - tx) * (scale / old);
+  ty = r.height / 2 - (r.height / 2 - ty) * (scale / old);
+  draw();
+}
+function setOrient(nr, nm) {
+  const r = wrap.getBoundingClientRect();
+  const c = s2w(r.left + r.width / 2, r.top + r.height / 2);
+  rot = ((nr % 360) + 360) % 360; mir = nm;
+  centerOn(c.x, c.y);
+  document.getElementById('b-mir').classList.toggle('active', mir === -1);
+  draw();
+}
+function setMeasure(on) {
+  measureOn = on;
+  document.getElementById('b-meas').classList.toggle('active', on);
+  if (!on) { mPts = []; mPrev = null; info.textContent = INFO_DEFAULT; }
+  else info.textContent = 'Ölçüm: iki noktaya tıkla (pad merkezine yapışır) · Esc iptal';
+  draw();
+}
+document.getElementById('b-in').onclick = () => zoomBy(1.35);
+document.getElementById('b-out').onclick = () => zoomBy(1 / 1.35);
+document.getElementById('b-fit').onclick = () => fit();
+document.getElementById('b-rot').onclick = () => setOrient(rot + 90, mir);
+document.getElementById('b-mir').onclick = () => setOrient(rot, -mir);
+document.getElementById('b-meas').onclick = () => setMeasure(!measureOn);
+document.getElementById('b-pin').onclick = () => {
+  padLabels = !padLabels;
+  document.getElementById('b-pin').classList.toggle('active', padLabels);
+  draw();
+};
+document.getElementById('b-bg').onclick = () => { bgi = (bgi + 1) % BG.length; draw(); };
+// Üst/Alt: "Top ..." katmanlarını aç, "Bottom ..." olanları kapat (ve tersi).
+// Katman adına göre çalışır; taraf bilgisi taşımayanlara (Multi-Layer, Keepout,
+// mekanik) DOKUNMAZ — SVG sürümündeki flip ile aynı semantik.
+let showingTop = true;
+document.getElementById('b-flip').onclick = () => {
+  showingTop = !showingTop;
+  G.layers.forEach((l, i) => {
+    const n = l.name.toUpperCase();
+    if (n.startsWith('TOP')) vis[i] = showingTop;
+    else if (n.startsWith('BOTTOM')) vis[i] = !showingTop;
+  });
+  renderLayers(); draw();
+  info.textContent = showingTop ? 'Üst katmanlar' : 'Alt katmanlar';
+};
+document.getElementById('b-all').onclick = () => {
+  vis = vis.map(() => true); renderLayers(); draw();
+};
+document.getElementById('b-none').onclick = () => {
+  vis = vis.map(() => false); renderLayers(); draw();
+};
+document.getElementById('b-png').onclick = () => {
+  cv.toBlob(b => {
+    if (!b) return;
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(b); a.download = PROJECT + '_pcb.png'; a.click();
+    setTimeout(() => URL.revokeObjectURL(a.href), 5000);
+    info.textContent = 'PNG indirildi (' + cv.width + '×' + cv.height + ')';
+  }, 'image/png');
+};
+const help = document.getElementById('help');
+document.getElementById('b-help').onclick = () => help.classList.add('open');
+document.getElementById('hclose').onclick = () => help.classList.remove('open');
+help.addEventListener('click', e => { if (e.target === help) help.classList.remove('open'); });
+window.addEventListener('keydown', e => {
+  if (document.activeElement === document.getElementById('q')) {
+    if (e.key === 'Escape') document.getElementById('q').blur();
+    return;
+  }
+  const k = e.key.toLowerCase();
+  if (e.key === 'Escape') {
+    if (help.classList.contains('open')) { help.classList.remove('open'); return; }
+    if (measureOn) { setMeasure(false); return; }
+    selComp = null; selComps = []; selNet = -1; popup.classList.remove('open');
+    info.textContent = INFO_DEFAULT; renderNets(); draw();
+  }
+  else if (k === 'f') fit();
+  else if (k === 'b') setSb(sb.classList.contains('collapsed'));
+  else if (k === 'm') setMeasure(!measureOn);
+  else if (k === 'r') setOrient(rot + 90, mir);
+  else if (k === 'x') setOrient(rot, -mir);
+  else if (k === 'p') document.getElementById('b-pin').click();
+  else if (k === 't') document.getElementById('b-flip').click();
+  else if (e.key === '?') help.classList.toggle('open');
+  else if (e.key === '/') { e.preventDefault(); document.getElementById('q').focus(); }
+});
+
+// === BOM · Montaj paneli ==================================================
+// SVG goruntuleyicideki panelin ayni islevi: komponentler DEGER + FOOTPRINT
+// ikilisine gore gruplanir; satira tikla -> grubun TUM komponentleri board'da
+// vurgulanir; checkbox montajda "yerlestirildi" isaretidir (localStorage).
+// Anahtar bicimi SVG surumuyle AYNI ("deger\u0000footprint") -> iki goruntuleyici
+// ayni montaj durumunu paylasir, disa aktarilan dosyalar birbiriyle uyumludur.
+const BOM_KEY = 'schviz-bom:' + PROJECT;
+let bomState = {}, bomFilter = '';
+try { bomState = JSON.parse(localStorage.getItem(BOM_KEY) || '{}'); } catch (e) { bomState = {}; }
+function bomSave() { try { localStorage.setItem(BOM_KEY, JSON.stringify(bomState)); } catch (e) {} }
+let BOM_GROUPS = [], BOM_TOTAL = 0;
+function bomBuild() {
+  const m = new Map();
+  G.comps.forEach(c => {
+    const val = ((COMP_INFO[c.d] || {}).value || '').trim(), fp = (c.fp || '').trim();
+    const key = val + '\u0000' + fp;
+    let g = m.get(key);
+    if (!g) { g = { key: key, val: val, fp: fp, desigs: [], top: 0, bot: 0 }; m.set(key, g); }
+    g.desigs.push(c.d);
+    if (c.l === 'BOTTOM') g.bot++; else g.top++;
+  });
+  const nat = (a, b) => a.localeCompare(b, undefined, { numeric: true });
+  BOM_GROUPS = [...m.values()];
+  BOM_GROUPS.forEach(g => g.desigs.sort(nat));
+  BOM_GROUPS.sort((a, b) => b.desigs.length - a.desigs.length || nat(a.val, b.val));
+  BOM_TOTAL = G.comps.length;
+}
+function bomProg() {
+  let done = 0;
+  BOM_GROUPS.forEach(g => { if (bomState[g.key]) done += g.desigs.length; });
+  document.getElementById('bom-done').textContent = done;
+  document.getElementById('bom-total').textContent = BOM_TOTAL;
+}
+function bomRender() {
+  if (!G) return;
+  const q = qs.trim().toLowerCase();
+  let html = '', n = 0;
+  BOM_GROUPS.forEach((g, i) => {
+    if (bomFilter === 'TOP' && !g.top) return;
+    if (bomFilter === 'BOTTOM' && !g.bot) return;
+    if (bomFilter === 'todo' && bomState[g.key]) return;
+    if (q && !(g.val.toLowerCase().indexOf(q) >= 0 || g.fp.toLowerCase().indexOf(q) >= 0
+               || g.desigs.some(d => d.toLowerCase().indexOf(q) >= 0))) return;
+    n++;
+    const done = !!bomState[g.key];
+    html += '<div class="brow' + (done ? ' done' : '') + '" data-i="' + i + '">'
+         + '<span class="bchk">' + (done ? '\u2713' : '') + '</span>'
+         + '<span class="bq">' + g.desigs.length + '</span>'
+         + '<span class="bm"><span class="bv">' + esc(g.val || '(deger yok)') + '</span>'
+         + (g.fp ? ' <span class="bf">' + esc(g.fp) + '</span>' : '')
+         + '<div class="bd">' + esc(g.desigs.join(', ')) + '</div></span></div>';
+  });
+  document.getElementById('bom-list').innerHTML = n ? html : '<div class="empty">eslesen yok</div>';
+  bomProg();
+}
+document.getElementById('bom-list').addEventListener('click', e => {
+  const row = e.target.closest('.brow');
+  if (!row) return;
+  const g = BOM_GROUPS[+row.dataset.i];
+  if (e.target.classList.contains('bchk')) {        // montaj isareti
+    if (bomState[g.key]) delete bomState[g.key]; else bomState[g.key] = 1;
+    bomSave(); bomRender();
+    return;
+  }
+  document.querySelectorAll('.brow.sel').forEach(r => r.classList.remove('sel'));
+  row.classList.add('sel');
+  if (g.desigs.length === 1) { showComp(g.desigs[0]); crossOut(g.desigs[0]); return; }
+  selComps = g.desigs.slice(); selComp = null; selNet = -1;
+  popup.classList.remove('open');
+  let x0 = 1e9, y0 = 1e9, x1 = -1e9, y1 = -1e9;   // grubun tamamini kapsa
+  selComps.forEach(d => {
+    const c = G.comps.find(x => x.d === d);
+    if (!c || !c.b) return;
+    x0 = Math.min(x0, c.b[0]); y0 = Math.min(y0, c.b[1]);
+    x1 = Math.max(x1, c.b[2]); y1 = Math.max(y1, c.b[3]);
+  });
+  if (x0 < x1) centerOn((x0 + x1) / 2, (y0 + y1) / 2);
+  info.textContent = g.desigs.length + ' komponent vurgulandi (' + (g.val || '-') + ')';
+  draw();
+});
+// Board'da komponent secilince BOM satirini da isaretle
+function bomMark(d) {
+  const i = BOM_GROUPS.findIndex(g => g.desigs.indexOf(d) >= 0);
+  if (i < 0) return;
+  document.querySelectorAll('.brow.sel').forEach(r => r.classList.remove('sel'));
+  const row = document.querySelector('.brow[data-i="' + i + '"]');
+  if (row) { row.classList.add('sel'); row.scrollIntoView({ block: 'nearest' }); }
+}
+document.querySelectorAll('#bom-chips .chip').forEach(ch => ch.onclick = () => {
+  bomFilter = ch.dataset.bf;
+  document.querySelectorAll('#bom-chips .chip').forEach(x => x.classList.toggle('active', x === ch));
+  bomRender();
+});
+document.getElementById('bom-rst').onclick = () => {
+  if (!confirm('Tum montaj isaretleri silinsin mi?')) return;
+  bomState = {}; bomSave(); bomRender();
+};
+// Disa / ice aktarma: localStorage tarayiciya bagli oldugundan montaj durumunu
+// baska makineye/kisiye devretmenin tek yolu.
+document.getElementById('bom-exp').onclick = () => {
+  const items = BOM_GROUPS.filter(g => bomState[g.key])
+    .map(g => ({ key: g.key, value: g.val, footprint: g.fp, designators: g.desigs }));
+  const blob = new Blob([JSON.stringify({
+    project: PROJECT, total: BOM_TOTAL,
+    placed: items.reduce((s, i) => s + i.designators.length, 0), items: items }, null, 2)],
+    { type: 'application/json' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob); a.download = PROJECT + '_montaj.json'; a.click();
+  setTimeout(() => URL.revokeObjectURL(a.href), 5000);
+  info.textContent = items.length + ' grup dosyaya aktarildi';
+};
+document.getElementById('bom-imp').onclick = () => document.getElementById('bom-file').click();
+document.getElementById('bom-file').onchange = e => {
+  const f = e.target.files && e.target.files[0];
+  if (!f) return;
+  const rd = new FileReader();
+  rd.onload = () => {
+    let d = null;
+    try { d = JSON.parse(rd.result); } catch (err) {}
+    if (!d || !Array.isArray(d.items)) { info.textContent = 'Gecersiz dosya'; return; }
+    const known = new Set(BOM_GROUPS.map(g => g.key));
+    let ok = 0, miss = 0;
+    d.items.forEach(it => { if (known.has(it.key)) { bomState[it.key] = 1; ok++; } else miss++; });
+    bomSave(); bomRender();
+    info.textContent = ok + ' grup yuklendi' + (miss ? ' - ' + miss + ' grup bu boardda yok' : '');
+  };
+  rd.readAsText(f);
+  e.target.value = '';
+};
+
+// === Cross-probe (birleşik görünüm için) ==================================
+const IN_FRAME = window.parent && window.parent !== window;
+function crossOut(d) {
+  if (IN_FRAME) window.parent.postMessage({ type:'xprobe', source:'pcb', designator:d }, '*');
+}
+window.addEventListener('message', ev => {
+  const d = ev.data;
+  if (!d || d.type !== 'xprobe' || d.source === 'pcb' || !G) return;
+  let n = d.designator;
+  if (!G.comps.some(c => c.d === n)) {
+    const q = (n + '_').toUpperCase();
+    const c = G.comps.map(c => c.d).filter(x => x.toUpperCase().startsWith(q)).sort();
+    if (c.length) n = c[0];
+  }
+  showComp(n);
+});
+
+// === Yükleme ==============================================================
+async function gunzipB64(b64) {
+  const bin = Uint8Array.from(atob(b64), c => c.charCodeAt(0));
+  if (typeof DecompressionStream === 'undefined') return null;
+  const st = new Blob([bin]).stream().pipeThrough(new DecompressionStream('gzip'));
+  return await new Response(st).text();
+}
+(async function init() {
+  let txt = null;
+  try { txt = await gunzipB64(GEO_GZ); } catch (e) { txt = null; }
+  if (txt === null) {
+    info.textContent = 'Bu tarayıcı sıkıştırılmış geometriyi açamıyor (DecompressionStream gerekli).';
+    return;
+  }
+  G = JSON.parse(txt);
+  prep();
+  document.getElementById('dims').textContent =
+    G.w.toFixed(1) + '×' + G.h.toFixed(1) + 'mm · ' + G.comps.length + ' komponent · '
+    + G.nets.filter(Boolean).length + ' net';
+  bomBuild();
+  renderLayers(); renderNets(); renderComps(); bomRender();
+  if (window.innerWidth < 820) setSb(false);
+  fit();
+  new ResizeObserver(() => draw()).observe(wrap);
+})();
+</script>
+</body></html>
+"""
+
+
+def build_pcb_canvas_html(geo, comp_info, timestamp, project_name, pcb_name=""):
+    """@brief Geometri tabanlı (canvas) PCB görüntüleyici HTML'i üret.
+
+    @param geo extract_pcb_geometry() çıktısı
+    @param comp_info Şematikten gelen komponent bilgisi (değer/açıklama/sayfa)
+    @param timestamp Üretim saati
+    @param project_name Proje adı
+    @param pcb_name PcbDoc dosya adı
+    @return HTML metni
+    """
+    import gzip as _gzip, base64 as _b64
+    gz = _b64.b64encode(_gzip.compress(
+        json.dumps(geo, separators=(",", ":")).encode("utf-8"), 6)).decode()
+    return (_PCB_CANVAS_TPL
+            .replace("__MOBILE_META__", _MOBILE_META)
+            .replace("__GESTURE__", _GESTURE_JS)
+            .replace("__GEO_GZ__", gz)
+            .replace("__COMPINFO__", json.dumps(comp_info))
+            .replace("__PROJECTJSON__", json.dumps(project_name))
+            .replace("__PROJECT__", project_name)
+            .replace("__PCBNAME__", pcb_name or project_name)
+            .replace("__TIME__", timestamp))
+
+
+def generate_pcb_canvas_viewer(project_path, output_path, log=print, progress=None):
+    """@brief Geometri tabanlı PCB görüntüleyici üret (küçük dosya, akıcı zoom).
+
+    @details
+    Klasik `generate_pcb_viewer` katman SVG'lerini gömer (yüksek doğruluk, büyük
+    dosya). Bu üretici PCB'nin primitive geometrisini gömüp tarayıcıda canvas'a
+    çizer: BRK-210 için 8 MB yerine ~0.6 MB ve her zoom seviyesinde akıcı.
+
+    @param project_path Altium proje dosyası (.PrjPcb) yolu
+    @param output_path Çıktı HTML yolu
+    @param log Log callback'i
+    @param progress İlerleme callback'i (yüzde, etiket)
+    @return True/False
+    """
+    from altium_monkey.altium_pcbdoc import AltiumPcbDoc
+    prog = progress or (lambda p, l: None)
+    patch_altium_text_decoding()
+    prog(5, "PCB okunuyor")
+    paths = _resolve_pcbdoc_paths(project_path, log)
+    if not paths:
+        log("\n! PCB dosyası bulunamadı.")
+        return False
+    pcb_path = None
+    pcb = None
+    for p in paths:
+        try:
+            cand = AltiumPcbDoc.from_file(str(p))
+        except Exception as e:
+            log(f"  · {p.name} okunamadı: {e}")
+            continue
+        if getattr(cand, "components", None):
+            pcb, pcb_path = cand, p
+            break
+        if pcb is None:
+            pcb, pcb_path = cand, p
+    if pcb is None:
+        log("\n! PCB parse edilemedi.")
+        return False
+    log(f"\nPCB (geometri): {pcb_path.name}")
+    prog(35, "Geometri çıkarılıyor")
+    geo = extract_pcb_geometry(pcb, log)
+    if not geo.get("available"):
+        log("! Geometri çıkarılamadı.")
+        return False
+
+    comp_info = {}
+    try:
+        prog(65, "Şematik komponent bilgisi")
+        data = _collect_data(project_path, lambda m: None, with_pcb=False)
+        for c in data.get("components", []):
+            comp_info[c["designator"]] = {
+                "value": c.get("value", ""),
+                "description": c.get("description", ""),
+                "sheet": c.get("sheet_name", ""),
+            }
+    except Exception as e:
+        log(f"  · Şematik bilgisi alınamadı (yine de devam): {e}")
+
+    prog(85, "HTML oluşturuluyor")
+    ts = datetime.datetime.now().strftime("%H:%M:%S")
+    html = build_pcb_canvas_html(geo, comp_info, ts, Path(project_path).stem, pcb_path.name)
+    out = Path(output_path)
+    out.parent.mkdir(parents=True, exist_ok=True)
+    out.write_text(html, encoding="utf-8")
+    log(f"\n✓ PCB (geometri) görüntüleyici üretildi: {out}")
+    log(f"  build: {ts}  ({out.stat().st_size / 1024 / 1024:.2f} MB)")
+    prog(100, "Tamamlandı")
+    return True
 
 def generate_json(
     project_path: str,
@@ -5506,11 +7639,20 @@ def build_html(sheets, net_list, components, timestamp,
     max_x = max((s["x"] + s["w"] for s in sheets), default=2000) + 100
     max_y = max((s["y"] + s["h"] for s in sheets), default=1200) + 100
 
+    # Sayfa SVG'leri HTML'e HAM gömüldüğünde çıktı büyüyordu (BRK-210: 6.3 MB).
+    # PCB katmanlarındaki desenin aynısı: tüm sayfa SVG'leri tek gzip+base64
+    # blob'unda taşınır, açılışta DecompressionStream ile çözülüp .sheet-body
+    # içine enjekte edilir; ardından SVG'ye bağlı kurulumlar (tıklanabilir net /
+    # block / designator sınıfları, LOD bitmap'leri) çalıştırılır.
+    import gzip as _gzip, base64 as _b64
+    sheet_gz = _b64.b64encode(_gzip.compress(
+        json.dumps({str(s["id"]): s["svg"] for s in sheets},
+                   separators=(",", ":")).encode("utf-8"), 6)).decode()
     sheet_divs = "\n".join(
         f'<div class="sheet-card" id="sheet-{s["id"]}" data-sheet-id="{s["id"]}" '
         f'style="left:{s["x"]}px;top:{s["y"]}px;width:{s["w"]}px;height:{s["h"]}px;">'
         f'<div class="sheet-title">{s["name"]}</div>'
-        f'<div class="sheet-body">{s["svg"]}</div>'
+        f'<div class="sheet-body"></div>'
         f'</div>'
         for s in sheets
     )
@@ -5766,7 +7908,9 @@ def build_html(sheets, net_list, components, timestamp,
   #sch-hl-overlay .hl-text {{ fill:#00e5ff; font-family:Consolas,monospace;
     font-weight:bold; paint-order:stroke; stroke:#04222a; stroke-linejoin:round; }}
   @keyframes hlpulse {{ 0%,100%{{stroke-opacity:0.5}} 50%{{stroke-opacity:1}} }}
-  #toolbar {{ position:absolute; top:8px; right:8px; display:flex; gap:6px; z-index:200; }}
+  #toolbar {{ position:absolute; top:8px; right:8px; left:8px; display:flex; gap:6px;
+              z-index:200; flex-wrap:wrap; justify-content:flex-end;
+              align-items:flex-start; }}
   #sheet-jump {{ max-width:150px; appearance:auto; font-family:inherit; }}
   /* Fare ile üzerine gelince bilgi balonu (komponent/net/block) */
   #svg-tip {{ position:fixed; display:none; background:#111; color:#ddd;
@@ -5795,10 +7939,16 @@ def build_html(sheets, net_list, components, timestamp,
   #zoom-info {{ position:absolute; bottom:8px; left:50%; transform:translateX(-50%);
                 color:#666; font-size:11px; }}
   #brand {{ position:absolute; bottom:8px; right:12px; color:#444; font-size:10px; }}
-  #current-net {{ position:absolute; top:8px; left:50%; transform:translateX(-50%);
-                  color:{inter_color}; font-size:13px; font-weight:bold;
-                  background:rgba(0,0,0,0.6); padding:4px 10px; border-radius:3px;
-                  max-width:60%; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }}
+  /* Seçili net etiketi TOOLBAR'IN İÇİNDE akar (mutlak konumluyken "Sayfa…"
+     açılır menüsünün üstüne biniyordu; dar pencerede kaçınılmazdı). Flex
+     yerleşimi çakışmayı yapısal olarak engeller: toolbar sarınca etiket de
+     birlikte sarar. Boşken hiç görünmez. */
+  #current-net {{ align-self:center; color:{inter_color}; font-size:12px;
+                  font-weight:bold; background:rgba(0,0,0,0.6);
+                  padding:5px 10px; border-radius:3px; max-width:230px;
+                  white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
+                  pointer-events:none; }}
+  #current-net:empty {{ display:none; }}
   #detail-panel {{ position:absolute; bottom:0; left:0; right:0;
                    max-height:180px; background:rgba(20,20,20,0.97);
                    border-top:1px solid #444; overflow-y:auto; padding:8px 12px;
@@ -5854,7 +8004,7 @@ def build_html(sheets, net_list, components, timestamp,
     .tool-btn {{ padding:8px 11px; font-size:12px; }}
     #sheet-jump {{ max-width:120px; }}
     #shortcuts, #brand {{ display:none; }}
-    #current-net {{ max-width:70%; font-size:12px; }}
+    #current-net {{ max-width:150px; font-size:11px; }}
     .modal-content {{ min-width:0; width:92vw; padding:18px; }}
   }}
   /* Sürükleme tutamacı: dokunuşta tarayıcı kaydırması devreye girmesin */
@@ -5896,6 +8046,7 @@ def build_html(sheets, net_list, components, timestamp,
     {sheet_divs}
   </div>
   <div id="toolbar">
+    <div id="current-net"></div>
     <select id="sheet-jump" class="tool-btn" title="Sayfaya git"></select>
     <button class="tool-btn" id="zoom-in" title="Yaklaş ( + )">+</button>
     <button class="tool-btn" id="zoom-out" title="Uzaklaş ( − )">−</button>
@@ -5922,7 +8073,6 @@ def build_html(sheets, net_list, components, timestamp,
     <button class="tool-btn" id="reset-view">Reset</button>
     <button class="tool-btn" id="clear-sel">Clear</button>
   </div>
-  <div id="current-net"></div>
   <div id="zoom-info">Zoom <span id="zoom-val">0.30x</span></div>
   <div id="shortcuts">Esc clear · / search · 0 reset · F fit · <kbd style="background:#1a1a1a;padding:1px 4px;border:1px solid #555;border-radius:2px;color:#aaa">?</kbd> tüm kısayollar</div>
   <div id="brand">altium_monkey</div>
@@ -5995,9 +8145,15 @@ const PCB = {json.dumps({
 const NET_COLORS = ['{inter_color}', '#ff9800', '#e91e63', '#ffeb3b'];
 let INTRA_COLOR = '{intra_color}';
 
-document.querySelectorAll('.sheet-body svg').forEach(svg => {{
-  svg.setAttribute('preserveAspectRatio', 'none');
-}});
+// Sayfa SVG'leri gzip+base64 gömülü — script sonunda initSheets() çözüp
+// .sheet-body'lere enjekte eder, sonra SVG'ye bağlı kurulumları çalıştırır.
+const SHEET_GZ = "{sheet_gz}";
+async function gunzipB64(b64) {{
+  const bin = Uint8Array.from(atob(b64), c => c.charCodeAt(0));
+  if (typeof DecompressionStream === 'undefined') return null;
+  const st = new Blob([bin]).stream().pipeThrough(new DecompressionStream('gzip'));
+  return await new Response(st).text();
+}}
 
 const viewport = document.getElementById('viewport');
 const canvas = document.getElementById('canvas');
@@ -6030,7 +8186,12 @@ const LOD_ON = 0.85, LOD_OFF = 1.05;  // histerezis: girişte <ON, çıkışta >
 // zoom'da da gösterilir (harita uygulaması deseni: harekette yumuşak ama
 // akıcı, durunca keskin canlı SVG). Üst sınır: çok aşırı zoom'da bitmap
 // çirkinleşir + görünür alan zaten küçük olduğundan canlı SVG akıcıdır.
-const LOD_MAX_I = 4;
+// (v2.15.0) Bu sınır artık SABİT DEĞİL: etkileşim bitmap'i zoom'a göre
+// yeniden üretildiğinden (aşağıdaki lodRetune) bitmap keskin olduğu SÜRECE
+// kullanılır. Aşağıdaki oran "bitmap ekran çözünürlüğünün en az %55'i" demek.
+const LOD_SHARP = 0.55;
+// Sayfa başına bitmap uzun kenar sınırı (bellek): 700×470'lik kartta res≈4.
+const LOD_MAX_PX = 2800;
 // Bitmap çözünürlüğü: LOD aralığının tepesinde (scale≈1) ekran pikseliyle
 // eşleşsin diye DPR kadar; alt sınır 1.25 (etkileşim bitmap'i okunur kalsın),
 // bellek için 1.6 ile sınırlı (kart 700×470 → ~2-3MB/sayfa).
@@ -6040,8 +8201,12 @@ let panInteract = false, wheelInteract = false, wheelIdleT = null;
 function updateLod() {{
   if (!lodReady) return;
   const rest = lodActive ? (scale < LOD_OFF) : (scale < LOD_ON);
+  // Etkileşim sırasında bitmap yalnız YETERİNCE KESKİNSE kullanılır; değilse
+  // canlı SVG (bulanık bitmap yerine). lodMinRes, GÖRÜNÜR sayfaların en düşük
+  // bitmap çözünürlüğü — lodRetune onu zoom'a yaklaştırır.
+  const sharp = lodMinRes() >= scale * LOD_SHARP;
   const want = lodEnabled &&
-    (rest || ((panInteract || wheelInteract) && scale <= LOD_MAX_I));
+    (rest || ((panInteract || wheelInteract) && sharp));
   if (want === lodActive) return;
   lodActive = want;
   if (want) {{
@@ -6073,7 +8238,52 @@ function setLodEnabled(on) {{
   lsSet({{ lod: on }});
 }}
 lodBtn.addEventListener('click', () => setLodEnabled(!lodEnabled));
-(function buildLods() {{
+// Bir sayfanın bitmap'ini VERİLEN çözünürlükte üret/yenile (res = kart
+// boyutunun katı). Mevcut bitmap üretim bitene kadar ekranda kalır → görüntü
+// atlamaz. `body.dataset.lodRes` üretilmiş çözünürlüğü taşır.
+function lodRender(body, res, done) {{
+  const svgEl = body.querySelector('svg');
+  if (!svgEl) {{ done(false); return; }}
+  const w = Math.max(1, Math.round(body.clientWidth * res));
+  const h = Math.max(1, Math.round(body.clientHeight * res));
+  const src = new XMLSerializer().serializeToString(svgEl);
+  const img = new Image();
+  let url = '', triedData = false;
+  const fin = ok => {{
+    if (url) {{ URL.revokeObjectURL(url); url = ''; }}
+    if (ok) {{
+      try {{
+        const cv = document.createElement('canvas');
+        cv.width = w; cv.height = h;
+        // preserveAspectRatio="none" → hedef boyuta gerilir, ekranla birebir
+        cv.getContext('2d').drawImage(img, 0, 0, w, h);
+        cv.className = 'lod-bitmap';
+        const old = body.querySelector('canvas.lod-bitmap');
+        if (old) old.remove();
+        body.appendChild(cv);
+        body.dataset.lodRes = String(res);
+        if (!body.classList.contains('lod-ready')) {{
+          body.classList.add('lod-ready'); lodReady++;
+        }}
+        updateLod();
+      }} catch (e) {{ ok = false; }}   // bu sayfa canlı SVG'de kalır
+    }}
+    done(ok);
+  }};
+  img.onload = () => fin(true);
+  img.onerror = () => {{
+    // blob: bazı ortamlarda engellenebilir → data: URI ile bir kez daha dene
+    if (triedData) {{ fin(false); return; }}
+    triedData = true;
+    if (url) {{ URL.revokeObjectURL(url); url = ''; }}
+    img.src = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(src);
+  }};
+  url = URL.createObjectURL(new Blob([src], {{ type: 'image/svg+xml;charset=utf-8' }}));
+  img.src = url;
+}}
+// SVG'ler enjekte edildikten SONRA çalışır (initSheets çağırır): taban
+// çözünürlükte tüm sayfaların bitmap'i (idle'da, sırayla).
+function buildLods() {{
   const bodies = Array.from(document.querySelectorAll('.sheet-body'));
   const idle = window.requestIdleCallback
     ? (f => window.requestIdleCallback(f, {{ timeout: 800 }}))
@@ -6081,43 +8291,67 @@ lodBtn.addEventListener('click', () => setLodEnabled(!lodEnabled));
   let i = 0;
   function step() {{
     if (i >= bodies.length) return;
-    const body = bodies[i++];
-    const svgEl = body.querySelector('svg');
-    if (!svgEl) {{ idle(step); return; }}
-    const w = Math.max(1, Math.round(body.clientWidth * LOD_RES));
-    const h = Math.max(1, Math.round(body.clientHeight * LOD_RES));
-    const src = new XMLSerializer().serializeToString(svgEl);
-    const img = new Image();
-    let url = '', triedData = false;
-    const done = ok => {{
-      if (url) {{ URL.revokeObjectURL(url); url = ''; }}
-      if (ok) {{
-        try {{
-          const cv = document.createElement('canvas');
-          cv.width = w; cv.height = h;
-          // preserveAspectRatio="none" → hedef boyuta gerilir, ekranla birebir
-          cv.getContext('2d').drawImage(img, 0, 0, w, h);
-          cv.className = 'lod-bitmap';
-          body.appendChild(cv);
-          body.classList.add('lod-ready');
-          lodReady++; updateLod();
-        }} catch (e) {{ /* bu sayfa canlı SVG'de kalır */ }}
-      }}
-      idle(step);
-    }};
-    img.onload = () => done(true);
-    img.onerror = () => {{
-      // blob: bazı ortamlarda engellenebilir → data: URI ile bir kez daha dene
-      if (triedData) {{ done(false); return; }}
-      triedData = true;
-      if (url) {{ URL.revokeObjectURL(url); url = ''; }}
-      img.src = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(src);
-    }};
-    url = URL.createObjectURL(new Blob([src], {{ type: 'image/svg+xml;charset=utf-8' }}));
-    img.src = url;
+    lodRender(bodies[i++], LOD_RES, () => idle(step));
   }}
   idle(step);
-}})();
+}}
+// === Zoom'a göre bitmap tazeleme (mip) ====================================
+// Sabit çözünürlüklü bitmap yakın zoom'da bulanıklaştığı için eskiden scale>4'te
+// devre dışı kalıyordu (ve orada takılma geri geliyordu). Artık hareket
+// durduğunda GÖRÜNÜR sayfaların bitmap'i o zoom'a uygun çözünürlükte yeniden
+// üretilir → etkileşim bitmap'i her zoom'da keskin, canlı SVG yalnız DURAN
+// görünümde (tıklama/metin seçimi tam olarak korunur).
+function lodCapRes(body) {{
+  const m = Math.max(body.clientWidth, body.clientHeight) || 1;
+  return Math.max(LOD_RES, LOD_MAX_PX / m);
+}}
+function lodVisibleBodies() {{
+  const vp = viewport.getBoundingClientRect();
+  const out = [];
+  document.querySelectorAll('.sheet-body').forEach(b => {{
+    const r = b.getBoundingClientRect();
+    if (r.right > vp.left - 40 && r.left < vp.right + 40 &&
+        r.bottom > vp.top - 40 && r.top < vp.bottom + 40) out.push(b);
+  }});
+  return out;
+}}
+// Görünür sayfaların en düşük bitmap çözünürlüğü (updateLod keskinlik kararı)
+function lodMinRes() {{
+  const vis = lodVisibleBodies();
+  if (!vis.length) return LOD_RES;
+  let m = Infinity;
+  vis.forEach(b => {{
+    if (!b.classList.contains('lod-ready')) return;
+    m = Math.min(m, +(b.dataset.lodRes || LOD_RES));
+  }});
+  return m === Infinity ? 0 : m;
+}}
+let lodTuneT = null, lodTuning = false;
+function lodRetune() {{
+  if (lodTuning || !lodEnabled) return;
+  const want = Math.max(LOD_RES, Math.min(scale * (window.devicePixelRatio || 1), 64));
+  const queue = lodVisibleBodies().filter(b => {{
+    const cap = lodCapRes(b);
+    const target = Math.min(want, cap);
+    const cur = +(b.dataset.lodRes || 0);
+    // Hedefin altındaysa yenile; çok üstündeyse (uzaklaşıldı) küçült — aradaki
+    // %5'lik pay gereksiz yeniden üretimi engeller.
+    return cur < target * 0.95 || cur > target * 1.6;
+  }});
+  if (!queue.length) return;
+  lodTuning = true;
+  let i = 0;
+  (function next() {{
+    if (i >= queue.length) {{ lodTuning = false; updateLod(); return; }}
+    const b = queue[i++];
+    lodRender(b, Math.min(want, lodCapRes(b)), () => setTimeout(next, 0));
+  }})();
+}}
+// Hareket durduktan 400ms sonra tazele (sürükleme/zoom sırasında değil)
+function lodScheduleRetune() {{
+  clearTimeout(lodTuneT);
+  lodTuneT = setTimeout(lodRetune, 400);
+}}
 
 function applyT() {{
   canvas.style.transform = `translate(${{tx}}px,${{ty}}px) scale(${{scale}})`;
@@ -6127,6 +8361,7 @@ function applyT() {{
   // sayesinde ilk applyT çağrılarında typeof güvenle 'undefined' döner)
   if (typeof __annoUi === 'function') __annoUi();
   updateLod();
+  if (typeof lodScheduleRetune === 'function') lodScheduleRetune();
 }}
 applyT();
 // Programatik görünüm değişimlerinde (fit/reset/zoom butonu) yumuşak geçiş.
@@ -6457,7 +8692,11 @@ function renderComps(filter='') {{
   const matched = components.filter(c =>
     c.designator.toLowerCase().includes(q) || c.value.toLowerCase().includes(q)
   );
-  matched.slice(0, 1500).forEach(comp => {{
+  // Liste DOM'u şişmesin diye üst sınır var; SESSİZ kırpma yapma — kalan
+  // sayıyı yaz ki kullanıcı "komponent eksik" sanmasın (anotasyonsuz büyük
+  // tasarımlarda 1500 sınırına dayanılabiliyor).
+  const LIST_CAP = 1500;
+  matched.slice(0, LIST_CAP).forEach(comp => {{
     const div = document.createElement('div');
     div.className = 'comp-item';
     const val = comp.value ? ` <span style="color:#666">${{escHtml(comp.value)}}</span>` : '';
@@ -6472,6 +8711,12 @@ function renderComps(filter='') {{
   if (!matched.length) {{
     const m = document.createElement('div');
     m.className = 'empty-msg'; m.textContent = 'eşleşen komponent yok';
+    list.appendChild(m);
+  }} else if (matched.length > LIST_CAP) {{
+    const m = document.createElement('div');
+    m.className = 'empty-msg';
+    m.textContent = '… ' + (matched.length - LIST_CAP) + ' komponent daha '
+                  + '(aramayla daralt)';
     list.appendChild(m);
   }}
 }}
@@ -6955,13 +9200,16 @@ function updateDetailPanel() {{
 const netNameSet = new Set(nets.map(n => n.name));
 
 // SVG text'lerinde net adlarını tıklanabilir yap
-document.querySelectorAll('.sheet-body svg text').forEach(t => {{
-  const content = (t.textContent || '').trim();
-  if (netNameSet.has(content)) {{
-    t.classList.add('clickable-net');
-    t.setAttribute('data-net', content);
-  }}
-}});
+// (SVG'ler gzip'ten sonra enjekte edildiğinden initSheets() çağırır)
+function setupNetTexts() {{
+  document.querySelectorAll('.sheet-body svg text').forEach(t => {{
+    const content = (t.textContent || '').trim();
+    if (netNameSet.has(content)) {{
+      t.classList.add('clickable-net');
+      t.setAttribute('data-net', content);
+    }}
+  }});
+}}
 
 // Block linkleri: Python tarafından çıkarılan sheet_symbol verisinden
 // Komponent designator'ları: Python tarafından çıkarılan components verisinden
@@ -6994,6 +9242,9 @@ function resolveCompDesignator(content, compMap) {{
   return null;
 }}
 
+// Block link + komponent designator sınıflarını SVG metinlerine uygula
+// (SVG'ler gzip'ten sonra enjekte edildiğinden initSheets() çağırır)
+function setupSheetTexts() {{
 Object.entries(sheetPos).forEach(([sheetId, sp]) => {{
   const card = document.getElementById('sheet-' + sheetId);
   if (!card) return;
@@ -7028,6 +9279,7 @@ Object.entries(sheetPos).forEach(([sheetId, sp]) => {{
     }}
   }});
 }});
+}}
 document.querySelectorAll('.sheet-body').forEach(body => {{
   body.addEventListener('mousedown', e => {{
     if (e.target.classList && (
@@ -7708,6 +9960,32 @@ window.addEventListener('message', ev => {{
     showCompPopup(comp);
   }}
 }});
+
+// === Sayfa SVG'lerini aç (gzip) ve SVG'ye bağlı kurulumları çalıştır ========
+// Sıra ÖNEMLİ: enjeksiyon → preserveAspectRatio → tıklanabilir metin sınıfları
+// (net / block / designator) → LOD bitmap'leri. Tıklama handler'ları
+// `.sheet-body` kaplarına bağlı olduğundan (delegasyon) yeniden kurulmaları
+// GEREKMEZ; yalnız sınıf/attribute atamaları SVG'yi gerektirir.
+(async function initSheets() {{
+  let txt = null;
+  try {{ txt = await gunzipB64(SHEET_GZ); }} catch (e) {{ txt = null; }}
+  if (txt === null) {{
+    document.getElementById('current-net').textContent =
+      'Bu tarayıcı sıkıştırılmış şemayı açamıyor (DecompressionStream gerekli).';
+    return;
+  }}
+  const map = JSON.parse(txt);
+  Object.keys(map).forEach(id => {{
+    const card = document.getElementById('sheet-' + id);
+    const body = card && card.querySelector('.sheet-body');
+    if (body) body.innerHTML = map[id];
+  }});
+  document.querySelectorAll('.sheet-body svg').forEach(s =>
+    s.setAttribute('preserveAspectRatio', 'none'));
+  setupNetTexts();
+  setupSheetTexts();
+  buildLods();
+}})();
 </script>
 </body></html>
 """

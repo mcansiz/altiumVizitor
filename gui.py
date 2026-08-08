@@ -42,7 +42,8 @@ from PyQt5.QtCore import QT_VERSION_STR, PYQT_VERSION_STR
 from viewer import (generate_viewer, generate_json,
                     generate_bom_csv, generate_pnp_csv,
                     generate_ic_map_xlsx, generate_mcu_pinout_xlsx,
-                    generate_pcb_viewer, generate_combined_viewer,
+                    generate_pcb_viewer,
+    generate_pcb_canvas_viewer, generate_combined_viewer,
                     APP_VERSION)
 
 
@@ -108,7 +109,7 @@ class GeneratorThread(QtCore.QThread):
     def __init__(self, mode, project_path, output_path,
                  inter_color="#4ec9b0", intra_color="#ff9800",
                  main_designators=None, min_pins=4, exclude_prefixes=None,
-                 parent=None):
+                 fast_pcb=False, parent=None):
         """@brief __init__()
 
         @param mode Üretim modu (html/json/bom/pnp/icmap/mcupin/pcbview/combined)
@@ -119,6 +120,7 @@ class GeneratorThread(QtCore.QThread):
         @param main_designators Ana işlemci designator listesi
         @param min_pins Minimum pin sayısı eşiği
         @param exclude_prefixes IC haritasından hariç tutulacak designator önekleri ("J,P,TP")
+        @param fast_pcb Birleşik görünümde PCB paneli geometri (canvas) olsun mu
         @param parent
         """
         super().__init__(parent)
@@ -130,6 +132,7 @@ class GeneratorThread(QtCore.QThread):
         self.main_designators = main_designators
         self.min_pins = min_pins
         self.exclude_prefixes = exclude_prefixes
+        self.fast_pcb = fast_pcb
 
     def run(self):
         # İlerleme callback'i: üretici fonksiyonlara verilir, sinyale çevirir.
@@ -201,6 +204,17 @@ class GeneratorThread(QtCore.QThread):
                     self.done_signal.emit(
                         False, "PCB görüntüleyici üretilemedi (PCB dosyası yok/okunamadı)")
                     return
+            elif self.mode == "pcbgeo":
+                ok = generate_pcb_canvas_viewer(
+                    project_path=self.project_path,
+                    output_path=self.output_path,
+                    log=lambda msg: self.log_signal.emit(msg),
+                    progress=emit_progress,
+                )
+                if not ok:
+                    self.done_signal.emit(
+                        False, "PCB (geometri) görüntüleyici üretilemedi (PCB dosyası yok/okunamadı)")
+                    return
             elif self.mode == "combined":
                 ok = generate_combined_viewer(
                     project_path=self.project_path,
@@ -209,6 +223,7 @@ class GeneratorThread(QtCore.QThread):
                     intra_sheet_color=self.intra_color,
                     log=lambda msg: self.log_signal.emit(msg),
                     progress=emit_progress,
+                    fast_pcb=self.fast_pcb,
                 )
                 if not ok:
                     self.done_signal.emit(
@@ -233,7 +248,7 @@ class GeneratorThread(QtCore.QThread):
                 final_out = str(Path(self.output_path).with_suffix(".xlsx"))
             elif self.mode == "mcupin":
                 final_out = str(Path(self.output_path).with_suffix(".xlsx"))
-            elif self.mode == "pcbview":
+            elif self.mode in ("pcbview", "pcbgeo"):
                 final_out = str(Path(self.output_path).with_suffix(".html"))
             elif self.mode == "combined":
                 final_out = str(Path(self.output_path).with_suffix(".html"))
@@ -357,6 +372,9 @@ class MainWindow(QtWidgets.QMainWindow):
         pcbview_btn = getattr(self, "pcbViewerBtn", None)
         if pcbview_btn is not None:
             pcbview_btn.clicked.connect(self.generate_pcbview_action)
+        pcbgeo_btn = getattr(self, "pcbGeoBtn", None)
+        if pcbgeo_btn is not None:
+            pcbgeo_btn.clicked.connect(self.generate_pcbgeo_action)
         combined_btn = getattr(self, "combinedBtn", None)
         if combined_btn is not None:
             combined_btn.clicked.connect(self.generate_combined_action)
@@ -534,6 +552,14 @@ class MainWindow(QtWidgets.QMainWindow):
         """
         self._start_generation(mode="icmap")
 
+    def generate_pcbgeo_action(self):
+        """@brief Geometri tabanlı (canvas) PCB görüntüleyici üretimini başlatır.
+
+        SVG katmanları yerine ham geometri gömülür: dosya ~3-15x küçük,
+        her zoom seviyesinde akıcı.
+        """
+        self._start_generation(mode="pcbgeo")
+
     def generate_pcbview_action(self):
         """@brief PCB görüntüleyici (HTML) üretimini başlatır.
         """
@@ -581,6 +607,7 @@ class MainWindow(QtWidgets.QMainWindow):
         "icmapBtn": "IC Bağlantı Haritası (Excel)",
         "mcuPinBtn": "MCU Pin Listesi (Excel)",
         "pcbViewerBtn": "PCB Görüntüleyici",
+        "pcbGeoBtn": "PCB Hızlı (geometri)",
         "combinedBtn": "Şematik + PCB + 3D  ★",
     }
     _MODE_BTN = {
@@ -591,6 +618,7 @@ class MainWindow(QtWidgets.QMainWindow):
         "icmap": "icmapBtn",
         "mcupin": "mcuPinBtn",
         "pcbview": "pcbViewerBtn",
+        "pcbgeo": "pcbGeoBtn",
         "combined": "combinedBtn",
     }
 
@@ -642,6 +670,9 @@ class MainWindow(QtWidgets.QMainWindow):
         elif mode == "pcbview":
             base = Path(output_path)
             output_path = str(base.with_name(base.stem + "_PCB").with_suffix(".html"))
+        elif mode == "pcbgeo":
+            base = Path(output_path)
+            output_path = str(base.with_name(base.stem + "_PCB_hizli").with_suffix(".html"))
         elif mode == "combined":
             base = Path(output_path)
             output_path = str(base.with_name(base.stem + "_Birlesik").with_suffix(".html"))
@@ -668,11 +699,13 @@ class MainWindow(QtWidgets.QMainWindow):
             pbar.setFormat("Başlatılıyor… %p%")
             pbar.setVisible(True)
 
+        fast_chk = getattr(self, "fastPcbCheck", None)
         self.worker = GeneratorThread(
             mode, project_path, output_path,
             inter_color=self.inter_color, intra_color=self.intra_color,
             main_designators=main_desigs or None, min_pins=min_pins,
             exclude_prefixes=exclude_prefixes or None,
+            fast_pcb=bool(fast_chk is not None and fast_chk.isChecked()),
         )
         self.worker.log_signal.connect(self.log)
         self.worker.progress_signal.connect(self.on_progress)

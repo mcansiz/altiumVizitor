@@ -193,6 +193,19 @@
               </widget>
              </item>
              <item>
+              <widget class="QPushButton" name="pcbGeoBtn">
+               <property name="toolTip">
+                <string>Geometri tabanlı PCB görüntüleyici: SVG yerine ham geometri gömülür → dosya çok daha küçük, her zoom seviyesinde akıcı (canvas). Ölçüm, net/komponent seçimi, döndürme dahil.</string>
+               </property>
+               <property name="text">
+                <string>PCB Hızlı (geometri)</string>
+               </property>
+               <property name="cls" stdset="0">
+                <string>view</string>
+               </property>
+              </widget>
+             </item>
+             <item>
               <widget class="QPushButton" name="combinedBtn">
                <property name="toolTip">
                 <string>Şematik + PCB + 3D tek dosyada. Üç yönlü cross-probe: birinde komponente tıkla → diğerlerinde gösterilir</string>
@@ -202,6 +215,20 @@
                </property>
                <property name="cls" stdset="0">
                 <string>primary</string>
+               </property>
+              </widget>
+             </item>
+             <item>
+              <widget class="QCheckBox" name="fastPcbCheck">
+               <property name="toolTip">
+                <string>Birleşik görünümün PCB panelinde geometri (canvas) görüntüleyiciyi kullan: katman SVG'leri hiç render edilmez → üretim çok daha hızlı, dosya çok daha küçük, her zoom'da akıcı.
+KARŞILIĞI: 3D board yüzey dokusu (bakır/silkscreen) üretilmez (board düz yeşil kalır) ve solder mask / paste katmanları listelenmez.</string>
+               </property>
+               <property name="text">
+                <string>Birleşikte hızlı PCB kullan (geometri)</string>
+               </property>
+               <property name="checked">
+                <bool>true</bool>
                </property>
               </widget>
              </item>

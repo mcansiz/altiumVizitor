@@ -5,7 +5,7 @@ Wavenumber'ın ticari "viz sch 1.0" ürününün açık-kaynak alternatifi.
 [altium_monkey](https://github.com/wavenumber-eng/altium_monkey) kütüphanesi
 (Eli Hughes / Wavenumber) üzerine kurulu.
 
-**Mevcut sürüm**: `APP_VERSION` sabiti **`viewer.py`'de** tutulur (şu an 2.10.0);
+**Mevcut sürüm**: `APP_VERSION` sabiti **`viewer.py`'de** tutulur (şu an 2.15.1);
 `gui.py` oradan import eder (v2.9.29'da taşındı — HTML çıktıları da sürümü
 gösterebilsin diye, tek kaynak). Yeni özellik/düzeltme ekleyince bu sabiti
 güncelle (semver: major.minor.patch). Sürüm pencere başlığında, alt durum
@@ -43,6 +43,16 @@ sağ üst rozetinde (`{proje} · v{APP_VERSION}`) görünür.
     ATLANIR (v2.9.30+): direnç yerine `IC6.9 (P0_0) [R12 üzerinden]`;
     pasif→güç bağlantıları `R5→+3V3 (pull-up)` / `C14→GND (filtre C)` diye
     raporlanır. Üstte fonksiyon dağılımı özeti. `mcu_designator` ZORUNLU.
+  - `generate_pcb_canvas_viewer(...)` → **geometri tabanlı** PCB görüntüleyici
+    (v2.12.0+; v2.13.0'da BOM · Montaj paneli eklendi — SVG sürümüyle AYNI
+    localStorage anahtarı ve dışa-aktarma biçimi, yani montaj durumu iki
+    görüntüleyici arasında ortak). SVG katmanı gömmek yerine `extract_pcb_geometry()` ile ham
+    primitive'ler (iz/yay/pad/via/region/metin) çıkarılıp gzip'lenerek gömülür,
+    tarayıcıda `<canvas>`'a çizilir → **BRK-210: 8 MB yerine 3.3 MB, üretim
+    135 s yerine 48 s**; her zoom seviyesinde akıcı (LOD gerekmez). Katman
+    aç/kapa, komponent seç (popup + cross-probe), ize çift tık = net vurgusu,
+    ölçüm (pad merkezine yapışma), döndür/çevir, pad etiketleri, PNG, dokunmatik.
+    GUI'de **"PCB Hızlı (geometri)"** butonu (`mode='pcbgeo'`).
   - `generate_pcb_viewer(...)` → tam ekran PCB görüntüleyici HTML (Altium benzeri).
     `collect_pcb_layers()` ile tüm katmanlar SVG render edilir (TOP/BOTTOM bakır,
     iç katmanlar MID1-8, silkscreen, pasta, lehim, mekanik, drill). Sidebar'dan
@@ -59,6 +69,16 @@ sağ üst rozetinde (`{proje} · v{APP_VERSION}`) görünür.
     block genişliğini doğal boyut sanar, `fitView()` matematiği bozulur, board ilk
     açılışta ekran dışına kayar (bkz. Çözülen Sorunlar). İlk sığdırma iframe layout'u
     oturduktan sonra çalışır (`requestAnimationFrame` + boyut kontrolü).
+  - `generate_combined_viewer(..., fast_pcb=False)` → şematik + PCB tek HTML'de
+    yan yana. **`fast_pcb=True`** (GUI'de "Birleşikte hızlı PCB kullan"
+    kutucuğu, varsayılan KAPALI) PCB panelinde geometri/canvas görüntüleyiciyi
+    kullanır: `to_layer_svgs()` HİÇ çağrılmaz → **BRK-210: 402 s / 13.28 MB
+    yerine 69 s / 7.27 MB** (5.9x hızlı, 1.8x küçük). v2.14.0'dan itibaren 3D board yüzey dokusu
+    (bakır izler + pad'ler + silkscreen çizim ve YAZILARI) hızlı modda da var:
+    `_build_surface_from_geometry()` aynı dokuyu geometriden çizer. Kalan tek
+    fark: solder mask / paste katmanları listelenmez (Altium onları pad'lerden
+    türetiyor, dosyada primitive yok). Cross-probe üç yönlü çalışmaya
+    devam eder (canvas viewer aynı postMessage sözleşmesini kullanır).
   - `generate_combined_viewer(...)` → şematik + PCB tek HTML'de yan yana,
     çift yönlü cross-probe. İki viewer iframe içinde izole (her iframe'in HTML'i
     kabuğa JSON string olarak gömülür, runtime'da `iframe.srcdoc` ile yüklenir),
@@ -250,6 +270,79 @@ Bir değişiklik yaptıktan sonra:
 - PyInstaller paketi için gui.ui dosyası `sys._MEIPASS` üzerinden bulunur
   (gui.py'de fonksiyonla)
 
+### PCB Viewer: döndürme / ayna + montaj dışa-içe aktarma (v2.12.0+)
+
+- **⟳ (R)** board'u 90° döndürür, **Çevir (X)** aynalar (alt yüzden bakış).
+  Görüş merkezindeki nokta yerinde kalır. Ekran↔kök dönüşümü tek noktada
+  (`rootToScreen`/`screenToRoot`/`centerOnRoot`); 90° katları olduğu için
+  AABB matematiği bozulmaz (bkz. Çözülen Sorunlar). Overlay yazıları
+  `.upright` sınıfıyla düz kalır.
+- **BOM · Montaj → Dışa / İçe**: işaretler `{proje}_montaj.json` olarak
+  kaydedilir (grup anahtarı + değer/footprint/designator listesi) ve başka
+  makinede/kişide geri yüklenir; bilinmeyen gruplar sayılıp bildirilir.
+  (localStorage tarayıcıya bağlı olduğundan devretmenin tek yolu buydu.)
+
+### Şematik LOD: zoom'a uyarlı bitmap (v2.15.0+)
+
+- Taban bitmap'ler açılışta idle'da üretilir (`buildLods` → `lodRender(body,
+  LOD_RES)`), sonra `lodRetune()` hareket durdukça GÖRÜNÜR sayfaları o zoom'a
+  uygun çözünürlükte yeniden üretir (`body.dataset.lodRes` takip eder).
+- `updateLod()` kararı: uzak zoomda (histerezis `LOD_ON/LOD_OFF`) her zaman
+  bitmap; etkileşim sırasında ise **yalnız bitmap yeterince keskinse**
+  (`lodMinRes() >= scale × LOD_SHARP`). Aşırı zoomda canlı SVG'ye düşer.
+- Duran görünümde her zaman canlı SVG → tıklama, hover, PDF gibi metin seçimi
+  aynen çalışır (LOD yalnız HAREKET anında devrede).
+
+### Şematik: sayfa SVG'leri gzip gömülü (v2.12.0+)
+
+PCB katmanlarındaki desenin aynısı: tüm sayfa SVG'leri tek gzip+base64
+blob'unda (`SHEET_GZ`), açılışta çözülüp `.sheet-body`'lere enjekte edilir.
+**BRK-210: 6.3 MB → 0.29 MB.** Tıklama handler'ları `.sheet-body` kaplarına
+bağlı (delegasyon) olduğundan yeniden kurulmaz; yalnız SVG'ye bağlı kurulumlar
+`initSheets()` içinden SIRAYLA çağrılır: `preserveAspectRatio` →
+`setupNetTexts()` (tıklanabilir net sınıfları) → `setupSheetTexts()`
+(block link + designator sınıfları) → `buildLods()`. Bu sıra bozulursa
+tıklanabilirlik veya LOD sessizce kaybolur.
+
+### PCB Viewer: boyut, Netler paneli, ölçüm, PNG (v2.11.0+)
+
+- **Çıktı boyutu**: katman SVG'leri artık HTML'e ham gömülmüyor; hepsi tek
+  **gzip+base64** blob'unda (`LAYER_GZ`) taşınıp açılışta `DecompressionStream`
+  ile çözülüyor (`initLayers`). Çözülünce varsayılan AÇIK katmanlar hemen,
+  diğerleri ilk gösterimde (`ensureLayerLoaded`) DOM'a enjekte edilir.
+  **BRK-210: 65.1 MB → 8.0 MB (8×)**. `layerDataReady` çözülmeden
+  `loadAllLazyLayers()` no-op'tur (birkaç yüz ms). Çok eski tarayıcıda
+  (DecompressionStream yok) info-bar'da uyarı gösterilir.
+- **Netler paneli** (sidebar 2. sekme): net adı + pad/iz sayısı
+  (`collect_pcb_layers` artık `nets` listesi de döndürür — SVG taramak yerine
+  PCB'den bir kez çıkarılır). Ara, Güç/GND/Sinyal filtrele, tıkla → net tüm
+  katmanlarda vurgulanır (bakır ize çift tıklamakla aynı sonuç).
+- **Ölçüm aracı** (`Ölç` / `M`): iki noktaya tıkla → mesafe mm + mil, Δx/Δy;
+  imleç bir **pad/via üzerindeyse MERKEZİNE yapışır** (`snapXY`) — pad-pad
+  ölçümü göz kararı olmaz. Çizgi/yazı `1/scale` ile ekran-sabit
+  (`updateMeasureMetrics`, `applyTransform`dan ÇAĞRILIR — `updateMarkerMetrics`
+  içinden değil: o, highlight yoksa erken çıkıyor). Esc iptal.
+- **PNG dışa aktarma** (`Görüntü`): o anki görünüm (görünür katmanlar + vurgu +
+  ölçüm) uzun kenarı 4000px olan PNG olarak indirilir (LOD bitmap'iyle aynı
+  serileştirme deseni; blob → data: URI fallback'li).
+- **Yardım modalı** (`?`): fare/klavye, dokunmatik ve panel özeti.
+- **Kısayollar**: `M` ölçüm, `F` sığdır, `?` yardım (mevcut `/`, `B`, `Esc`).
+- **Bakır dolgu yarı-saydam** (`_recolor_pcb_layer`, copper/inner):
+  `shapebased-region` (pour) `fill-opacity=0.55` alır — pour izlerle AYNI
+  renkte olduğundan board tek düze renk bloğu gibi görünüyordu; artık üstteki
+  izler/pad'ler (tam parlaklık) belirgin.
+
+### Geometri (canvas) viewer: BOM · Montaj paneli (v2.13.0+)
+
+SVG sürümündeki panelin aynısı canvas sürümünde de var (4. sekme):
+değer+footprint gruplaması, satıra tıkla → grubun TÜM komponentleri vurgulanır
+(`selComps` dizisi; tek seçimde ayrıca **pin-1 sarı halkası**), ✓ ile montaj
+takibi, Tümü/Üst/Alt/Kalan filtreleri, arama, Dışa/İçe aktarma.
+**Anahtar biçimi SVG sürümüyle birebir aynı** (`değer\u0000footprint`) ve
+localStorage anahtarı da (`schviz-bom:<proje>`) ortak → aynı board'u iki
+görüntüleyiciyle açan kullanıcı aynı montaj durumunu görür, dışa aktarılan
+JSON ikisi arasında taşınabilir.
+
 ### PCB Viewer: BOM · Montaj paneli (v2.10.0+)
 
 InteractiveHtmlBom (KiCad iBOM) tarzı montaj akışı. Sol panelde iki sekme:
@@ -371,6 +464,152 @@ mesajına bak.
   bu API olmayabilir (graceful fallback var, "veri yok" der).
 
 ## Çözülen Sorunlar (tarihçe)
+
+- **Gerçek projede İKİ ciddi veri kaybı: 5 sayfa hiç açılmıyor + 67 sayfada
+  yalnız 18 komponent (v2.15.1, kullanıcı log'u)**:
+  (1) **`ERR …: Failed to decode cp1252 content: byte 0x8d`** — altium_monkey
+  `%UTF8%` öneki YOKSA kaydı KATI cp1252 ile çözüyor. Altium, datasheet'ten
+  yapıştırılan metni ANSI alanına UTF-8 olarak yazabiliyor: bozuk kayıt
+  `Text=` + `ef bc 8d 35 35 e2 84 83 …` yani **`－55℃＋125℃`** (tam genişlikli
+  karakterler). cp1252'de 0x8D tanımsız → ValueError → O SAYFA TAMAMEN
+  düşüyordu (67 sayfanın 5'i) ve aynı hata `AltiumDesign`i de düşürüp
+  BOM/varyant verisini yok ediyordu. Çözüm: `patch_altium_text_decoding()` —
+  `decode_byte_array` yamalanır, katı yol patlarsa sırayla (a) UTF-8
+  (metin AYNEN kurtulur — doğrulandı: `－55℃＋125℃`), (b) Windows davranışı
+  (cp1252'de tanımsız bayt kendi kod noktasına düşer, asla hata vermez).
+  Yama `_collect_data` başında uygulanır; `from … import decode_byte_array`
+  yapan modüllerde de isim değiştirilir (7 modül), yoksa eski katı sürüm
+  çalışmaya devam ederdi.
+  (2) **67 sayfa → 18 komponent**: birleştirme anahtarı DESIGNATOR'dı; bu
+  tasarım ANOTASYONSUZ (designator'lar `C?`, `R?`, `D?`) olduğundan tüm
+  sayfalardaki `C?` tek komponente çöküyordu. Artık yer tutucu designator'da
+  (`…?`) kimlik olarak Altium **UniqueId**'si kullanılır (aynı sayfada bile
+  benzersiz, ölçüldü: 14 komponent → 14 farklı uid). Anotasyonlu tasarımlarda
+  davranış AYNEN korunur (BRK-210: 264 komponent, 1 multi-part — değişmedi),
+  çünkü multi-part birleştirme designator'a bağlı kalır.
+  **Sonuç** (kullanıcının projesi): 62/67 → **67/67 sayfa**, 18 → **1481
+  komponent**, AltiumDesign hatası yok. Komponent listesindeki 1500'lük DOM
+  sınırı da artık sessiz değil: "… N komponent daha (aramayla daralt)".
+  **Bilinen kısıt**: anotasyonsuz tasarımda şema üzerindeki `C?` yazısına
+  tıklamak o sayfadaki İLK `C?`'yi vurgular (SCH_BOXES designator'la
+  anahtarlanıyor); listeden seçim doğru komponenti açar.
+
+
+- **Şematik: etkileşim bitmap'i artık zoom'a göre üretiliyor (mip) — v2.15.0,
+  "PCB'deki akıcılığı şematikte de alabilir miyiz?"**: Ölçüm önce yapıldı:
+  BRK-210 şematiği **8 sayfa / 22 564 SVG elemanı** (3 086 metin, 14 008 çizim)
+  — PCB'nin SVG DOM'undan kat kat hafif, üstelik şematikte v2.9.35'ten beri LOD
+  var. Yani PCB'yi kurtaran şey (SVG DOM'unu tamamen bırakmak) burada aynı
+  ölçüde gerekli DEĞİL; asıl eksik, etkileşim bitmap'inin SABİT çözünürlükte
+  (`LOD_RES` ≈ 1.25-1.6) olmasıydı: yakın zoomda bulanıklaştığı için
+  `scale > 4`'te devre dışı kalıyor, takılma orada geri geliyordu.
+  **Çözüm**: `lodRender(body, res)` + `lodRetune()` — hareket durduktan 400 ms
+  sonra YALNIZ GÖRÜNÜR sayfaların bitmap'i o zoom'a uygun çözünürlükte yeniden
+  üretilir (`res = scale × dpr`, sayfa başına `LOD_MAX_PX=2800` uzun kenar
+  sınırı → kartta res≈4). `updateLod` artık sabit eşik yerine "bitmap ekran
+  çözünürlüğünün ≥ %55'i mi" (`LOD_SHARP`) diye bakar → bitmap ~7× zoom'a kadar
+  kullanılır, ötesinde canlı SVG (bulanık göstermek yerine).
+  **Kullanım hiç bozulmadı**: duran görünümde HÂLÂ canlı SVG var — metin seçme/
+  kopyalama, tıklama, hover aynen çalışır (CDP ile doğrulandı, 12/12).
+  Görünmeyen sayfalar taban çözünürlükte kalır (bellek).
+  **Şematiği geometri→canvas'a çevirme YAPILMADI** (bilinçli): şematiğin ana
+  içeriği metindir ve canvas'ta PDF gibi metin seçme/kopyalama kaybolur; ayrıca
+  binlerce yazının poligonu yükü büyütür. Kazanç/kayıp dengesi PCB'dekinin
+  tersi.
+
+
+- **Hızlı (geometri) modda beş kullanıcı hatası (v2.14.0)**:
+  (1) **3D board çıplaktı** — izler ve designator yazıları görünmüyordu. Doku
+  klasik yolda katman SVG'lerinden türetiliyor, hızlı modda o adım hiç
+  çalışmıyor. Yeni `_build_surface_from_geometry()` aynı dokuyu GEOMETRİDEN
+  üretir. **Hizalama kritik**: geometri koordinatları board bbox'ının
+  sol-üstünden (Y aşağı +), 3D dünya ise bbox MERKEZİNDEN (Y yukarı +) →
+  `X_dünya = X_geo − W/2`, `Y_dünya = H/2 − Y_geo`; yani düzlem tam
+  `[−W/2,W/2]×[−H/2,H/2]` aralığını kaplar → `surf.cx = surf.cy = 0`,
+  viewBox `0 0 W H`. `addSurface`'in delik-delme eşlemesi de aynı formülü
+  kullandığından delikler yerli yerinde kalır. `surf.ok` yalnız bbox board
+  outline'ından geldiyse 1 (aksi halde delme kapalı — kayık dokuda hilal
+  artefaktı olurdu).
+  (2) Canvas görüntüleyicide **Üst/Alt · Hepsi · Temizle** butonları yoktu →
+  eklendi (`T` kısayolu; SVG sürümüyle aynı semantik: yalnız "Top …"/"Bottom …"
+  adlı katmanlara dokunur).
+  (3) **Katmanı en üste getirme (↑)** yoktu → her katman satırına buton;
+  `topLayer` en sona çizilir (canvas'ta sonra çizilen üstte), tekrar basınca
+  normal sıraya döner.
+  (4) **Net filtre çipleri (Tümü/Güç/GND/Sinyal) Katmanlar sekmesinde
+  görünüyordu**: `.hidden` kuralı `.panel.hidden` olarak yazılmıştı, `#chips`
+  bir `.panel` olmadığı için işlemiyordu. Aynı kök neden BOM panelinin de her
+  sekmede görünmesine yol açıyordu (`.panel.nopad` kuralı sonra geldiği için
+  eşit özgüllükte gizlemeyi eziyordu) → `.panel.hidden, #chips.hidden
+  { display:none !important; }`.
+  (5) Şematikte **seçili net etiketi "Sayfa…" açılır menüsünün üstüne
+  biniyordu**. Mutlak konumlandırma (ortalı, sonra sola alma) dar pencerede
+  kaçınılmaz çakışma üretiyordu → etiket TOOLBAR'IN İÇİNE alındı (flex
+  yerleşimi çakışmayı yapısal olarak engeller, toolbar sarınca etiket de
+  sarar); boşken `:empty` ile hiç görünmez.
+
+
+- **Birleşik görünüm hâlâ eski (SVG) PCB'yi üretiyordu (v2.13.0, kullanıcı
+  sorusu)**: v2.12.0'da geometri görüntüleyici ayrı bir butona bağlanmıştı ama
+  `generate_combined_viewer` içindeki PCB paneli `collect_pcb_layers()` +
+  `build_pcb_html()` yolunda kalmıştı — yani "Şematik + PCB + 3D" düğmesi
+  hızlı yoldan yararlanmıyordu. Artık `fast_pcb` bayrağı var (GUI'de onay
+  kutusu, varsayılan kapalı → mevcut davranış korunur). Hızlı yolda PCB
+  dosyası bir kez açılır, `extract_pcb_geometry` + `build_pcb_canvas_html`
+  kullanılır ve 3D verisi `_extract_3d()` ile DOĞRUDAN alınır; `to_layer_svgs`
+  hiç çağrılmadığı için **3D yüzey dokusu üretilemez** (doku o SVG'lerden
+  türetiliyor) — bu bilinçli takas, log'a ve kutucuğun ipucuna yazılı.
+  Doğrulama (CDP): PCB panelinin geometri sürümü olduğu, BOM panelinin
+  dolduğu, şematik→PCB ve PCB→şematik cross-probe'un çalıştığı, 3D panelinin
+  yüklendiği ve dokunun beklendiği gibi bulunmadığı — 9/9 PASS.
+
+
+- **Geometri (canvas) PCB görüntüleyici — metinler görünmüyordu: ÜÇ ayrı kök
+  neden (v2.12.0)**: `extract_pcb_geometry` + canvas renderer ilk sürümünde
+  silkscreen yazıları hiç çıkmıyordu. (1) `render_pcb_text()` iki FARKLI sonuç
+  döndürüyor: TrueType için `characters` (glif poligonları), Altium'un
+  varsayılan **stroke** fontu için `lines` (çizgi parçaları). Yalnız
+  `characters` işlenince BRK-210'un 966 metninin 660'ı sessizce düşüyordu →
+  ikisi de işlenip ayrı kanalda (`texts` / `stexts`) gömülür, canvas'ta biri
+  dolgu diğeri kalemle çizilir. (2) **Birim tuzağı**: `render_pcb_text` çıktısı
+  MİLİMETRE (kayıt `x_mils=2962.6` → ilk segment `75.2499` mm ile birebir
+  doğrulandı); mil sanılıp mil→mm dönüşümünden geçirilince yazılar board'un
+  ~25 katı uzağına düşüyordu (ekranda hiç görünmüyor) → metinler için ayrı
+  `XM/YM` dönüşümü. (3) **Görünürlük**: Altium `comment_on`/`NameOn` kapalı
+  yazıları basmaz; filtre olmadan silkscreen gizli değer/açıklama yazılarıyla
+  doluyordu. DİKKAT: designator görünürlüğü **`name_on`** alanıdır —
+  `designator_on` bu dosyalarda HER komponentte False (legacy alan); ona
+  bakılırsa tüm designator'lar kaybolur.
+
+- **PCB'de board döndürme/ayna (v2.12.0)**: Ekran↔kök dönüşümü tek noktaya
+  alındı (`rootToScreen`/`screenToRoot`/`centerOnRoot`) ve dönüşüm
+  `t + s·R(rot)·diag(mir,1)` olarak tanımlandı. Döndürme **90°'nin katlarıyla
+  sınırlı** olduğundan `getBoundingClientRect` ekran AABB'si kök uzayda YİNE
+  AABB kalır → mevcut kutu matematiği (komponent vurgusu, pad etiketi, ölçüm)
+  değişmeden doğru çalışır (CDP: 6 yönelimde gidiş-dönüş hatası 9e-15, pad
+  merkezi yönelimden bağımsız 0.0000 mm). Overlay YAZILARI ters/aynalı
+  okunmasın diye `.upright` sınıfıyla kendi çapaları etrafında geri döndürülür;
+  doğrulama Chromium'da `getScreenCTM` CSS transform'u İÇERMEDİĞİ için
+  bileşik matris (CSS × element) hesaplanarak yapılır.
+
+
+- **PCB çıktısı 65 MB'a çıkıyordu — katman SVG'leri ham gömülüydü (v2.11.0)**:
+  `to_layer_svgs()` çıktısı HTML'e olduğu gibi yazıldığından BRK-210 için
+  **65.1 MB** dosya üretiliyordu (yavaş açılış, yüksek bellek; birleşik görünüm
+  bundan etkilenmiyordu çünkü iç HTML'i zaten gzip'liyor). Katman içerikleri
+  tek gzip+base64 blob'una alındı → **8.0 MB**. Yerleşim değişmedi: her katman
+  için boş `<g>` placeholder korunur, çözülünce içerik enjekte edilir.
+  Doğrulama (CDP): varsayılan açık katmanlar dolu, kapalı katman hâlâ tembel,
+  `ensureLayerLoaded` ile açılınca yükleniyor; net highlight / BOM grup vurgusu
+  / pad etiketleri regresyonsuz.
+  **Ölçüm notu — mimari alternatif**: aynı board'un HAM GEOMETRİSİ
+  (19 025 iz + 963 region + 1 153 pad + 557 via + 207 arc + 966 metin)
+  kompakt JSON'da **1.2 MB, gzip 250 KB**. Yani SVG yerine geometriyi gömüp
+  `<canvas>`'a çizen bir renderer (KiCad InteractiveHtmlBom yaklaşımı) dosyayı
+  ~30× daha küçültebilir ve LOD hilelerine gerek bırakmaz. altium_monkey
+  primitive erişimi buna hazır (`pcb.tracks/arcs/pads/vias/regions/texts`);
+  zor kısım pad şekilleri, pour delikleri ve METİN (Altium stroke font →
+  `altium_text_to_polygon`). Yapılmadı — ayrı, büyük iş olarak duruyor.
 
 - **Mobil tarayıcıda (Android Firefox) parmakla yakınlaştırma ve benzeri
   hiçbir etkileşim çalışmıyordu (v2.10.0, kullanıcı bildirimi)**: Dört

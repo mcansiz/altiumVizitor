@@ -60,6 +60,18 @@ No web server, no installation, no internet required. Works directly via `file:/
   Works on phones and tablets: one-finger pan, two-finger pinch zoom, tap to select
   (schematic, PCB and 3D views alike), responsive sidebars.
 
+* **Geometry PCB Viewer (fast)**
+  Embeds raw board geometry (tracks/pads/vias/regions/text) instead of layer SVGs and
+  draws it on a `<canvas>`: ~3-15x smaller files, smooth at any zoom, plus rotate/mirror,
+  measurement, net & component selection, BOM/assembly panel and touch support.
+  The combined viewer can use it too — tick **"Birleşikte hızlı PCB kullan"** (off by
+  default); the 3D board texture (copper, pads, silkscreen text) is rendered from the same
+  geometry, so only solder-mask/paste layers are unavailable.
+
+* **Measure, Net Browser & PNG Export (PCB viewer)**
+  Two-click distance in mm/mil that snaps to pad centers, searchable net list with
+  power/ground/signal filters, one-click PNG of the current view, built-in help (`?`).
+
 * **BOM · Assembly Panel (PCB viewer)**
   Components grouped by value + footprint; click a row to highlight the whole group
   on the board, tick it off while assembling (progress is saved in the browser),
@@ -248,6 +260,8 @@ Projeyi seçin, bir düğmeye basın — çıktı olarak **çift tıkla açılan
 - **AI/LLM dostu JSON** — Gerçek elektriksel bağlantı (pin → net), BOM ve varyant verisiyle kompakt dışa aktarma.
 - **Not &amp; kutu araçları** — Şematik üzerine PDF editörü tarzı not/işaret ekleme, kaydetme.
 - **Dokunmatik / mobil** — Telefon ve tablette çalışır: tek parmak kaydırma, iki parmak yakınlaştırma, dokunarak seçme (şematik, PCB ve 3D); dar ekranda kayan sol panel.
+- **PCB Hızlı (geometri) görünümü** — Katman SVG'leri yerine board'un ham geometrisi gömülür ve canvas'a çizilir: dosya ~3-15 kat küçük, her zoom'da akıcı; döndürme/ayna, ölçüm, net & komponent seçimi, BOM·Montaj paneli, dokunmatik dahil. Birleşik görünümde de kullanılabilir: **"Birleşikte hızlı PCB kullan"** kutucuğu (varsayılan kapalı); 3D board dokusu (bakır, pad, silkscreen yazıları) da geometriden üretilir, yalnız mask/paste katmanları bulunmaz.
+- **Ölçüm · Net listesi · PNG (PCB)** — İki tıkla mesafe (mm + mil, pad merkezine yapışır), aranabilir net listesi (Güç/GND/Sinyal filtresi, tıkla → vurgula), tek tıkla görünümün PNG'si, `?` ile yardım.
 - **BOM · Montaj paneli (PCB)** — Değer + footprint'e göre gruplanmış liste; satıra dokun → grubun tamamı board'da vurgulanır, ✓ ile montaj takibi (tarayıcıda saklanır), Üst/Alt/Kalan filtreleri, seçili parçada pin-1 işareti.
 - **Cross-platform** — Windows ve Linux; kodun tamamı `pathlib` ile OS-bağımsız.
 

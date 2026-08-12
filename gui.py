@@ -36,6 +36,14 @@ import traceback
 from pathlib import Path
 from importlib import metadata
 
+# --- Bağımlılık kapısı ----------------------------------------------------
+# HİÇBİR üçüncü-parti import'tan ÖNCE çalışmalı (PyQt5 dahil): eksik paket
+# durumunda kullanıcı, anlaşılmaz bir ImportError traceback'i yerine hangi
+# kütüphanenin eksik olduğunu ve kurulum komutunu gören açık bir mesaj alsın.
+# Eksik/uyumsuz paket varsa uygulama BAŞLAMAZ (mesaj + diyalog + çıkış kodu 1).
+import deps
+deps.enforce(gui=True)
+
 from PyQt5 import QtWidgets, QtCore, QtGui, uic
 from PyQt5.QtCore import QT_VERSION_STR, PYQT_VERSION_STR
 
@@ -59,24 +67,13 @@ def collect_versions() -> dict:
         "Qt": QT_VERSION_STR,
         "PyQt5": PYQT_VERSION_STR,
     }
-    # Pip ile kurulu modüllerin sürümleri (varsa)
-    for pkg, label in (
-        ("altium-monkey", "altium_monkey"),
-        ("openpyxl", "openpyxl"),          # Excel dışa aktarma (BOM/IC/MCU xlsx)
-        ("cascadio", "cascadio"),          # 3D STEP tessellation (opsiyonel)
-        ("trimesh", "trimesh"),            # 3D STEP mesh ayrıştırma (opsiyonel)
-        ("numpy", "numpy"),                # 3D STEP vertex/face işleme
-        ("freetype-py", "freetype-py"),    # altium_monkey: yazı tipi render
-        ("lxml", "lxml"),                  # altium_monkey: XML parse
-        ("lz4", "lz4"),                    # altium_monkey: sıkıştırma
-        ("pillow", "pillow"),              # altium_monkey: görüntü
-        ("uharfbuzz", "uharfbuzz"),        # altium_monkey: metin şekillendirme
-        ("wn-geometer", "wn-geometer"),    # altium_monkey: geometri
-    ):
-        try:
-            info[label] = metadata.version(pkg)
-        except Exception:
-            info[label] = "—"
+    # Bağımlılıkların sürümleri — TEK KAYNAK deps.DEPENDENCIES (bkz. deps.py).
+    # Sorunlu paketlerde sürümün yanına durumu da yazılır; normalde eksik paketle
+    # uygulama hiç açılmaz, ama SCHVIZ_SKIP_DEP_CHECK ile atlanmışsa burada görünür.
+    for dist, ver, durum, _purpose, _direct in deps.status_table():
+        if dist == "PyQt5":
+            continue  # yukarıda PYQT_VERSION_STR ile zaten listelendi
+        info[dist] = ver if durum == "tamam" else f"{ver}  ({durum})"
     return info
 
 
@@ -338,6 +335,10 @@ class MainWindow(QtWidgets.QMainWindow):
         self.setWindowTitle(f"Schematic Viz Generator  v{APP_VERSION}")
         #self.setStyleSheet(APP_STYLE)
 
+        # Kalıcı ayarlar (son açılan proje klasörü vb.) — Windows'ta registry,
+        # Linux/macOS'ta ini dosyası; yol ayracı OS'a göre çözülür.
+        self.settings = QtCore.QSettings("SchematicViz", "SchematicViz")
+
         # Default renkler
         self.inter_color = "#4ec9b0"
         self.intra_color = "#ff9800"
@@ -421,17 +422,38 @@ class MainWindow(QtWidgets.QMainWindow):
             self.log("✓ Sürüm bilgisi panoya kopyalandı.")
 
     # === Proje seçimi ===
+    def _last_project_dir(self) -> str:
+        """@brief Proje "Gözat" diyaloğunun açılacağı klasörü belirler.
+
+        @details Önce alandaki mevcut proje yolunun klasörü, sonra en son
+        seçilen klasör (QSettings), o da yoksa kullanıcının ev dizini kullanılır.
+        Var olmayan (ör. silinmiş/taşınmış) klasörler atlanır.
+
+        @return Diyaloğun başlangıç klasörü.
+        """
+        current = self.projectPathEdit.text().strip()
+        if current:
+            parent = Path(current).parent
+            if parent.is_dir():
+                return str(parent)
+        saved = self.settings.value("lastProjectDir", "", type=str)
+        if saved and Path(saved).is_dir():
+            return saved
+        return str(Path.home())
+
     def browse_project(self):
         """@brief Dosya diyaloğuyla Altium projesi seçer ve şemaları listeler.
         """
         path, _ = QtWidgets.QFileDialog.getOpenFileName(
             self,
             "Altium proje dosyası seç",
-            str(Path.home()),
+            self._last_project_dir(),
             "Altium Project (*.PrjPcb *.PrjPCB);;Tüm Dosyalar (*)",
         )
         if not path:
             return
+        # Bir sonraki "Gözat"ta aynı klasörden başla
+        self.settings.setValue("lastProjectDir", str(Path(path).parent))
         self.projectPathEdit.setText(path)
         self.load_schematics(path)
 

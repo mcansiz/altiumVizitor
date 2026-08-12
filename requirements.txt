@@ -7,6 +7,12 @@
 # (Ubuntu 24.04+ / Debian 13+). Ubuntu 22.04 ve öncesinde pip
 # "ResolutionImpossible: wn-geometer==2026.6.10" hatası verir.
 # Python >= 3.10 da şart.
+#
+# DENETİM: aynı liste deps.py'de (Dep tablosu) tutulur ve uygulama HER
+# açılışta oradan denetlenir — paketlerden biri eksikse Schematic Viz
+# başlamaz, hangi paketin eksik olduğunu ve kurulum komutunu söyler.
+# Kurulu durumu görmek için:  py -3.12 deps.py
+# Bu dosyayla deps.py'nin uyumunu görmek için:  py -3.12 deps.py --requirements
 
 # --- Çekirdek (GUI + üretim) ---
 PyQt5>=5.15.11
@@ -17,6 +23,14 @@ openpyxl>=3.1              # Excel çıktıları (IC haritası, MCU pin listesi)
 cascadio>=0.0.17
 trimesh>=4.12
 numpy>=2.0
+
+# --- Alt bağımlılıklar (pip yukarıdakilerle BİRLİKTE otomatik kurar;
+#     ayrıca yazmaya gerek yok ama uygulamanın açılış denetimi bunların
+#     varlığını da kontrol eder — biri eksikse uygulama başlamaz) ---
+#   PyQt5-Qt5, PyQt5-sip          → PyQt5
+#   freetype-py, lxml, lz4,       → altium-monkey
+#   pillow, uharfbuzz, wn-geometer
+#   et-xmlfile                    → openpyxl
 
 # --- Paketleme (opsiyonel, exe üretimi için) ---
 # pyinstaller>=6.21

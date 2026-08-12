@@ -5,14 +5,14 @@ Wavenumber'ın ticari "viz sch 1.0" ürününün açık-kaynak alternatifi.
 [altium_monkey](https://github.com/wavenumber-eng/altium_monkey) kütüphanesi
 (Eli Hughes / Wavenumber) üzerine kurulu.
 
-**Mevcut sürüm**: `APP_VERSION` sabiti **`viewer.py`'de** tutulur (şu an 2.15.1);
+**Mevcut sürüm**: `APP_VERSION` sabiti **`viewer.py`'de** tutulur (şu an 2.19.0);
 `gui.py` oradan import eder (v2.9.29'da taşındı — HTML çıktıları da sürümü
 gösterebilsin diye, tek kaynak). Yeni özellik/düzeltme ekleyince bu sabiti
 güncelle (semver: major.minor.patch). Sürüm pencere başlığında, alt durum
 çubuğunda, üretim log'unun başında, "Hakkında" diyaloğunda ve birleşik HTML'in
 sağ üst rozetinde (`{proje} · v{APP_VERSION}`) görünür.
 
-## Üç Dosya
+## Dört Dosya
 
 - **`viewer.py`** — Tüm üretim mantığı. Ortak `_collect_data()` helper'ı sayfaları,
   netleri, komponentleri, sheet symbol'leri (block'ları), netlist'i (pin→net)
@@ -95,6 +95,14 @@ sağ üst rozetinde (`{proje} · v{APP_VERSION}`) görünür.
     DEĞİŞMEZ (cross-probe arka planda çalışır). ~45-50MB çıktı.
     `build_combined_shell()` kabuk sayfayı, köprü için her iki builder'a eklenen
     `crossProbeOut()` + message listener'ı kullanır.
+    **Net cross-probe** (v2.18.0): komponentin yanında NET seçimi de paylaşılır —
+    şematikte bir net adına (veya Nets listesinden bir net'e) tıklayınca PCB'de
+    o net'in bakırı tüm katmanlarda vurgulanır, tersi de çalışır (PCB'de ize çift
+    tık / Netler panelinden seçim → şematikte net yayları çizilir). Mesaj tipi
+    `xprobe-net` (`{{source, net}}`, `net:null` = "bırak"); 3D'ye iletilmez (net
+    verisi yok). Ad birebir tutmazsa büyük/küçük harf duyarsız eşleştirilir.
+    Ping-pong'u `xpApplying` bayrağı keser: gelen mesaj uygulanırken hiçbir
+    panel geri yayın yapmaz. Çoklu seçimde (Shift) EN SON seçilen net iletilir.
     **İKİ KRİTİK GÖMME KURALI** (bkz. Çözülen Sorunlar): (1) iç HTML JSON'unda
     `</` → `<\/` yapılır, yoksa iç viewer'ların `</script>`'i kabuğun satır-içi
     script'ini erken kapatır → paneller boş. (2) `srcdoc` kullanılır, Blob URL
@@ -106,6 +114,7 @@ sağ üst rozetinde (`{proje} · v{APP_VERSION}`) görünür.
   = belirsiz/marquee (süresi kestirilemeyen adım, örn. PCB `to_layer_svgs()`).
   Üretici fonksiyonlar `progress=` callback'i alır (combined/pcbview/html).
 - **`gui.ui`** — Qt Designer XML form. `uic.loadUi('gui.ui')` ile yüklenir.
+- **`deps.py`** — Bağımlılık kataloğu + başlangıç denetimi (bkz. aşağıdaki bölüm).
 
 ## SchDoc Bulma Fallback'i — Cross-platform (ÖNEMLİ)
 
@@ -121,6 +130,45 @@ Bu olmadan Windows'ta kaydedilip Linux'ta açılan projeler (PrjPcb içindeki
 `SCH\dosya.SchDoc` ters-slash referansı Linux'ta çözülemez) açılamaz. İleride
 uygulama Linux için derlenirse bu fallback sayesinde bozulmaz. Kodda hardcoded
 path ayracı yok — her yerde `pathlib.Path` kullanılıyor (OS'a göre çözülür).
+
+## Bağımlılık Denetimi — eksik kütüphaneyle çalışmaz (v2.19.0+)
+
+Kullanılan TÜM kütüphaneler `deps.py`'deki **`DEPENDENCIES`** tablosunda tek
+kaynak olarak tutulur (dist adı, import adı, minimum sürüm, ne için gerektiği,
+doğrudan mı/alt bağımlılık mı). `requirements.txt` bu tabloyla eşleşir
+(`py -3.12 deps.py --requirements` ile karşılaştırılabilir).
+
+- **Doğrudan**: PyQt5, altium-monkey, openpyxl, cascadio, trimesh, numpy
+- **Alt bağımlılık** (olmazsa yine çöker): PyQt5-Qt5, PyQt5-sip, freetype-py,
+  lxml, lz4, pillow, uharfbuzz, wn-geometer, et-xmlfile
+
+**Kapı nerede kurulu**: `gui.py` HİÇBİR üçüncü-parti import'tan ÖNCE (PyQt5
+dahil) `deps.enforce(gui=True)` çağırır → eksik varsa konsola + hata diyaloğuna
+yazıp `SystemExit(1)`. `viewer.py` ise import edilir edilmez `deps.require()`
+çağırır → `DependencyError`. Sıra kritiktir: `import deps` satırı PyQt5/
+altium_monkey import'larının ÜSTÜNDE olmalı, yoksa kullanıcı açıklayıcı mesaj
+yerine ham `ImportError` traceback'i görür. Sonuç `deps._CACHE`'te tutulur
+(gui → viewer zincirinde ikinci denetim bedavadır).
+
+- **Sürüm denetimi yalnız doğrudan bağımlılıklarda** ve yalnız minimum
+  bildirilmişse yapılır; sürüm dizgesi ayrıştırılamazsa karşılaştırma ATLANIR
+  (hatalı ayrıştırma geçerli bir kurulumu reddetmesin).
+- **Frozen (PyInstaller) modda yalnız import edilebilirlik denetlenir**:
+  paketlenmiş exe'de pip metadata'sı bulunmayabilir → sürüm/metadata denetimi
+  yanlış "eksik" deyip exe'yi hiç açılmaz hale getirirdi. `sys.frozen` ile
+  ayrılır; import adı olmayan paket (PyQt5-Qt5) frozen modda atlanır.
+- **Konsol kodlaması**: mesajda Türkçe karakter + ✓/✗/→ var; Türkçe Windows
+  konsolunda (cp1254/cp437) düz `print` UnicodeEncodeError fırlatıp ASIL hatayı
+  gizler → yazma `deps._write()` üzerinden yapılır (kodlanamayan karakter '?'
+  ile değiştirilir; CLI ayrıca stdout'u UTF-8'e almayı dener).
+- **Kaçış kapağı**: `SCHVIZ_SKIP_DEP_CHECK=1` denetimi tamamen atlar.
+- `build_exe.bat` ve `build_linux.sh` paketlemeden ÖNCE `deps.py` çalıştırır
+  (çıkış kodu 1 ise paketleme durur) — PyInstaller eksik paketi yalnız uyarıyla
+  geçip "başarılı" ama açılmayan exe üretiyordu.
+- GUI'nin "Hakkında" diyaloğundaki sürüm listesi de `deps.status_table()`'dan
+  üretilir (ikinci bir liste tutulmaz).
+
+Listeyi görmek için: `py -3.12 deps.py` (tablo + eksik varsa çıkış kodu 1).
 
 ## Geliştirme Komutları
 
@@ -464,6 +512,176 @@ mesajına bak.
   bu API olmayabilir (graceful fallback var, "veri yok" der).
 
 ## Çözülen Sorunlar (tarihçe)
+
+- **Şematikte bazı net etiketleri tıklanamıyordu — üstlerinde Altium "Blanket"i
+  var (v2.18.2, kullanıcı bildirimi: RS485AB_P aramada bulunuyor ama şemada
+  seçilemiyor)**: Diferansiyel çift / net-class direktifleri Altium'da bir
+  **Blanket** ile sarılır; bu, SVG'ye yarı saydam beyaz poligon olarak
+  (`fill=#FFFFFF fill-opacity=0.49`) ve etiket yazısından SONRA çizilir → yazı
+  görünür ama `elementFromPoint` poligonu döndürür, tıklama ona gider. Teşhis:
+  yazının sınıfı/`data-net`'i DOĞRUydu ve olayı doğrudan `<text>`e göndermek
+  seçimi yapıyordu; kaçıran tek şey hit-test'ti. Çözüm: şematikte etkileşimli
+  olan tek şey yazıdır → `.sheet-body svg * {{pointer-events:none}}` +
+  `.sheet-body svg text, .sheet-body svg text * {{pointer-events:auto}}`.
+  Pan/boş-alan davranışı değişmez (mousedown hedefi artık `<svg>`'nin kendisi
+  olur, mevcut kontroller aynı çalışır); metin seçme/kopyalama korunur.
+  Doğrulama (CDP): blanket altındaki etiket hit-test'te en üstte, koordinattan
+  tıklama net'i seçiyor; normal net / designator / boş-alan / metin seçme
+  regresyonsuz (6/6).
+
+- **Net cross-probe'u BAZI netlerde çalışmıyordu — İKİ ayrı ad uyuşmazlığı
+  (v2.18.1, kullanıcı bildirimi: "ADC3_CS'i göstermiyor")**:
+  (1) **Otomatik PCB adları**: şematik net listesi sayfadaki etiket/port
+  adlarından kurulur (ADC3_CS); PCB ise aynı bakırı kendi otomatik adıyla tanır
+  (BRK-213: 367 netin **253'ü** `NetU9_15` gibi). Ad eşleşmediği için PCB tarafı
+  "bulunamadı" diyordu.
+  (2) **Overbar (üst çizgi) gösterimi**: aktif-düşük sinyallerin ham adı
+  `ADC3_C\S\` biçimindedir; `get_obj_text()` bunu şematik listesi için
+  "ADC3_CS"e normalize ediyor ama netlist/PCB tarafında ham hali duruyordu →
+  aday adların HİÇBİRİ tutmuyordu. Ölçüm: BRK-209'un 68 port adından 10'u
+  (ADC1_CS, ADC3_CS, ADC_IRQ, PEX_INT, PEX_RST…) yalnız bu yüzden eşleşmiyordu
+  — hepsi CS/IRQ/INT/RST, yani hepsi üst çizgili. `ADC3_C\S\` → PCB'de
+  `NetR61_1`. Çözüm: takma ad ANAHTARLARI overbar işaretleri atılmış halde
+  kurulur (değerler ham PCB adı kalır, PCB kendi adıyla arar) ve netlist artık
+  her nete `labels` (net_label + port + sheet_entry + power_port endpoint
+  adları, normalize) ekler → yeniden adlandırma yapılmamış netler de eşleşir.
+  (3) **Kanal taban adı**: tekrar (Repeat) sayfası şematikte BİR kez çizildiği
+  için etiket taban adıyla görünür (VSS_ADC) ama derlenen/PCB adı kanal sonekli
+  olur (VSS_ADC_1..5). Taban ad kendisi bir PCB neti DEĞİLSE taban da anahtar
+  yapılır → tıklayınca tüm kanallar birlikte vurgulanır.
+  **Sonuç (BRK-209)**: eşleşen net 39 → 118; şematikteki 137 netin **135'i**
+  PCB'de bulunuyor (kalan 2'si 'Analog PORT'/'Digital PORT' — bakırı olmayan
+  harness portları). Ortak çözüm **takma ad köprüsü**:
+  `_merge_netlist_with_pcb` her nete `pcb_name` (yeniden adlandırmadan ÖNCEki
+  PCB adı) + `sch_labels` (o bakırı işaret eden tüm şematik etiketleri) ekler;
+  `_collect_data` bunlardan `etiket → [PCB net adları]` haritası kurup
+  `net_list[i]["pcb"]` olarak gömer. Şematik `xprobe-net` mesajına `pcbNet`
+  dizisini de koyar, PCB tarafı önce görünen adı sonra PCB adlarını dener; ters
+  yönde şematik gelen PCB adını takma ad listesinde arar. **Liste (tek ad değil)
+  olmasının sebebi**: kanal-tekrarlı tasarımda bir etiket birden çok PCB netine
+  denk gelebilir → `highlightNet` artık ad DİZİSİ kabul eder, canvas sürümünde
+  `selNets` + Set tabanlı filtre (`drawLayer(li, netSet)`) ile hepsi birden
+  vurgulanır.
+
+- **Net seçimi panellere yayılmıyordu (v2.18.0, kullanıcı isteği)**: Cross-probe
+  yalnız KOMPONENT taşıyordu; şematikte bir net seçilince PCB'de hiçbir şey
+  olmuyordu. Yeni `xprobe-net` mesajı (`{source, net}`) şematik ↔ PCB arasında
+  çift yönlü çalışır: şematikte net adına/liste satırına tıkla → PCB'de net tüm
+  katmanlarda vurgulanır + Netler panelindeki satır işaretlenir; PCB'de ize çift
+  tık veya Netler panelinden seçim → şematikte net yayları çizilir. Her iki PCB
+  görüntüleyici (SVG + geometri/canvas) destekler; 3D'ye iletilmez (net verisi
+  yok). **Üç ayrıntı**: (1) ping-pong'u `xpApplying` bayrağı keser — gelen mesajı
+  uygularken `crossProbeOut`/`crossProbeNet` no-op olur, yoksa iki panel
+  birbirini sonsuz tetiklerdi; (2) yayın `highlightNet`/`clearNetHighlight`
+  İÇİNDE değil KULLANICI giriş noktalarında yapılır (highlightNet zaten
+  clearNetHighlight çağırıyor → önce null sonra ad yayılır, karşı panelde
+  komponent seçimi de silinirdi); (3) `netMark` panel henüz açılmadıysa listeyi
+  bir kez render eder (tembel render yüzünden satır bulunamıyordu). Kabukta
+  `lastNet` saklanır, PCB tembel yüklenince `repostSel` ile iletilir.
+  Doğrulama (CDP, iki mod): SVG 8/8, geometri 7/7 PASS; komponent cross-probe
+  ve 3D testleri regresyonsuz (12/12, 8/8).
+  **Test notu**: CDP'de `element.dataset` boş obje olarak serileşir — doğrudan
+  `dataset.net` (string) okunmalı, yoksa test yanlış FAIL verir.
+
+- **3D: model geometrisi yerleşim başına yeniden kuruluyordu (v2.17.0, ölçüme
+  dayalı optimizasyon — "A seçeneği")**: `buildModels` HER yerleşim için ayrı
+  `BufferGeometry` kurup `computeVertexNormals()` çalıştırıyor ve GPU'ya ayrı
+  yüklüyordu. Aynı kütüphane modeli board'da onlarca kez geçtiğinden (BRK-213:
+  60 model → 695 yerleşim) aynı üçgenler **4.7 kez** taşınıyordu. Yeni
+  `partGeometry(modelId, parçaIdx, pt)` önbelleği geometriyi (model, parça)
+  başına BİR kez kurar; three.js aynı geometriyi birden çok Mesh'te paylaşır
+  (dönüşüm mesh'in kendi matrisinde). **Materyal bilerek paylaşılmadı**: seçim
+  karartması (`dimReg` → `userData.dDesig`) materyal üzerinden çalışıyor,
+  paylaşılsaydı bir direnç seçilince aynı modeli kullanan 167 kopya birlikte
+  yanardı. **Ölçüm (BRK-213, headless Edge + CDP)**: GPU geometrisi
+  **2586 → 279**, JS yığını 91.7 → 72.2 MB, sayfa yükleme→sahne hazır
+  **1.12 → 0.76 s** (3 yenilemenin medyanı), hover raycast 2.65 → 0.65 ms,
+  `setSel` 3.6 → 1.0 ms. **Regresyon kanıtı**: mesh (2581), materyal (2586),
+  draw call (2586) ve rasterize edilen üçgen (985 549) DEĞİŞMEDİ; 40 komponentin
+  dünya bbox merkezi (3 hane) birebir aynı; aynı kameradan alınan ekran
+  görüntüsü **bayt bayt özdeş** (MD5 eşit); seçimde yalnız R101_4'ün 4 mesh'i
+  parlıyor, aynı modeli paylaşan 166 kopya etkilenmiyor.
+  **Yapılmadı (bilinçli)**: draw call sayısı değişmez — onun için instancing
+  gerekir (2580 Mesh → 273 InstancedMesh, ölçülen kare kazancı ~3.1×) ama
+  InstancedMesh'te örnek başına emissive olmadığından seçim vurgusunun
+  `setColorAt`/overlay ile yeniden yazılması gerekir; ayrı iş olarak duruyor.
+  Ölçüm dosyaları: `scratchpad/an3d_*.py`, `test_sharedgeo.py`.
+
+- **3D: silkscreen logosu yok + zoom hep merkeze (v2.16.2, kullanıcı bildirimi)**:
+  (1) **Logo**: hızlı moddaki 3D doku üreticisi (`_build_surface_from_geometry`)
+  silkscreen'den yalnız iz/yay/yazı çiziyor, **REGION'ları** yalnız bakır katman
+  için alıyordu. Logo/amblem gibi vektör grafikler silkscreen REGION'u olarak
+  saklanır (BRK-213'te "BARKO ELEKTRONİK" = 68 region) → 2D'de görünüp 3D'de
+  kayboluyordu. Silk region'ları da (delikleriyle, evenodd) çizilir; doğrulama:
+  68/68 region dokuda, üstten görünüm ekran görüntüsünde logo okunuyor.
+  (2) **Zoom**: 3D tekerleği yalnız `orbit.r`'yi ölçekliyordu → hep ekran
+  merkezine yaklaşıyordu (2D PCB imlece yaklaşırken). Yeni `zoomAt(mult,cx,cy)`:
+  imlecin altındaki nokta P (ışının board düzlemi z=0 ile kesişimi) etrafında
+  hem kamerayı hem orbit hedefini `f` ile ölçekler → bakış yönü ve mesafe oranı
+  korunur, **P ekranda tam yerinde kalır** (perspektif kamerada matematiksel
+  olarak kesin: P−kamera vektörü yalnız ölçeklenir). Mesh raycast'i YOK (board
+  düz; yüzlerce mesh'te tekerlek başına raycast pahalı). Kenardan (teğet) bakışta
+  kesişim çok uzağa düşerse (>4r) veya kesişim yoksa eski merkez-zoom'a düşülür.
+  Aynı fonksiyon pinch'te de kullanılır (parmakların ortası). Doğrulama (CDP):
+  üç farklı ekran noktasında P'nin NDC kayması 0.00000, mesafe tam yarıya iner;
+  ekran merkezinden zoom'da hedef sabit (8/8 PASS).
+
+- **Geometri viewer: TERS (inverted) yazılar dolu beyaz KUTU çiziliyordu
+  (v2.16.1, kullanıcı bildirimi: J7_3 yanındaki +OUT / -OUT / OUT3-50A)**:
+  `render_pcb_text()` bir glifi `outline` + **`holes`** olarak döndürüyor;
+  `extract_pcb_geometry` yalnız `outline`'ı alıyordu. İki etkisi vardı:
+  (1) Normal TrueType yazıda 'O','a','8' gibi harflerin iç boşluğu dolu
+  çiziliyordu (fark edilmesi zor), (2) **ters yazıda TÜM METİN kayboluyordu** —
+  Altium ters yazıyı "dolu dikdörtgen + harf biçimli DELİKLER" olarak
+  modelliyor (`is_inverted=True, use_inverted_rectangle=True`; '+OUT' için
+  5 noktalı kutu + 4 delik + 'O'nun ortasındaki ada ayrı kontur), delikler
+  atlanınca geriye düz beyaz kutu kalıyordu. Çözüm: `[g.outline] + g.holes`
+  konturlarının tümü aynı yola eklenir; canvas'ta `fill('evenodd')`, 3D doku
+  SVG'sinde `fill-rule="evenodd"` deliği oyar, deliğin İÇİNDEKİ adayı yeniden
+  doldurur (kontur sırası önemsiz — evenodd sarım yönüne bakmaz). Aynı
+  düzeltme hızlı moddaki 3D board dokusuna da yansır (aynı `geo["texts"]`).
+  Ek olarak 3D doku SVG'sinde bakır pour'ları da artık `r[3]` delikleriyle
+  (anti-pad) evenodd çiziliyor. **Doğrulama** (BRK-213, headless Edge + CDP
+  ekran görüntüsü): +OUT/-OUT/OUT3-50A ve .PCBCODE artık beyaz kutudan oyulmuş
+  harfler olarak okunuyor (Altium/KiCad ile aynı). Yazı YÖNÜ zaten doğruydu:
+  board'un üst kenarındaki kopyalar tasarımda gerçekten `rotation=180`, alt
+  kenardakiler `rotation=0` (KiCad'deki görünümle birebir).
+
+- **Cross-probe seçimi "yapışıyordu" + Parçalar toggle'ı kendiliğinden geri
+  açılıyordu + board'u kaplayan mavi blok (v2.16.0, kullanıcı bildirimi)**:
+  Üç ayrı şikâyet, üç ayrı kök neden.
+  (1) **Bayat seçim**: şematikte boş alana tıklayıp seçimi bırakınca hiçbir yere
+  haber verilmiyordu (`crossProbeOut` yalnız SEÇİMDE çağrılıyordu) → kabuktaki
+  `lastSel` eski designator'da kalıyor, 3D/PCB'ye geçince `repostSel`/`setViewMode`
+  onu geri gösteriyordu. Artık **seçim temizleme de bir mesaj**: designator'ı
+  boş `xprobe` = "bırak". Yayan yerler: şematik boş-alan tıklaması +
+  `clearSelection()` (Esc / Temizle), SVG PCB boş-alan tıklaması + Esc, canvas
+  PCB boş-alan tıklaması + Esc, 3D boşluğa tıklama. Alan yerler: üç viewer'ın
+  `message` handler'ı (kutu/popup/vurgu temizlenir), kabukta `lastSel = null`.
+  (2) **Parçalar toggle'ı**: 3D'nin handler'ı GELEN HER mesajda `compBtn.onclick()`
+  ile parçaları geri açıyordu; mod değiştikçe kabuk aynı seçimi tazelediği için
+  kullanıcının kapattığı parçalar her sekme dönüşünde geri geliyordu. Artık
+  gelen designator **son gelenle** (`lastXpSel`) karşılaştırılır; aynıysa hiçbir
+  şey yapılmaz. Karşılaştırma `selectedDesig`'e DEĞİL `lastXpSel`'e bakar —
+  çünkü parçaları gizlemek yerel olarak `setSel(null)` yapıyor, bu da tekrar
+  mesajını "yeni seçim" gibi gösterirdi. Parçaları gizlemek artık diğer
+  panellere seçim-bırak YAYMAZ (yerel görünüm tercihi).
+  (3) **Board'u kaplayan açık mavi dikdörtgen**: PcbDoc'ta MECHANICAL1 üzerinde,
+  komponente bağlı OLMAYAN (`component_index=65535`) iki serbest 3D gövde —
+  202.7×85.1 mm, 20 mm + 22 mm yükseklik, `body_color_3d=16776960` (BGR → #00ffff),
+  **`body_opacity_3d = 0.0`**. Altium bunları TAM SAYDAM çizer (muhafaza/gabari
+  hacmi); biz opaklık alanını hiç okumadığımız için dolu blok olarak çiziyorduk.
+  `_extract_3d` artık opaklığı okur: alan **azınlıkta** saydam ise (≤%25 — bazı
+  dosyalarda alan hiç doldurulmamış olabilir, hepsi 0 ise ölçüt yok sayılır)
+  opacity ≤0.02 gövdeler ÇİZİLMEZ (log'a sayısı yazılır), 0.02–0.98 arası
+  gövdeler yarı saydam materyalle çizilir. BRK-213: 14 gövde atlandı (2 mekanik
+  hacim + 12 MECH montaj donanımı), 695 STEP + 1 extrude kaldı; Smart_MCU
+  etkilenmedi. Ayrıca "Parçalar" toggle'ı artık `userData.desig` yerine
+  `userData.part` bayrağına bakar → designator'sız gövdeler de gizlenir
+  (kullanıcı "kapattığım halde duruyor" diyordu).
+  **Doğrulama** (headless Edge + CDP, iframe başına execution context):
+  seçim/temizleme yayılımı + toggle kalıcılığı 12/12 PASS, PCB↔şematik temizleme
+  6/6 PASS; dört şablonun JS'i `node --check` ile hatasız.
 
 - **Gerçek projede İKİ ciddi veri kaybı: 5 sayfa hiç açılmıyor + 67 sayfada
   yalnız 18 komponent (v2.15.1, kullanıcı log'u)**:

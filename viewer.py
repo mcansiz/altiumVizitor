@@ -40,12 +40,18 @@ import datetime
 import xml.etree.ElementTree as ET
 from typing import Callable
 
+# Bağımlılık kapısı — viewer doğrudan import edildiğinde de (script/otomasyon)
+# eksik kütüphaneyle çalışmasın. gui.py üzerinden gelindiğinde denetim zaten
+# yapılmıştır (sonuç deps modülünde önbelleklenir, ikinci kez maliyeti yok).
+import deps
+deps.require()
+
 from altium_monkey.altium_prjpcb import AltiumPrjPcb
 from altium_monkey.altium_schdoc import AltiumSchDoc
 
 # Uygulama sürümü — tek kaynak burası; gui.py buradan import eder.
 # HTML çıktılarında sağ üst köşedeki rozette görünür (build saati yerine).
-APP_VERSION = "2.15.1"
+APP_VERSION = "2.19.0"
 
 # Dikey pin adlarının doğru render edildiği minimum altium_monkey sürümü.
 # Bu sürümden öncesinde STM32 gibi IC'lerde dikey pinler yatay çiziliyordu.
@@ -292,17 +298,17 @@ def _check_altium_monkey_version(log):
         ver = metadata.version("altium-monkey")
     except Exception:
         return
-    # CalVer karşılaştırması (YYYY.M.D) — string parça parça sayısal
+    # CalVer karşılaştırması (YYYY.M.D) — deps.parse_version PyPI'nin `.postN` /
+    # `bN` eklerini de doğru okur. (Eski saf `int(x) for x in v.split(".")`
+    # sürümü `2026.8.11.post1`te patlayıp (0,)'a düşüyor, yani GÜNCEL kütüphanede
+    # bile "eski sürüm" uyarısı basıyordu.)
     def parse(v):
-        """@brief parse()
-        
-        @param v
-        @return Üretilen sonuç.
+        """@brief Sürüm dizgesini karşılaştırılabilir demete çevirir.
+
+        @param v Sürüm dizgesi
+        @return int demeti (ayrıştırılamazsa (0,))
         """
-        try:
-            return tuple(int(x) for x in v.split("."))
-        except Exception:
-            return (0,)
+        return deps.parse_version(v) or (0,)
     if parse(ver) < parse(MIN_RECOMMENDED_AM):
         log(f"  ! Not: altium_monkey {ver} kullanılıyor. Dikey pin adları "
             f"(STM32 vb.) {MIN_RECOMMENDED_AM} öncesinde yatay render edilir. "
@@ -945,6 +951,45 @@ def _collect_data(project_path: str, log, with_pcb=False, progress=None):
             _merge_netlist_with_pcb(netlist, project_path, log)
         except Exception as e:
             log(f"  ! PCB netlist doğrulaması atlandı: {e}")
+        # Şematik etiketi → PCB net adı köprüsü (cross-probe için). PCB'de
+        # otomatik adlı (NetU5_20) netlerin şematikteki adı etiketten gelir;
+        # ad eşleşmediği sürece PCB tarafı o net'i bulamıyordu. Bir etiket
+        # birden çok PCB net'ine denk gelebilir (kanal tekrarları) → liste.
+        # Anahtarlar şematikte GÖRÜNEN adla (overbar işaretleri atılmış) kurulur —
+        # 'ADC3_C\S\' ham adı hiçbir yerde eşleşmiyordu. Değerler ham PCB adı
+        # kalır (PCB tarafı kendi adıyla arar).
+        alias = {}
+        pcb_names = {nn.get("pcb_name") or "" for nn in netlist.get("nets", [])}
+        for nn in netlist.get("nets", []):
+            pn = nn.get("pcb_name") or ""
+            if not pn:
+                continue
+            cands = ([nn.get("name") or ""] + list(nn.get("sch_labels") or [])
+                     + list(nn.get("alias_labels") or []))
+            keys = {str(c).replace("\\", "") for c in cands if c}
+            # Kanal-tekrarlı sayfalar: şematik BİR kez çizildiği için etiket
+            # taban adıyla görünür (VSS_ADC) ama derlenen/PCB adları kanal
+            # sonekli olur (VSS_ADC_1..5). Taban ad KENDİSİ bir PCB neti
+            # değilse taban da anahtar yapılır → tıklayınca tüm kanallar
+            # birlikte vurgulanır (bu yüzden değer LİSTE).
+            for k in list(keys):
+                base = re.sub(r"_\d+$", "", k)
+                if base and base != k and base not in pcb_names:
+                    keys.add(base)
+            for lbl in keys:
+                if lbl and lbl != pn:
+                    alias.setdefault(lbl, [])
+                    if pn not in alias[lbl]:
+                        alias[lbl].append(pn)
+        if alias:
+            hit = 0
+            for net in net_list:
+                a = alias.get(net["name"])
+                if a:
+                    net["pcb"] = a
+                    hit += 1
+            log(f"  · Cross-probe için {hit} net PCB adıyla eşleştirildi "
+                f"(ör. şematik etiketi ↔ NetU5_20 gibi otomatik PCB adı).")
 
     # === BOM / Pick&Place / Varyant (AltiumDesign API) ===
     prog(0.96, "Tasarım verileri")
@@ -1205,12 +1250,26 @@ def compile_project_netlist(schdocs, project, log):
             seen_p.add(k)
             ports.append({"name": nm, "source_sheet": ss,
                           "io_type": port_io.get((Path(ss).name.lower(), nm), "")})
+        # Net'i işaret eden TÜM şematik adları (etiket / port / sheet-entry),
+        # overbar gösterimi normalize edilmiş halde. Cross-probe köprüsü bunu
+        # kullanır: şematikteki görünen ad "ADC3_CS" iken netlist/PCB tarafında
+        # ham hali "ADC3_C\S\" (aktif-düşük üst çizgi) geçiyor ve hiçbir yerde
+        # eşleşmiyordu (kullanıcı bildirimi: ADC3_CS PCB'de gösterilmiyor).
+        labels, seen_l = [], set()
+        for ep in n.get("endpoints", []) or []:
+            if ep.get("role") not in ("net_label", "port", "sheet_entry", "power_port"):
+                continue
+            nm = str(ep.get("name", "") or "").replace("\\", "")
+            if nm and nm not in seen_l:
+                seen_l.add(nm)
+                labels.append(nm)
         nets_out.append({
             "name": n.get("name", ""),
             "auto_named": n.get("auto_named", False),
             "source_sheets": n.get("source_sheets", []),
             "terminals": terminals,
             "ports": ports,
+            "labels": labels,
         })
 
     log(f"  ✓ {len(nets_out)} net, {total_terminals} pin bağlantısı çıkarıldı")
@@ -1330,6 +1389,7 @@ def _merge_netlist_with_pcb(netlist, project_path, log):
         members = sorted(set(pcb_groups[ni]))
         terminals = []
         sch_labels, ports, seen_p = set(), [], set()
+        alias_labels = set()      # cross-probe köprüsü (rename'i ETKİLEMEZ)
         for d, p in members:
             info = pin_name_exact.get((d, p))
             if info is None:
@@ -1341,6 +1401,7 @@ def _merge_netlist_with_pcb(netlist, project_path, log):
                               "pin_name": info[0] or "", "pin_type": info[1] or ""})
             rec = pin_sch_net.get((d, p))
             if rec:
+                alias_labels.update(rec.get("labels") or [])
                 if not rec.get("auto_named"):
                     sch_labels.add(rec["name"])
                 for pt in rec.get("ports") or []:
@@ -1362,7 +1423,16 @@ def _merge_netlist_with_pcb(netlist, project_path, log):
                 name = cand
                 renamed += 1
                 auto = name.startswith(("Net", "PCBNET_"))
+        # pcb_name: PCB'nin KENDİ net adı (yeniden adlandırmadan ÖNCEki).
+        # Cross-probe için şart: şematik "ADC3_CS" derken PCB o net'i
+        # "NetU5_20" diye tanır; ad eşleşmediği için PCB'de hiçbir şey
+        # vurgulanmıyordu (kullanıcı bildirimi). sch_labels ise aynı bakırı
+        # işaret eden TÜM şematik etiketleri (kanal tekrarlarında bir etiket
+        # birden çok PCB net'ine karşılık gelebilir).
         new_nets.append({"name": name, "auto_named": auto,
+                         "pcb_name": pcb_net_names.get(ni, ""),
+                         "sch_labels": sorted(sch_labels),
+                         "alias_labels": sorted(alias_labels),
                          "source_sheets": [], "terminals": terminals,
                          "ports": ports})
 
@@ -1861,7 +1931,26 @@ def _extract_3d(pcb, log=print):
         bodies = []        # modelsiz gövdeler (extrude fallback)
         placements = []    # STEP modelli gövdeler
         U2MM = 1e-4 * MIL2MM    # model_2d_x/y ve model_3d_dz birimi: 0.1 µmil → mm
+        # Altium "3D Body / Opacity": 0 = TAM SAYDAM (Altium hiç çizmez). Mekanik
+        # katmana çizilen kutu hacimleri (muhafaza/gabari) ve montaj donanımı böyle
+        # işaretlenir; bunları opak çizmek board'un önüne dev renkli blok koyuyordu
+        # (kullanıcı bildirimi: board'u kaplayan açık mavi dikdörtgen — MECHANICAL1
+        # üzerinde 202×85mm, opacity 0, komponente bağlı DEĞİL).
+        # Emniyet: bazı dosyalarda alan hiç doldurulmamış olabilir (hepsi 0) →
+        # o zaman anlamsızdır, yok sayılır. Yalnız AZINLIK saydamsa ölçüt uygulanır.
+        _ops = []
         for b in pcb.component_bodies:
+            try:
+                _ops.append(float(getattr(b, "body_opacity_3d", 1) or 0))
+            except Exception:
+                _ops.append(1.0)
+        _n_clear = sum(1 for o in _ops if o <= 0.02)
+        honor_op = 0 < _n_clear <= 0.25 * max(len(_ops), 1)
+        n_skipped = 0
+        for bi, b in enumerate(pcb.component_bodies):
+            if honor_op and _ops[bi] <= 0.02:
+                n_skipped += 1      # Altium'da görünmeyen gövde → 3D'de de çizme
+                continue
             vo = getattr(b, "outline", None)
             if not vo:
                 continue
@@ -1925,8 +2014,11 @@ def _extract_3d(pcb, log=print):
                 else:
                     r = col & 0xFF; g = (col >> 8) & 0xFF; bl = (col >> 16) & 0xFF
                     color = "#%02x%02x%02x" % (r, g, bl)
-                bodies.append({"d": desig, "layer": layer, "h": round(h, 3),
-                               "z0": round(so, 3), "color": color, "poly": poly})
+                rec = {"d": desig, "layer": layer, "h": round(h, 3),
+                       "z0": round(so, 3), "color": color, "poly": poly}
+                if honor_op and _ops[bi] < 0.98:
+                    rec["op"] = round(_ops[bi], 2)   # yarı saydam gövde (cam/muhafaza)
+                bodies.append(rec)
         # GERÇEK delikler (v2.9.32): ≥0.6mm çaplı yuvarlak delikler (THT pad +
         # büyük via) JS'te board geometrisinden shape.holes ile kesilir, doku
         # alfası delinir → içinden arka plan görünür (eski görünüm: koyu boyalı
@@ -1978,6 +2070,9 @@ def _extract_3d(pcb, log=print):
         log(f"  ✓ 3D: board {maxx-minx:.0f}×{maxy-miny:.0f}mm · {th_mm:.2f}mm ·"
             f" {len(placements)} STEP + {len(bodies)} extrude gövde ·"
             f" {len(drills)} gerçek delik")
+        if n_skipped:
+            log(f"  · 3D: {n_skipped} gövde Altium'da tam saydam (opacity 0) —"
+                " çizilmedi (mekanik hacim/gabari)")
         return {"available": True, "thickness": round(th_mm, 3),
                 "outline": outline, "bodies": bodies,
                 "models": models, "placements": placements, "drills": drills,
@@ -2161,8 +2256,10 @@ def _build_surface_from_geometry(geo, log=print):
             # 1) bakır dolgu (pour) — sönük
             for r in geo["regions"]:
                 if r[0] == ci and len(r[2]) >= 6:
-                    out.append('<path d="%s" fill="%s" fill-opacity="0.5"/>'
-                               % (poly_d(r[2]), COPPER))
+                    # delikler (anti-pad / pour boşlukları) evenodd ile oyulur
+                    d = " ".join([poly_d(r[2])] + [poly_d(h) for h in (r[3] or [])])
+                    out.append('<path d="%s" fill="%s" fill-opacity="0.5" '
+                               'fill-rule="evenodd"/>' % (d, COPPER))
             # 2) bakır izler + yaylar — sönük
             out += strokes(geo["tracks"], COPPER, "0.5", {ci})
             for a in geo["arcs"]:
@@ -2172,11 +2269,19 @@ def _build_surface_from_geometry(geo, log=print):
             for p in geo["pads"]:
                 if p[0] == ci or p[0] == multi:
                     out.append(pad_el(p, GOLD, "0.95"))
-            # 4) silkscreen: çizim + YAZILAR
+            # 4) silkscreen: çizim + BÖLGELER + YAZILAR
             out += strokes(geo["tracks"], SILK, "1", {si})
             for a in geo["arcs"]:
                 if a[0] == si:
                     out.append(arc_el(a, SILK, "1"))
+            # Silkscreen REGION'ları (logo/amblem gibi vektör grafikler böyle
+            # çizilir — BRK-213'ün "BARKO ELEKTRONIK" logosu 68 region).
+            # Eskiden yalnız bakır region'ları alınıyordu → logo 2D'de görünüp
+            # 3D board yüzeyinde kayboluyordu (kullanıcı bildirimi).
+            for r in geo["regions"]:
+                if r[0] == si and len(r[2]) >= 6:
+                    d = " ".join([poly_d(r[2])] + [poly_d(h) for h in (r[3] or [])])
+                    out.append('<path d="%s" fill="%s" fill-rule="evenodd"/>' % (d, SILK))
             for t in geo["texts"]:
                 if t[0] != si:
                     continue
@@ -2383,15 +2488,25 @@ def extract_pcb_geometry(pcb, log=print):
             if not res:
                 continue
             if getattr(res, "characters", None):
+                # DİKKAT: glif konturunun DELİKLERİ de gerekli (`g.holes`).
+                #  • Normal yazıda 'O','a','8' gibi harflerin iç boşluğu,
+                #  • TERS (inverted) yazıda ise TÜM METİN: altium_monkey ters
+                #    yazıyı "dolu dikdörtgen + harf biçimli delikler" olarak
+                #    döndürür (+OUT: 5 noktalı kutu + 4 delik). Delikler
+                #    atlanınca yazı yerine DOLU BEYAZ KUTU çiziliyordu
+                #    (kullanıcı bildirimi: J7_3 yanındaki +OUT/-OUT/OUT3-50A).
+                # Hepsi tek yola eklenip evenodd ile doldurulur: delik oyar,
+                # deliğin içindeki ada ('O'nun ortası) yeniden dolar.
                 polys = []
                 for ch in res.characters:
                     for g in ch:
-                        pts = []
-                        for x, y in g.outline:
-                            pts.append(XM(x))
-                            pts.append(YM(y))
-                        if len(pts) >= 6:
-                            polys.append(pts)
+                        for cont in [g.outline] + list(getattr(g, "holes", None) or []):
+                            pts = []
+                            for x, y in cont:
+                                pts.append(XM(x))
+                                pts.append(YM(y))
+                            if len(pts) >= 6:
+                                polys.append(pts)
                 if polys:
                     texts.append([layer_of(t.layer), polys])
             elif getattr(res, "lines", None):
@@ -2981,7 +3096,7 @@ def build_3d_html(d3d, timestamp, project_name):
   <button class="b3d on" id="v-lod" title="LOD: döndürme/zoom sırasında çözünürlük düşürülür (akıcılık), durunca netleşir">LOD</button>
 </div>
 <div id="lbl3d"></div>
-<div id="info3d">Sürükle / tek parmak: döndür · Tekerlek / iki parmak: zoom · Sağ-sürükle veya iki parmak kaydır: taşı · Tıkla: komponent</div>
+<div id="info3d">Sürükle / tek parmak: döndür · Tekerlek / iki parmak: imlecin olduğu yere zoom · Sağ-sürükle veya iki parmak kaydır: taşı · Tıkla: komponent</div>
 <script>__THREE__</script>
 <script>
 const D = __DATA__;
@@ -2992,6 +3107,8 @@ let renderer, scene, camera;
 const meshByDesig = {};   // desig -> [mesh,...]
 const pickList = [];
 let autoRot = false, selectedDesig = null;
+// Kabuktan (birleşik görünüm) gelen SON seçim — aynısı tekrar gelirse yok sayılır
+let lastXpSel = null;
 const orbit = { r:120, az:-0.7, el:0.6, tx:0, ty:0, tz:0 };
 const DEG = Math.PI/180;
 const dimMats = [];   // seçimde karartılacak tüm materyaller
@@ -3005,6 +3122,11 @@ function dimReg(mat, desig){
 }
 function registerMesh(mesh, desig){
   mesh.userData.desig = desig || null;
+  // "Parçalar" toggle'ı desig'e DEĞİL bu bayrağa bakar: komponente bağlı olmayan
+  // gövdeler de (mekanik hacim, montaj donanımı — component_index geçersiz)
+  // gizlenebilsin. Eskiden yalnız desig'liler gizleniyordu → çıplak board
+  // isteyen kullanıcının önünde adsız gövdeler kalıyordu.
+  mesh.userData.part = true;
   pickList.push(mesh);
   if(desig){ (meshByDesig[desig] = meshByDesig[desig] || []).push(mesh); }
   dimReg(mesh.material, desig);
@@ -3089,6 +3211,7 @@ function buildScene(){
     catch(e){ return; }
     const mat = new THREE.MeshStandardMaterial(
       {color:new THREE.Color(b.color||'#3a3a3e'), metalness:0.30, roughness:0.5});
+    if(b.op != null && b.op < 0.98){ mat.transparent = true; mat.opacity = b.op; }
     const mesh = new THREE.Mesh(geo, mat);
     if(b.layer==='bottom') mesh.position.z = -(th/2 + (b.z0||0) + h);
     else                   mesh.position.z =  (th/2 + (b.z0||0));
@@ -3169,18 +3292,36 @@ function addSurface(){
   if(s.bot) mk(s.bot, false);
 }
 
+// Model parçalarının GEOMETRİSİ paylaşılır (v2.17.0): aynı kütüphane modeli
+// board'da onlarca kez yerleşiyor (BRK-213: 60 model → 695 yerleşim), eskiden
+// HER yerleşim için ayrı BufferGeometry kurulup ayrı ayrı normal hesaplanıyor ve
+// GPU'ya ayrı yükleniyordu — aynı üçgenler 4.7 kez. three.js bir geometriyi
+// birden çok Mesh'te paylaşabilir (dönüşüm mesh'in kendi matrisinde), materyal
+// ise mesh başına AYRI kalır: seçim karartması (dimReg → userData.dDesig)
+// materyal üzerinden çalışıyor, paylaşılırsa tüm kopyalar birlikte yanardı.
+const geoCache = new Map();     // "modelId#parçaIdx" → BufferGeometry | null
+function partGeometry(mid, i, pt){
+  const key = mid + '#' + i;
+  if(geoCache.has(key)) return geoCache.get(key);
+  let g = null;
+  if(pt.v && pt.f && pt.v.length >= 9){
+    g = new THREE.BufferGeometry();
+    g.setAttribute('position', new THREE.BufferAttribute(new Float32Array(pt.v), 3));
+    g.setIndex(pt.f);
+    g.computeVertexNormals();
+  }
+  geoCache.set(key, g);
+  return g;
+}
 function buildModels(){
   const th = D.thickness || 1.6;
   const models = D.models || {};
   (D.placements || []).forEach(pl=>{
     const md = models[pl.m]; if(!md || !md.parts) return;
     const inner = new THREE.Group();
-    md.parts.forEach(pt=>{
-      if(!pt.v || !pt.f || pt.v.length < 9) return;
-      const geo = new THREE.BufferGeometry();
-      geo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(pt.v), 3));
-      geo.setIndex(pt.f);
-      geo.computeVertexNormals();
+    md.parts.forEach((pt, i)=>{
+      const geo = partGeometry(pl.m, i, pt);
+      if(!geo) return;
       const mat = new THREE.MeshStandardMaterial(
         {color:new THREE.Color(pt.c||'#b0b0b6'), metalness:0.5, roughness:0.42,
          side:THREE.DoubleSide});
@@ -3265,10 +3406,36 @@ window.addEventListener('mousemove', e=>{
 });
 window.addEventListener('mouseup', ()=>{ drag=null; });
 canvas.addEventListener('contextmenu', e=>e.preventDefault());
+// === İmlece yakınlaştırma (2D PCB'deki davranışın 3D karşılığı) =============
+// Tekerlek merkeze değil, imlecin ALTINDAKİ noktaya yaklaşır. Kamerayı P
+// noktasına doğru f oranında ötelemek = hem kamerayı hem hedefi P etrafında
+// f ile ölçeklemek; bakış yönü ve mesafe oranı korunduğundan P ekranda YERİNDE
+// kalır (perspektif kamerada tam doğru: P-kamera vektörü yalnız ölçeklenir).
+// P = ışının board düzlemiyle (z=0) kesişimi — board düz olduğundan mesh
+// raycast'ine gerek yok (yüzlerce mesh'te tekerlek başına raycast pahalı).
+const zoomPlane = new THREE.Plane(new THREE.Vector3(0,0,1), 0);
+const zoomPt = new THREE.Vector3();
+function zoomAt(mult, cx, cy){
+  const nr = Math.max(4, Math.min(3000, orbit.r * mult));
+  const f = nr / orbit.r;               // kelepçe sonrası GERÇEK çarpan
+  orbit.r = nr;
+  const rc = canvas.getBoundingClientRect();
+  ndc.x = ((cx - rc.left) / rc.width) * 2 - 1;
+  ndc.y = -((cy - rc.top) / rc.height) * 2 + 1;
+  ray.setFromCamera(ndc, camera);
+  const P = ray.ray.intersectPlane(zoomPlane, zoomPt);
+  // Board'a teğet (kenar) bakışta kesişim çok uzağa düşebilir → o durumda
+  // merkeze yakınlaş (sıçrama olmasın). Kesişim yoksa da (yukarı bakış) aynı.
+  if (P && P.distanceTo(new THREE.Vector3(orbit.tx, orbit.ty, orbit.tz)) < orbit.r * 4) {
+    orbit.tx = P.x + (orbit.tx - P.x) * f;
+    orbit.ty = P.y + (orbit.ty - P.y) * f;
+    orbit.tz = P.z + (orbit.tz - P.z) * f;
+  }
+  applyCam();
+}
 canvas.addEventListener('wheel', e=>{ e.preventDefault();
   lodTouch();
-  orbit.r *= (e.deltaY<0 ? 0.9 : 1.1);
-  orbit.r = Math.max(4, Math.min(3000, orbit.r)); applyCam(); }, {passive:false});
+  zoomAt(e.deltaY<0 ? 0.9 : 1.1, e.clientX, e.clientY); }, {passive:false});
 
 __GESTURE__
 // === Dokunmatik: tek parmak döndür, iki parmak yakınlaştır + kaydır ========
@@ -3279,7 +3446,9 @@ installGesture(canvas, {
   pan: (dx,dy)=>{ orbit.az -= dx*0.0095; orbit.el += dy*0.0095;
                   lodTouch(); applyCam(); },
   pinch: (f,cx,cy,mdx,mdy)=>{
-    orbit.r = Math.max(4, Math.min(3000, orbit.r / f));   // parmaklar açılır → yakınlaş
+    // parmaklar açılır → yakınlaş; hedef nokta parmakların ORTASI (fare
+    // tekerleğiyle aynı davranış)
+    zoomAt(1/f, cx, cy);
     // İki parmağın ortak kayması = board'u kaydır (fare sağ-sürüklemesinin karşılığı)
     const k = orbit.r*0.0016;
     const right = new THREE.Vector3().setFromMatrixColumn(camera.matrix,0);
@@ -3324,8 +3493,10 @@ function setSel(desig){
 canvas.addEventListener('click', e=>{
   if(moved) return;
   const o = pick(e);
-  if(o && o.userData.desig){ setSel(o.userData.desig); crossOut(o.userData.desig); }
-  else { setSel(null); }
+  if(o && o.userData.desig){
+    lastXpSel = o.userData.desig; setSel(lastXpSel); crossOut(lastXpSel);
+  }
+  else { lastXpSel = null; setSel(null); crossOut(null); }   // boşluğa tık = seçimi bırak
 });
 const lbl = document.getElementById('lbl3d');
 // Hover raycast PAHALI (yüzlerce mesh) — her mousemove'da değil, frame başına 1 kez
@@ -3353,9 +3524,7 @@ function crossOut(d){ if(IN_FRAME) window.parent.postMessage(
   {type:'xprobe', source:'3d', designator:d}, '*'); }
 window.addEventListener('message', ev=>{
   const m=ev.data; if(!m||m.type!=='xprobe'||m.source==='3d') return;
-  // Diğer panelden seçim geldi — parçalar gizliyse geri aç ki seçim görünsün
-  if(!compsVisible) compBtn.onclick();
-  let d = m.designator;
+  let d = m.designator || null;      // designator yok → "seçimi temizle"
   if(d && !meshByDesig[d]){
     // Şematikten MANTIKSAL ad gelmiş olabilir (hiyerarşik kanal: R103) →
     // kanal-sonekli ilk fiziksel kopyaya çözümle (R103_diffI2C_1)
@@ -3363,6 +3532,16 @@ window.addEventListener('message', ev=>{
     const c = Object.keys(meshByDesig).filter(k=>k.toUpperCase().startsWith(q)).sort();
     if(c.length) d = c[0];
   }
+  if(!meshByDesig[d]) d = null;      // 3D'de karşılığı yok
+  // Aynı seçim yeniden geldiyse (mod değiştirince kabuk son seçimi tazeler)
+  // HİÇBİR ŞEY yapma — yoksa kullanıcının kapattığı "Parçalar" her sekme
+  // dönüşünde kendiliğinden geri açılıyordu (kullanıcı bildirimi). Karşılaştırma
+  // selectedDesig'e DEĞİL son GELEN mesaja göre: parçaları gizlemek seçimi
+  // yerel olarak sıfırlıyor, o yüzden tekrar mesajını "yeni" saymamalı.
+  if(d === lastXpSel) return;
+  lastXpSel = d;
+  // Yeni bir seçim geldi ve parçalar gizli → seçim görünsün diye geri aç
+  if(d && !compsVisible) compBtn.onclick();
   setSel(d);
 });
 
@@ -3381,8 +3560,10 @@ let compsVisible=true;
 compBtn.onclick=()=>{
   compsVisible=!compsVisible;
   compBtn.classList.toggle('on', compsVisible);
-  pickList.forEach(m=>{ if(m.userData.desig) m.visible=compsVisible; });
-  if(!compsVisible) setSel(null);   // gizli parçada seçim asılı kalmasın
+  pickList.forEach(m=>{ if(m.userData.part) m.visible=compsVisible; });
+  // Gizli parçada seçim asılı kalmasın. crossOut YOK: parçaları gizlemek yerel bir
+  // görünüm tercihi, diğer panellerin (şematik/PCB) seçimini düşürmemeli.
+  if(!compsVisible) setSel(null);
 };
 
 function resize(){
@@ -3543,7 +3724,7 @@ const HAVE_3D  = {have_3d_js};
 const frameSch = document.getElementById('frame-sch');
 const framePcb = document.getElementById('frame-pcb');
 const frame3d  = HAVE_3D ? document.getElementById('frame-3d') : null;
-let td_loaded = false, pcb_loaded = false, lastSel = null;
+let td_loaded = false, pcb_loaded = false, lastSel = null, lastNet = null;
 
 // gzip+base64 → metin (DecompressionStream). Yoksa null (eski tarayıcı).
 async function gunzipB64(b64) {{
@@ -3570,8 +3751,10 @@ async function loadFrame(id, b64) {{
 // geçişte). Açılışta ekstra yük yok; şematik hemen etkileşime hazır.
 let curMode = 'sch';
 loadFrame('frame-sch', SCH_GZ);
-function repostSel(fr) {{ if (lastSel) setTimeout(() =>
-  postTo(fr, {{type:'xprobe', source:'sch', designator:lastSel}}), 400); }}
+function repostSel(fr) {{ setTimeout(() => {{
+  if (lastSel) postTo(fr, {{type:'xprobe', source:'sch', designator:lastSel}});
+  if (lastNet) postTo(fr, {{type:'xprobe-net', source:'sch', net:lastNet}});
+}}, 400); }}
 function ensurePcbLoaded() {{
   if (!pcb_loaded) {{ pcb_loaded = true; loadFrame('frame-pcb', PCB_GZ).then(() => repostSel(framePcb)); }}
 }}
@@ -3583,8 +3766,21 @@ function ensure3dLoaded() {{
 function postTo(fr, d) {{ try {{ if (fr && fr.contentWindow) fr.contentWindow.postMessage(d, '*'); }} catch(e) {{}} }}
 window.addEventListener('message', ev => {{
   const d = ev.data;
-  if (!d || d.type !== 'xprobe') return;
-  if (d.designator) lastSel = d.designator;
+  if (!d) return;
+  // Net seçimi (v2.18.0): yalnız şematik ↔ PCB arasında anlamlı — 3D'de net
+  // verisi yok. net YOKSA "net vurgusunu bırak" demektir.
+  if (d.type === 'xprobe-net') {{
+    lastNet = d.net || null;
+    if (d.source !== 'pcb' && (curMode === 'both' || curMode === 'pcb')) ensurePcbLoaded();
+    if (d.source === 'sch') postTo(framePcb, d);
+    else if (d.source === 'pcb') postTo(frameSch, d);
+    return;
+  }}
+  if (d.type !== 'xprobe') return;
+  // designator YOKSA bu bir "seçimi temizle" bildirimidir (şematikte boş alana
+  // tıklama / Esc). lastSel de sıfırlanmalı — yoksa 3D veya PCB paneline
+  // geçildiğinde repostSel bayat seçimi geri gösteriyordu (kullanıcı bildirimi).
+  lastSel = d.designator || null;
   // PCB'yi yalnızca görünür bir modda yükle — sadece-şematik modunda arka planda
   // ağır PCB yüklenmesin (lastSel saklanır, moda geçince repostSel ile iletilir).
   if (d.source !== 'pcb' && (curMode === 'both' || curMode === 'pcb')) ensurePcbLoaded();
@@ -4654,12 +4850,23 @@ function netRender() {{
   document.getElementById('net-count').textContent =
     shown + ' / ' + NETS.length + ' net' + (q ? ' (filtreli)' : '');
 }}
+// Netler panelinde bir satırı seçili işaretle (şematikten gelen seçim için de
+// kullanılır — kullanıcı hangi net'in vurgulandığını listede görsün).
+function netMark(name) {{
+  document.querySelectorAll('.net-row.sel').forEach(r => r.classList.remove('sel'));
+  if(!name) return;
+  // Panel henüz açılmadıysa liste boştur (tembel render) → bir kez doldur
+  if(!document.querySelector('#net-list .net-row')) netRender();
+  const row = [...document.querySelectorAll('#net-list .net-row')]
+                .find(r => r.dataset.net === name);
+  if(row) {{ row.classList.add('sel'); row.scrollIntoView({{block:'nearest'}}); }}
+}}
 document.getElementById('net-list').addEventListener('click', e => {{
   const row = e.target.closest('.net-row');
   if(!row) return;
-  document.querySelectorAll('.net-row.sel').forEach(r => r.classList.remove('sel'));
-  row.classList.add('sel');
+  netMark(row.dataset.net);
   highlightNet(row.dataset.net);
+  crossProbeNet(row.dataset.net);      // şematikte de aynı net seçilsin
 }});
 document.querySelectorAll('#net-chips .bom-chip').forEach(ch => ch.onclick = () => {{
   netTypeF = ch.dataset.nf;
@@ -5123,13 +5330,24 @@ svg.addEventListener('click', e => {{
     el=el.parentNode;
   }}
   if(desig) {{ showComp(desig); crossProbeOut(desig); }}
-  // Boş alana tıklama (komponent yok, bakır/net yok) = net highlight'ı iptal
-  else if(!netAt(e.target)) clearNetHighlight();
+  // Boş alana tıklama (komponent yok, bakır/net yok) = net + komponent seçimini iptal
+  else if(!netAt(e.target)) {{
+    if(netHlGroup) crossProbeNet(null);
+    clearNetHighlight(); netMark(null); clearPcbSel();
+  }}
 }});
 // SVG'nin dışındaki zemine tıklama da highlight'ı temizler
 wrap.addEventListener('click', e => {{
-  if(!moved && e.target===wrap) clearNetHighlight();
+  if(!moved && e.target===wrap) {{
+    if(netHlGroup) crossProbeNet(null);
+    clearNetHighlight(); netMark(null); clearPcbSel();
+  }}
 }});
+// Komponent seçimini bırak + diğer panellere (şematik/3D) bildir
+function clearPcbSel() {{
+  if(!highlightMarker && !popup.classList.contains('open')) return;
+  clearHighlight(); popup.classList.remove('open'); crossProbeOut(null);
+}}
 
 // === Bakır yol / net highlight: çift tıkla → net'i TÜM katmanlarda göster,
 //     gerisini karart. data-net render edilmiş bakır elemanlarda mevcut. ===
@@ -5160,14 +5378,18 @@ function clearNetHighlight() {{
     netDimmed = false;
   }}
 }}
+// netName: tek ad veya ad DİZİSİ. Dizi gerekiyor çünkü kanal-tekrarlı
+// tasarımda şematikteki tek etiket birden çok PCB net'ine karşılık gelebilir.
 function highlightNet(netName) {{
   loadAllLazyLayers();              // net tüm katmanlarda → gizli/tembel olanları da yükle
   clearNetHighlight();
   clearHighlight();                 // komponent kutusu varsa temizle
   autoFit=false;
   popup.classList.remove('open');
+  const wanted = new Set(Array.isArray(netName) ? netName : [netName]);
+  const label = Array.isArray(netName) ? netName.join(' + ') : netName;
   const els = [...svg.querySelectorAll('[data-net]')]
-                .filter(e => e.getAttribute('data-net') === netName);
+                .filter(e => wanted.has(e.getAttribute('data-net')));
   if (!els.length) return;
   const NS = 'http://www.w3.org/2000/svg';
   // 1) Karartma: tüm katmanları grileştir + karart (Altium gibi) → net renkleri
@@ -5195,7 +5417,7 @@ function highlightNet(netName) {{
   }});
   svg.appendChild(g);
   netHlGroup = g;
-  infoBar.textContent = `Net: ${{netName}} · ${{els.length}} bakır eleman · Esc temizler`;
+  infoBar.textContent = `Net: ${{label}} · ${{els.length}} bakır eleman · Esc temizler`;
 }}
 // Katman rengini biraz parlatıp doygunlaştır ki gri zeminde net görünsün
 function boostColor(col) {{
@@ -5207,7 +5429,7 @@ function boostColor(col) {{
 }}
 svg.addEventListener('dblclick', e => {{
   const net = netAt(e.target);
-  if (net) {{ e.preventDefault(); highlightNet(net); }}
+  if (net) {{ e.preventDefault(); highlightNet(net); netMark(net); crossProbeNet(net); }}
 }});
 const hoverLabel=document.getElementById('hover-label');
 svg.addEventListener('mousemove', e => {{
@@ -5263,8 +5485,11 @@ window.addEventListener('keydown', e => {{
     if (pcbHelp.classList.contains('open')) {{ pcbHelp.classList.remove('open'); return; }}
     if (measureOn) {{ setMeasure(false); infoBar.textContent = INFO_DEFAULT; return; }}
     clearNetHighlight();
+    netMark(null);
     clearHighlight();
     popup.classList.remove('open');
+    crossProbeOut(null);      // şematik/3D panelindeki seçim de bırakılsın
+    crossProbeNet(null);      // şematikteki net seçimi de bırakılsın
   }}
   else if (e.key === 'b' || e.key === 'B')
     setSbOpen(sbEl.classList.contains('collapsed'));
@@ -5290,14 +5515,46 @@ pcbHelp.addEventListener('click', e => {{
 
 // === Cross-probe köprüsü (birleşik görünüm için) ===
 const IN_FRAME = window.parent && window.parent !== window;
+let xpApplying = false;   // gelen mesajı uygularken geri yayın yapma
 function crossProbeOut(designator) {{
-  if (IN_FRAME) {{
+  if (IN_FRAME && !xpApplying) {{
     window.parent.postMessage({{type:'xprobe', source:'pcb', designator:designator}}, '*');
+  }}
+}}
+// Net seçimi şematikle çift yönlü paylaşılır (v2.18.0)
+function crossProbeNet(name) {{
+  if (IN_FRAME && !xpApplying) {{
+    window.parent.postMessage({{type:'xprobe-net', source:'pcb', net:name || null}}, '*');
   }}
 }}
 window.addEventListener('message', ev => {{
   const d = ev.data;
-  if (!d || d.type !== 'xprobe' || d.source === 'pcb') return;
+  if (!d || d.source === 'pcb') return;
+  if (d.type === 'xprobe-net') {{
+    xpApplying = true;
+    try {{
+      if (!d.net) {{ clearNetHighlight(); netMark(null); }}
+      else {{
+        // Aday adlar: şematikteki görünen ad + PCB'nin kendi ad(lar)ı
+        // (otomatik adlandırılmış netlerde şematik adı PCB'de HİÇ geçmez).
+        const cands = [d.net].concat(d.pcbNet || []);
+        const found = [];
+        cands.forEach(c => {{
+          const q = String(c).toUpperCase();
+          const n = NETS.find(x => x.name === c) || NETS.find(x => x.name.toUpperCase() === q);
+          if (n && found.indexOf(n.name) < 0) found.push(n.name);
+        }});
+        if (found.length) {{ highlightNet(found); netMark(found[0]); }}
+        else infoBar.textContent = 'Net PCB\\'de bulunamadı: ' + d.net;
+      }}
+    }} finally {{ xpApplying = false; }}
+    return;
+  }}
+  if (d.type !== 'xprobe') return;
+  if (!d.designator) {{    // "seçimi temizle" bildirimi (şematik/3D'de boşluğa tıklandı)
+    pendingComp = null; clearHighlight(); popup.classList.remove('open');
+    return;
+  }}
   if (COMPONENTS[d.designator]) {{ showComp(d.designator); return; }}
   // Şematikten MANTIKSAL ad gelmiş olabilir (hiyerarşik kanal: R103) →
   // ilk fiziksel kopyayı göster (R103_diffI2C_1)
@@ -5630,7 +5887,7 @@ function fit() {
 
 // === Çizim ================================================================
 let vis = [];                 // katman görünürlüğü
-let selComp = null, selComps = [], selNet = -1, padLabels = true;
+let selComp = null, selComps = [], selNet = -1, selNets = [], padLabels = true;
 let topLayer = -1;          // "↑" ile en üste alınan katman (-1 = normal sıra)
 // selComp: popup'taki komponent (tekil) · selComps: vurgulanan tüm komponentler
 // (BOM grubu seçiminde bir grubun TAMAMI aynı anda vurgulanır)
@@ -5681,7 +5938,7 @@ function polyPath(pts) {
   for (let i = 2; i < pts.length; i += 2) ctx.lineTo(pts[i], pts[i + 1]);
   ctx.closePath();
 }
-function drawLayer(li, netOnly) {
+function drawLayer(li, netOnly) {   // netOnly: null | Set<netIndex>
   const L = G.layers[li], B = byLayer[li];
   ctx.fillStyle = L.color; ctx.strokeStyle = L.color;
   ctx.lineCap = 'round'; ctx.lineJoin = 'round';
@@ -5690,7 +5947,7 @@ function drawLayer(li, netOnly) {
     ctx.save();
     ctx.globalAlpha = (L.role === 'copper' || L.role === 'inner') ? 0.55 : 0.8;
     B.regions.forEach(r => {
-      if (netOnly >= 0 && r[1] !== netOnly) return;
+      if (netOnly && !netOnly.has(r[1])) return;
       ctx.beginPath(); polyPath(r[2]);
       (r[3] || []).forEach(h => polyPath(h));
       ctx.fill('evenodd');
@@ -5699,21 +5956,21 @@ function drawLayer(li, netOnly) {
   }
   let cw = -1;
   B.tracks.forEach(t => {
-    if (netOnly >= 0 && t[6] !== netOnly) return;
+    if (netOnly && !netOnly.has(t[6])) return;
     if (t[5] !== cw) { if (cw >= 0) ctx.stroke(); cw = t[5]; ctx.lineWidth = cw; ctx.beginPath(); }
     ctx.moveTo(t[1], t[2]); ctx.lineTo(t[3], t[4]);
   });
   if (cw >= 0) ctx.stroke();
   B.arcs.forEach(a => {
-    if (netOnly >= 0 && a[7] !== netOnly) return;
+    if (netOnly && !netOnly.has(a[7])) return;
     ctx.lineWidth = a[6] || 0.05;
     ctx.beginPath();
     // Y ters çevrildiği için açı yönü de ters (Altium CCW → canvas CW)
     ctx.arc(a[1], a[2], a[3], -a[5] * Math.PI / 180, -a[4] * Math.PI / 180);
     ctx.stroke();
   });
-  B.pads.forEach(p => { if (netOnly < 0 || p[8] === netOnly) padPath(p); });
-  if (netOnly < 0) {
+  B.pads.forEach(p => { if (!netOnly || netOnly.has(p[8])) padPath(p); });
+  if (!netOnly) {
     B.texts.forEach(t => {                 // TrueType: glif poligonlari (dolgu)
       ctx.beginPath();
       t[1].forEach(poly => polyPath(poly));
@@ -5745,21 +6002,22 @@ function draw() {
   ctx.strokeStyle = '#c8b400'; ctx.lineWidth = 0.15; ctx.stroke();
   // Çizim sırası = katman sırası; "↑" ile seçilen katman EN SONA alınır
   // (canvas'ta sonra çizilen üstte kalır).
-  G.layers.forEach((L, i) => { if (vis[i] && i !== topLayer) drawLayer(i, -1); });
-  if (topLayer >= 0 && vis[topLayer]) drawLayer(topLayer, -1);
+  G.layers.forEach((L, i) => { if (vis[i] && i !== topLayer) drawLayer(i, null); });
+  if (topLayer >= 0 && vis[topLayer]) drawLayer(topLayer, null);
   // delikler en üstte (pad/via içleri)
   ctx.fillStyle = '#0b0b0b';
   G.vias.forEach(v => { if (v[3] > 0) { ctx.beginPath(); ctx.arc(v[0], v[1], v[3] / 2, 0, 7); ctx.fill(); } });
   G.pads.forEach(p => { if (p[7] > 0) { ctx.beginPath(); ctx.arc(p[1], p[2], p[7] / 2, 0, 7); ctx.fill(); } });
   // net vurgusu: board karartılır, net parlak renkte tekrar çizilir
-  if (selNet >= 0) {
+  if (selNets.length) {
+    const selSet = new Set(selNets);
     ctx.fillStyle = 'rgba(0,0,0,0.62)';
     ctx.beginPath(); polyPath(G.outline); ctx.fill();
     ctx.save(); ctx.globalCompositeOperation = 'lighter';
-    G.layers.forEach((L, i) => { if (vis[i]) drawLayer(i, selNet); });
+    G.layers.forEach((L, i) => { if (vis[i]) drawLayer(i, selSet); });
     ctx.restore();
     G.vias.forEach(v => {
-      if (v[4] !== selNet) return;
+      if (!selSet.has(v[4])) return;
       ctx.fillStyle = '#ffd54f'; ctx.beginPath(); ctx.arc(v[0], v[1], v[2] / 2, 0, 7); ctx.fill();
     });
   }
@@ -5927,7 +6185,13 @@ wrap.addEventListener('click', e => {
   }
   const c = compAt(w);
   if (c) { showComp(c.d); crossOut(c.d); }
-  else { selComp = null; selComps = []; selNet = -1; popup.classList.remove('open'); info.textContent = INFO_DEFAULT; draw(); }
+  else {
+    const had = selComp || selComps.length, hadNet = selNets.length > 0;
+    selComp = null; selComps = []; selNet = -1; selNets = []; popup.classList.remove('open');
+    info.textContent = INFO_DEFAULT; renderNets(); draw();
+    if (had) crossOut(null);      // diğer paneller de seçimi bıraksın
+    if (hadNet) crossNet(null);   // şematikteki net seçimi de bırakılsın
+  }
 });
 wrap.addEventListener('dblclick', e => {
   if (measureOn) return;
@@ -5976,7 +6240,7 @@ function renderNets() {
     if (netTypeF && k !== netTypeF) return;
     if (q && nm.toLowerCase().indexOf(q) < 0) return;
     n++;
-    html += '<div class="row ' + k + (selNet === i ? ' sel' : '') + '" data-net="' + i + '">'
+    html += '<div class="row ' + k + (selNets.indexOf(i) >= 0 ? ' sel' : '') + '" data-net="' + i + '">'
          + '<span class="nm">' + esc(nm) + '</span><span class="ct">' + (cnt[i] || 0) + ' pad</span></div>';
   });
   document.getElementById('p-nets').innerHTML = n ? html : '<div class="empty">eşleşen yok</div>';
@@ -6033,16 +6297,29 @@ document.querySelectorAll('#chips .chip').forEach(ch => ch.onclick = () => {
 document.getElementById('q').addEventListener('input', e => {
   qs = e.target.value; renderNets(); renderComps(); bomRender();
 });
-function selectNet(i) {
-  selNet = i; selComp = null; selComps = [];
+// idxs: net indeks listesi. Kanal-tekrarlı tasarımda şematikteki tek etiket
+// birden çok PCB net'ine karşılık gelebilir → hepsi birlikte vurgulanır.
+function selectNets(idxs, emit) {
+  selNets = (idxs || []).filter(i => i >= 0);
+  selNet = selNets.length ? selNets[0] : -1;
+  selComp = null; selComps = [];
   popup.classList.remove('open');
-  info.textContent = 'Net: ' + G.nets[i] + ' · Esc temizler';
+  if (selNets.length)
+    info.textContent = 'Net: ' + selNets.map(i => G.nets[i]).join(' + ') + ' · Esc temizler';
+  else info.textContent = INFO_DEFAULT;
   renderNets(); draw();
+  if (emit) crossNet(selNets.length ? G.nets[selNets[0]] : null);
+}
+function selectNet(i) { selectNets([i], true); }
+// Netler panelinde seçili satırı görünür kıl (şematikten seçim geldiğinde)
+function netScroll(i) {
+  const r = document.querySelector('#p-nets .row[data-net="' + i + '"]');
+  if (r) r.scrollIntoView({ block:'nearest' });
 }
 function showComp(d) {
   const c = G.comps.find(x => x.d === d);
   if (!c) return;
-  selComp = d; selComps = [d]; selNet = -1;
+  selComp = d; selComps = [d]; selNet = -1; selNets = [];
   setSb(true);
   document.getElementById('pd').textContent = d;
   const inf = COMP_INFO[d] || {};
@@ -6145,8 +6422,11 @@ window.addEventListener('keydown', e => {
   if (e.key === 'Escape') {
     if (help.classList.contains('open')) { help.classList.remove('open'); return; }
     if (measureOn) { setMeasure(false); return; }
-    selComp = null; selComps = []; selNet = -1; popup.classList.remove('open');
+    const hadNet = selNets.length > 0;
+    selComp = null; selComps = []; selNet = -1; selNets = []; popup.classList.remove('open');
     info.textContent = INFO_DEFAULT; renderNets(); draw();
+    crossOut(null);      // şematik/3D panelindeki seçim de bırakılsın
+    if (hadNet) crossNet(null);
   }
   else if (k === 'f') fit();
   else if (k === 'b') setSb(sb.classList.contains('collapsed'));
@@ -6226,7 +6506,7 @@ document.getElementById('bom-list').addEventListener('click', e => {
   document.querySelectorAll('.brow.sel').forEach(r => r.classList.remove('sel'));
   row.classList.add('sel');
   if (g.desigs.length === 1) { showComp(g.desigs[0]); crossOut(g.desigs[0]); return; }
-  selComps = g.desigs.slice(); selComp = null; selNet = -1;
+  selComps = g.desigs.slice(); selComp = null; selNet = -1; selNets = [];
   popup.classList.remove('open');
   let x0 = 1e9, y0 = 1e9, x1 = -1e9, y1 = -1e9;   // grubun tamamini kapsa
   selComps.forEach(d => {
@@ -6291,13 +6571,47 @@ document.getElementById('bom-file').onchange = e => {
 
 // === Cross-probe (birleşik görünüm için) ==================================
 const IN_FRAME = window.parent && window.parent !== window;
+let xpApplying = false;   // gelen mesajı uygularken geri yayın yapma
 function crossOut(d) {
-  if (IN_FRAME) window.parent.postMessage({ type:'xprobe', source:'pcb', designator:d }, '*');
+  if (IN_FRAME && !xpApplying)
+    window.parent.postMessage({ type:'xprobe', source:'pcb', designator:d }, '*');
+}
+// Net seçimi şematikle çift yönlü paylaşılır (v2.18.0)
+function crossNet(name) {
+  if (IN_FRAME && !xpApplying)
+    window.parent.postMessage({ type:'xprobe-net', source:'pcb', net:name || null }, '*');
 }
 window.addEventListener('message', ev => {
   const d = ev.data;
-  if (!d || d.type !== 'xprobe' || d.source === 'pcb' || !G) return;
+  if (!d || d.source === 'pcb' || !G) return;
+  if (d.type === 'xprobe-net') {
+    xpApplying = true;
+    try {
+      if (!d.net) { selectNets([], false); }
+      else {
+        // Aday adlar: şematikteki görünen ad + PCB'nin KENDİ ad(lar)ı —
+        // otomatik adlandırılmış netlerde şematik adı PCB'de hiç geçmez.
+        const cands = [d.net].concat(d.pcbNet || []);
+        const idx = [];
+        cands.forEach(c => {
+          const q = String(c).toUpperCase();
+          let i = G.nets.indexOf(c);
+          if (i < 0) i = G.nets.findIndex(x => x && String(x).toUpperCase() === q);
+          if (i >= 0 && idx.indexOf(i) < 0) idx.push(i);
+        });
+        if (idx.length) { selectNets(idx, false); netScroll(idx[0]); }
+        else info.textContent = 'Net PCB\'de bulunamadı: ' + d.net;
+      }
+    } finally { xpApplying = false; }
+    return;
+  }
+  if (d.type !== 'xprobe') return;
   let n = d.designator;
+  if (!n) {      // "seçimi temizle" bildirimi (şematik/3D'de boşluğa tıklandı)
+    selComp = null; selComps = []; popup.classList.remove('open');
+    renderComps(); draw();
+    return;
+  }
   if (!G.comps.some(c => c.d === n)) {
     const q = (n + '_').toUpperCase();
     const c = G.comps.map(c => c.d).filter(x => x.toUpperCase().startsWith(q)).sort();
@@ -7774,6 +8088,15 @@ def build_html(sheets, net_list, components, timestamp,
   /* Şematik metinleri PDF'teki gibi seçilebilir/kopyalanabilir (body user-select:none
      bunu global kapatıyor; text elemanlarında geri açılır). Tıklanabilir sınıflar
      (net/block/designator) pointer imlecini korur — hem seçilir hem tıklanır. */
+  /* Şematikte etkileşimli olan tek şey YAZIdır; şekiller (tel, kutu, dolgu)
+     tıklamayı yakalamamalı. Altium'un "Blanket" nesnesi (diferansiyel çift /
+     net-class direktiflerini saran yarı saydam beyaz poligon) net etiketinin
+     ÜSTÜNE çiziliyor ve tıklamayı yiyordu → o etiketler aramada bulunuyor ama
+     şema üzerinde seçilemiyordu (kullanıcı bildirimi: RS485AB_P). Şekilleri
+     tıklamaya geçirgen yapmak pan/boş-alan davranışını değiştirmez: mousedown
+     hedefi artık <svg>'nin kendisi olur, oradaki kontroller aynı çalışır. */
+  .sheet-body svg * {{ pointer-events:none; }}
+  .sheet-body svg text, .sheet-body svg text * {{ pointer-events:auto; }}
   .sheet-body svg text {{ user-select:text; -webkit-user-select:text; cursor:text; }}
   .sheet-body svg text::selection {{ background:#4ec9b0; color:#000; }}
   .sheet-body svg text.clickable-net, .sheet-body svg text.block-link,
@@ -8477,6 +8800,7 @@ viewport.addEventListener('click', e => {{
              || cl.contains('comp-designator'))) return;   // yeni seçim yapılıyor
   if (window.getSelection && String(window.getSelection()).length > 0) return; // metin kopyalama
   clearCompHighlight();
+  crossProbeOut(null);      // PCB/3D panellerindeki seçim de bırakılsın
 }});
 
 function fitToSheet(sheetId) {{
@@ -9045,6 +9369,9 @@ function clearSelection() {{
   currentNetEl.textContent = '';
   detailPanel.classList.remove('open');
   clearCompHighlight();
+  document.getElementById('comp-popup').classList.remove('open');
+  crossProbeOut(null);      // PCB/3D panellerindeki seçim de bırakılsın
+  crossProbeNet(null);      // PCB'deki net vurgusu da temizlensin
 }}
 
 function selectNet(net, listEl, addToSelection = false) {{
@@ -9067,6 +9394,8 @@ function selectNet(net, listEl, addToSelection = false) {{
     if (listEl) listEl.scrollIntoView({{ behavior: 'smooth', block: 'nearest' }});
   }}
   renderAllSelections();
+  // Karşı panele ilet: çoklu seçimde EN SON seçilen net gönderilir
+  crossProbeNet(selectedNets.length ? selectedNets[selectedNets.length - 1].name : null);
 }}
 
 function renderAllSelections() {{
@@ -9930,16 +10259,53 @@ annoRender();
 // === Cross-probe köprüsü (birleşik görünüm için) ===
 // Bir iframe içindeysek parent ile haberleş.
 const IN_FRAME = window.parent && window.parent !== window;
+// Gelen mesajı UYGULARKEN geri yayın yapma (ping-pong önlemi)
+let xpApplying = false;
 function crossProbeOut(designator) {{
-  if (IN_FRAME) {{
+  if (IN_FRAME && !xpApplying) {{
     window.parent.postMessage({{type:'xprobe', source:'sch', designator:designator}}, '*');
   }}
 }}
-// Parent'tan "şu komponenti göster" mesajı
+// Net seçimi de karşı panele iletilir (v2.18.0): şematikte bir net adına
+// tıklayınca PCB'de o net'in bakırı vurgulanır. name null = "seçimi bırak".
+// PCB'nin KENDİ adı da gönderilir (net.pcb): şematikte "ADC3_CS" olan tel
+// PCB'de "NetU5_20" diye geçebilir (otomatik adlandırma) — yalnız görünen adı
+// göndermek PCB tarafında "bulunamadı" demekti.
+function crossProbeNet(name) {{
+  if (IN_FRAME && !xpApplying) {{
+    const rec = name ? nets.find(n => n.name === name) : null;
+    window.parent.postMessage({{type:'xprobe-net', source:'sch',
+      net:name || null, pcbNet:(rec && rec.pcb) || null}}, '*');
+  }}
+}}
+// Parent'tan "şu komponenti / net'i göster" mesajı
 window.addEventListener('message', ev => {{
   const d = ev.data;
-  if (!d || d.type !== 'xprobe' || d.source === 'sch') return;
+  if (!d || d.source === 'sch') return;
+  if (d.type === 'xprobe-net') {{
+    xpApplying = true;
+    try {{
+      if (!d.net) {{ clearSelection(); }}
+      else {{
+        const q = String(d.net).toUpperCase();
+        // PCB kendi adını yollar (NetU5_20) — şematikte o ad görünmez, bu
+        // yüzden takma ad listesine (net.pcb) de bakılır.
+        const net = nets.find(n => n.name === d.net)
+                 || nets.find(n => n.name.toUpperCase() === q)
+                 || nets.find(n => (n.pcb || []).indexOf(d.net) >= 0)
+                 || nets.find(n => (n.pcb || []).some(p => p.toUpperCase() === q));
+        if (net) selectNet(net, null, false);
+      }}
+    }} finally {{ xpApplying = false; }}
+    return;
+  }}
+  if (d.type !== 'xprobe') return;
   const desig = d.designator;
+  if (!desig) {{     // "seçimi temizle" bildirimi (PCB/3D'de boşluğa tıklandı)
+    clearCompHighlight();
+    document.getElementById('comp-popup').classList.remove('open');
+    return;
+  }}
   let comp = compByDesig[desig];
   if (!comp && desig) {{
     // PCB/3D'den FİZİKSEL kanal designator'ı gelmiş olabilir (hiyerarşik Repeat:

@@ -34,14 +34,11 @@ fi
 # ÖN KONTROL: uygulama bağımlılıkları BU python'da kurulu mu?
 # (PyInstaller eksik paketi yalnız UYARIyla geçer, build "başarılı" görünür
 # ama binary açılışta ModuleNotFoundError verir — pyenv/sistem python
-# karışıklığında yaşandı.)
-if ! "$PY" -c "import altium_monkey, PyQt5, openpyxl, cascadio, trimesh, numpy" 2>/dev/null; then
-  echo "HATA: Bagimliliklar yukaridaki Python'da kurulu degil."
-  echo "Once kur:  $PY -m pip install -r requirements.txt"
-  echo "(Eksik olanlar:)"
-  for m in altium_monkey PyQt5 openpyxl cascadio trimesh numpy; do
-    "$PY" -c "import $m" 2>/dev/null || echo "  - $m"
-  done
+# karışıklığında yaşandı.) Liste deps.py'de tutulur (uygulamanın kendi
+# başlangıç denetimiyle AYNI kaynak); eksik varsa deps.py 1 döndürür.
+if ! "$PY" deps.py; then
+  echo
+  echo "HATA: Bagimliliklar yukaridaki Python'da eksik - paketleme durduruldu."
   exit 1
 fi
 

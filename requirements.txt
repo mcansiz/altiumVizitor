@@ -16,7 +16,9 @@
 
 # --- Çekirdek (GUI + üretim) ---
 PyQt5>=5.15.11
-altium-monkey>=2026.6.21   # minimum önerilen sürüm (dikey pin adı düzeltmesi bu sürümde)
+altium-monkey>=2026.8.11   # UTF-8 metin kurtarma + anotasyonsuz komponent kimliği
+                           # düzeltmeleri bu sürümde (bkz. CLAUDE.md sürüm notu).
+                           # Bu sürüm pillow'u 12.3.0'a pinler (otomatik yükselir).
 openpyxl>=3.1              # Excel çıktıları (IC haritası, MCU pin listesi)
 
 # --- 3D STEP modelleri (birleşik Şematik+PCB+3D görünüm için ZORUNLU) ---

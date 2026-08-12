@@ -5,7 +5,7 @@ Wavenumber'ın ticari "viz sch 1.0" ürününün açık-kaynak alternatifi.
 [altium_monkey](https://github.com/wavenumber-eng/altium_monkey) kütüphanesi
 (Eli Hughes / Wavenumber) üzerine kurulu.
 
-**Mevcut sürüm**: `APP_VERSION` sabiti **`viewer.py`'de** tutulur (şu an 2.19.0);
+**Mevcut sürüm**: `APP_VERSION` sabiti **`viewer.py`'de** tutulur (şu an 2.19.3);
 `gui.py` oradan import eder (v2.9.29'da taşındı — HTML çıktıları da sürümü
 gösterebilsin diye, tek kaynak). Yeni özellik/düzeltme ekleyince bu sabiti
 güncelle (semver: major.minor.patch). Sürüm pencere başlığında, alt durum
@@ -138,7 +138,8 @@ kaynak olarak tutulur (dist adı, import adı, minimum sürüm, ne için gerekti
 doğrudan mı/alt bağımlılık mı). `requirements.txt` bu tabloyla eşleşir
 (`py -3.12 deps.py --requirements` ile karşılaştırılabilir).
 
-- **Doğrudan**: PyQt5, altium-monkey, openpyxl, cascadio, trimesh, numpy
+- **Doğrudan**: PyQt5, altium-monkey (>= **2026.8.11**, bkz. sürüm notu),
+  openpyxl, cascadio, trimesh, numpy
 - **Alt bağımlılık** (olmazsa yine çöker): PyQt5-Qt5, PyQt5-sip, freetype-py,
   lxml, lz4, pillow, uharfbuzz, wn-geometer, et-xmlfile
 
@@ -512,6 +513,126 @@ mesajına bak.
   bu API olmayabilir (graceful fallback var, "veri yok" der).
 
 ## Çözülen Sorunlar (tarihçe)
+
+- **Kütüphane uyarıları GUI log'unda görünmüyordu, ham İngilizce olarak konsola
+  düşüyordu (v2.19.3, kullanıcı: "bu uyarıyı MMCUD50A projesi için aldım")**:
+  altium_monkey bazı tanılamaları Python `logging` ile veriyor (ör. 2026.8.11'den
+  beri `Recovered unmarked UTF-8 in Altium text record (section 'FileHeader',
+  record 641, pair 12, field 'Text'); rewrite the file to add a %UTF8% sidecar`).
+  Kök logger'da handler olmadığından bunlar `lastResort` ile **konsola** yazılıyor,
+  bizim `log()` geri çağrımızdan geçmiyordu → GUI log'unda yok, pencereli exe'de
+  tamamen kayıp; kullanıcı konsolda görüp anlamlandıramıyordu. Yeni
+  `_LibraryLogCapture` + `_with_library_logs` dekoratörü (dokuz public üretim
+  fonksiyonuna uygulandı) üretim boyunca `altium_monkey` logger'ına bağlanır,
+  mesajları ŞABLONA göre sayar ve blok sonunda tek satırlık Türkçe özet yazar:
+  `· İşaretsiz UTF-8 metin kurtarıldı (112 kayıt) — … Veri kaybı yok; uyarıyı
+  kaldırmak için o sayfaları Altium'da açıp kaydetmek yeterli.` `propagate`
+  kapatıldığı için konsola ikinci kez basılmaz; iç içe çağrılarda (birleşik
+  görünüm → `_collect_data`) yalnız EN DIŞTAKİ blok özet yazar (`_LIB_LOG_DEPTH`).
+  **MMCUD50A teşhisi**: 70 SchDoc'un 70'i açıldı, **0 hata**; 6 dosyada 128 kayıt
+  (proje kapsamında 112) bu metni taşıyor ve içerik CLAUDE.md'de v2.15.1'de
+  kayıtlı olanın AYNISI: `－55℃＋125℃` (datasheet'ten yapıştırılmış tam genişlikli
+  eksi/artı + ℃ karakterleri, komponentin çalışma sıcaklığı parametresi). Yani
+  uyarı bir HATA değil, kurtarma bildirimi — 2026.8.1'de bu kayıtlar sayfayı
+  komple düşürüyordu. Regresyon: BRK-210/Smart_MCU JSON çıktısı bit bit aynı.
+
+- **Projede birden çok PcbDoc varsa YANLIŞ board seçiliyordu — cross-probe,
+  netlist doğrulaması ve Pick&Place sessizce boş kalıyordu (v2.19.2, kullanıcı
+  üretim log'u: "PCB'de komponent bulunamadı (parse boş)")**: BRK-209'un PrjPcb'si
+  İKİ PcbDoc referanslıyor — `BRK-218` (2.3 MB, **0 komponent / 0 pad / 12 iz**,
+  gabari-montaj dokümanı) ve `BRK-213` (34.7 MB, **947 komponent / 3308 pad /
+  21868 iz**, gerçek board). Kodda ÜÇ FARKLI seçim kuralı vardı: cross-probe
+  (`collect_pcb_placement`) ve netlist doğrulaması (`_merge_netlist_with_pcb`)
+  "adında 'panel' geçmeyen İLK dosya"yı alıyordu → BRK-218'i seçip boş dönüyor;
+  görüntüleyiciler (`generate_pcb_viewer` / geometri / birleşik) "komponenti olan
+  ilk dosya"yı arayıp doğru board'u buluyordu. Sonuç: aynı üretimde PCB paneli
+  doğru board'u çizerken cross-probe ve netlist yanlış dosyaya bakıyor, log
+  "komponent bulunamadı" + "net'e bağlı pad yok" diyordu (ad "panel" içermediği
+  için eski sezgisel kural devreye girmiyordu). **Çözüm**: tek yerde
+  `_pick_pcbdoc(project_path, log)` — adayları (komponent, pad) sayısına göre
+  puanlar, en yükseği kazanır; hiçbirinde komponent yoksa eski "panel olmayan
+  ilk dosya" davranışına döner; seçim proje başına BİR kez yapılıp loglanır
+  (`2 PcbDoc adayından **BRK-213…** seçildi (BRK-218…: 0 komponent; BRK-213…:
+  947 komponent)`). Beş çağrı noktası da buna bağlandı. Yanına `_load_pcbdoc()`
+  parse önbelleği kondu: aynı dosya süreç boyunca bir kez okunur (34.7 MB'lık
+  board önceden cross-probe/netlist/geometri/3D için ayrı ayrı açılıyordu),
+  kaybeden adaylar bellekten düşülür.
+  **İkinci kök neden — Pick&Place 0 yerleşim**: `AltiumDesign.to_pnp()` seçici
+  parametresi ALMIYOR; içeride hep `load_pcbdoc(selector=None)` çağırıp aday
+  listesinin ilkini alıyor ("Multiple PcbDoc files found, using first: BRK-218"
+  uyarısı kütüphaneden geliyordu) → PnP boş dönüyordu. Artık `AltiumDesign`
+  yüklenir yüklenmez `design.load_pcbdoc` bizim SEÇTİĞİMİZ (ve zaten parse
+  edilmiş) board'u döndürecek şekilde bağlanıyor → hem doğru sonuç hem 34 MB'lık
+  dosyanın ikinci kez parse edilmemesi.
+  **Sonuç (BRK-209, gerçek proje)**: cross-probe boş → **947 komponent**;
+  netlist "PCB'de pad yok" → **906 PCB neti / 3164 pad eşleşti, 78 otomatik ad
+  şematik adıyla değiştirildi**; net cross-probe eşleşmesi 0 → **471 net**;
+  Pick&Place 0 → **947 yerleşim** (`has_pnp` false → true).
+  **Regresyon**: tek PcbDoc'lu projelerde (BRK-210, Smart_MCU) JSON çıktısı
+  bit bit AYNI.
+  **Not — 3D'deki iki konsol mesajı**: `RWGltf_CafWriter skipped node
+  'RAQ0012C_PIN1_AREA' without geometry data` ve `ERR StepReaderData :
+  Unresolved Reference` cascadio'nun (OpenCASCADE) C katmanından gelir, Python
+  logging'i değildir (bu yüzden GUI log'una düşmez). İlki STEP modelindeki
+  geometrisiz işaret düğümü (pin-1 alanı) atlandı demektir, ikincisi bir STEP
+  dosyasındaki çözülemeyen iç referanstır — ikisi de kurtarılabilir: BRK-209'da
+  **935 gövdenin tamamı STEP mesh'i aldı (0 extrude yedeği)**, yani veri kaybı
+  yok.
+
+- **altium_monkey 2026.8.1 → 2026.8.11.post1 yükseltmesi (v2.19.1, ölçümle
+  doğrulanmış)**: Üç sürüm geriden geliyorduk; yükseltme öncesi eski/yeni
+  kütüphane yan yana çalıştırılıp fark ölçüldü.
+  **Bizim için kazanç**: (1) 2026.8.11 `%UTF8%` önekisiz UTF-8 metni artık
+  KÜTÜPHANE kurtarıyor (`decode_byte_array(b'Text=－55℃＋125℃')` eskiden
+  `ValueError: Failed to decode cp1252`, şimdi metni aynen döndürüp
+  `log.warning` ile "sidecar ekleyin" diyor) → v2.15.1'deki
+  `patch_altium_text_decoding()` yamamız artık **emniyet ağı**; kaldırılmadı
+  (eski kütüphaneyle de çalışılabilsin ve kütüphanenin kurtaramadığı bayt
+  dizileri için son çare kalsın diye). Yama `patched(byte_array, *args,
+  **kwargs)` imzalı olduğundan yeni `context=` parametresini sorunsuz geçirir.
+  (2) 2026.8.11.post1 anotasyonsuz/aynı designator'lı komponent kimliğini
+  düzeltti → BRK-210'da IC12 (BGA) **L8/M9/M10/N10 pinleri** artık PA7/PA5/PA4/
+  PA6 adlarıyla ve MCU_SPI1_MOSI/SCLK/CS/MISO netleriyle geliyor (eskiden
+  netlist'te HİÇ yoktu, yalnız PCB birleştirmesi kurtarıyordu); auto-named net
+  78 → 74. (3) 2026.8.10 `compiled.physical_page_metadata` API'sini getirdi
+  (fiziksel sayfa/kanal kimliği — bkz. "Yapılmadı" notu).
+  **Regresyon kanıtı**: kullandığımız API yüzeyi birebir aynı (9 modül/sınıf,
+  `compile_netlist` imzası, `NetlistOptions` alanları, PCB primitive kanalları;
+  `__all__`'a 2 sembol eklendi, hiçbiri kaldırılmadı) · `altium_pcbdoc.py` ve
+  `altium_text_to_polygon.py` HİÇ değişmemiş (PCB/geometri/3D yolu risksiz) ·
+  8 sayfanın şematik SVG'si element element aynı · JSON çıktısı Smart_MCU'da
+  bit bit aynı, BRK-210'da tek fark yukarıdaki 4 pin iyileşmesi · PCB geometri
+  (19025 iz/1153 pad/557 via/18 katman) ve birleşik 3D (49 STEP modeli, 274
+  yerleşim, 192 delik) üretimi sorunsuz.
+  **Yan etkiler**: `compiled.compile()` 1.8 s → 4.5 s (toplam üretim ~50 s
+  içinde önemsiz) · yükseltme **pillow'u 11.2.1 → 12.3.0'a zorlar**. Pillow
+  yükseltmesi tek bir sayfada SVG'yi 12 bayt büyüttü — sebebi izlendi: şemaya
+  GÖMÜLÜ PNG logo pillow 12'de 10 bayt farklı sıkıştırılıyor; **piksel içeriği
+  birebir aynı** (RGBA 699×406, aynı piksel MD5), vektör/metin koordinatları
+  değişmedi. **exe yeniden paketlenmeli** (pillow + altium_monkey ikilileri).
+  **Ölçüm tuzağı (not)**: `to_physical_svg()` ilk çağrıda ~27 s, sonrakiler
+  ~0.4 s sürüyor; bu bir SÜRÜM farkı DEĞİL, disk üstünde kalıcı font önbelleği
+  — sırayı ters çevirince maliyeti hangi sürüm önce çalışırsa o ödüyor.
+  **Yapılmadı (aday iş)**: `design.to_netlist()` (konsolide netlist: 251 net,
+  1049 pin, **kanal-sonekli fiziksel designator'lar**, net başına `aliases` /
+  `auto_named` / `hierarchy_paths`) bizim `compile_project_netlist` +
+  `_merge_netlist_with_pcb` ikilisinin yerini alıp netlist için PcbDoc
+  yüklemesini gereksiz kılabilir; `to_physical_svg(page_occurrence_ref)` +
+  `physical_page_metadata` ile tekrar (Repeat) sayfaları her kanal için AYRI
+  sayfa olarak fiziksel designator'larla çizilebilir (BRK-210: 8 mantıksal
+  SchDoc → **10 fiziksel sayfa**, diffI2C 3 kanal) — v2.9.33'teki arama
+  numarası ve v2.18.1'deki kanal takma-adı köprüsü bu eksiğin yamalarıydı.
+  Ayrıca `to_layer_svgs(project_parameters=…)` / `substitute_pcb_special_strings()`
+  PCB silkscreen'indeki `.PCBCODE` gibi özel stringleri gerçek değeriyle
+  basar (BRK-210'da 50 proje parametresi çözülüyor, bu kartta yerine konacak
+  metin yok; BRK-213'te var).
+
+- **Sürüm karşılaştırması PyPI son eklerinde patlıyordu (v2.19.1)**:
+  `_check_altium_monkey_version()` içindeki `int(x) for x in v.split(".")`
+  `2026.8.11.post1` (ve `2026.7.26b1`) için ValueError verip `(0,)`'a düşüyordu
+  → GÜNCEL kütüphanede bile her üretimde "eski sürüm, güncelleme önerilir"
+  uyarısı basılıyordu. Artık `deps.parse_version()` kullanılıyor (regex ile
+  yalnız baştaki sayısal kısım; ayrıştırılamazsa karşılaştırma atlanır).
 
 - **Şematikte bazı net etiketleri tıklanamıyordu — üstlerinde Altium "Blanket"i
   var (v2.18.2, kullanıcı bildirimi: RS485AB_P aramada bulunuyor ama şemada

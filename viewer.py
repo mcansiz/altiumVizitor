@@ -34,6 +34,7 @@ bağımsızdır (Three.js gömülü, harici bağımlılık yok).
 from pathlib import Path
 import codecs
 import json
+import logging
 import re
 import sys
 import datetime
@@ -51,11 +52,15 @@ from altium_monkey.altium_schdoc import AltiumSchDoc
 
 # Uygulama sürümü — tek kaynak burası; gui.py buradan import eder.
 # HTML çıktılarında sağ üst köşedeki rozette görünür (build saati yerine).
-APP_VERSION = "2.19.0"
+APP_VERSION = "2.19.3"
 
-# Dikey pin adlarının doğru render edildiği minimum altium_monkey sürümü.
-# Bu sürümden öncesinde STM32 gibi IC'lerde dikey pinler yatay çiziliyordu.
-MIN_RECOMMENDED_AM = "2026.6.21"
+# Önerilen minimum altium_monkey sürümü. Bu sürümden öncesinde:
+#   · 2026.6.21 öncesi — STM32 gibi IC'lerde dikey pin adları yatay çiziliyordu.
+#   · 2026.8.11 öncesi — `%UTF8%` önekisiz UTF-8 metin cp1252'de patlayıp SAYFA
+#     düşürüyordu (bizim patch_altium_text_decoding yamamız bunu kurtarıyor).
+#   · 2026.8.11.post1 öncesi — anotasyonsuz/aynı designator'lı komponentlerde
+#     derlenmiş şematik kimliği hatalıydı (BRK-210'da IC12'nin 4 SPI pini eksikti).
+MIN_RECOMMENDED_AM = "2026.8.11"
 
 # --- Altium metin çözümlemesi: cp1252'ye sığmayan içerik yüzünden sayfa kaybı --
 # altium_monkey, `%UTF8%` öneki YOKSA kaydı KATI cp1252 ile çözer. Altium'da
@@ -68,6 +73,11 @@ MIN_RECOMMENDED_AM = "2026.6.21"
 #   2) Windows davranışı: cp1252'de tanımsız baytlar kendi kod noktalarına düşer
 # Böylece hiçbir kayıt kaybolmaz. Yama bir kez uygulanır ve `decode_byte_array`
 # adını DOĞRUDAN import etmiş modüllerde de değiştirilir.
+# NOT (v2.19.1): altium_monkey 2026.8.11'den itibaren kütüphane bu kurtarmayı
+# KENDİ yapıyor (işaretsiz UTF-8'i çözüp `log.warning` ile sidecar öneriyor) →
+# yama artık EMNİYET AĞI: yalnız kütüphanenin katı yolu HÂLÂ patlarsa (daha eski
+# kurulum ya da kütüphanenin çözemediği bayt dizisi) devreye girer. Sarmalayıcı
+# `*args, **kwargs` aldığından yeni `context=` parametresi sorunsuz geçer.
 def _viz_cp1252_fallback(err):
     """@brief cp1252'de tanımsız baytı kendi kod noktasına çevirir (Windows gibi)."""
     return (chr(err.object[err.start]), err.start + 1)
@@ -77,6 +87,121 @@ try:
     codecs.lookup_error("viz_cp1252_fallback")
 except LookupError:
     codecs.register_error("viz_cp1252_fallback", _viz_cp1252_fallback)
+
+
+## @brief Kütüphane uyarılarını üretim log'una taşıyan yakalayıcının iç sayacı.
+#  (İç içe kullanımda yalnız EN DIŞTAKİ blok özet yazsın diye.)
+_LIB_LOG_DEPTH = [0]
+
+
+class _LibraryLogCapture:
+    """@brief altium_monkey'in `logging` uyarılarını toplayıp üretim log'una özetler.
+
+    @details
+    Kütüphane bazı tanılama mesajlarını Python `logging` ile verir (ör. işaretsiz
+    UTF-8 metin kurtarma). Kök logger'da handler olmadığı için bunlar `lastResort`
+    ile doğrudan **konsola** düşüyordu: GUI log'unda görünmüyor, pencereli exe'de
+    ise tamamen kayboluyordu — kullanıcı ham İngilizce mesajı konsolda görüp
+    "bu ne?" diye soruyordu. Bu sınıf üretim boyunca `altium_monkey` logger'ına
+    bağlanır, mesajları ŞABLONA göre sayar ve blok sonunda tek satırlık Türkçe
+    özet yazar. `propagate` kapatılır → konsola tekrar basılmaz.
+
+    Kullanım:  `with _LibraryLogCapture(log): ...`
+    """
+
+    class _Handler(logging.Handler):
+        def __init__(self, sink):
+            super().__init__(level=logging.WARNING)
+            self.sink = sink
+
+        def emit(self, record):
+            try:
+                # Şablon (record.msg) aynı olan mesajlar tek satırda toplanır;
+                # tam metin ilk örnekten alınır.
+                key = str(record.msg)
+                entry = self.sink.setdefault(key, {"n": 0, "ilk": ""})
+                entry["n"] += 1
+                if not entry["ilk"]:
+                    entry["ilk"] = record.getMessage()
+            except Exception:
+                pass
+
+    def __init__(self, log):
+        self.log = log or (lambda m: None)
+        self.msgs = {}
+        self.h = None
+        self.lg = None
+        self.prev_prop = None
+
+    def __enter__(self):
+        _LIB_LOG_DEPTH[0] += 1
+        if _LIB_LOG_DEPTH[0] == 1:
+            try:
+                self.lg = logging.getLogger("altium_monkey")
+                self.h = self._Handler(self.msgs)
+                self.lg.addHandler(self.h)
+                self.prev_prop = self.lg.propagate
+                self.lg.propagate = False
+                if self.lg.level > logging.WARNING or self.lg.level == logging.NOTSET:
+                    self.lg.setLevel(logging.WARNING)
+            except Exception:
+                self.h = None
+        return self
+
+    def __exit__(self, *exc):
+        _LIB_LOG_DEPTH[0] = max(0, _LIB_LOG_DEPTH[0] - 1)
+        if self.h is not None:
+            try:
+                self.lg.removeHandler(self.h)
+                self.lg.propagate = self.prev_prop
+            except Exception:
+                pass
+            self._report()
+        return False
+
+    def _report(self):
+        """@brief Toplanan uyarıları tek satırlık Türkçe özetlere çevir."""
+        for key, e in self.msgs.items():
+            n, ilk = e["n"], e["ilk"]
+            kere = f" ({n} kayıt)" if n > 1 else ""
+            if "Recovered unmarked UTF-8" in key:
+                self.log(f"  · İşaretsiz UTF-8 metin kurtarıldı{kere} — bir "
+                         f"parametre/metin `%UTF8%` işareti olmadan UTF-8 "
+                         f"kaydedilmiş (genelde datasheet'ten yapıştırılmış "
+                         f"°C / ± gibi karakterler). **Veri kaybı yok**; uyarıyı "
+                         f"kaldırmak için o sayfaları Altium'da açıp kaydetmek "
+                         f"yeterli.")
+            else:
+                self.log(f"  · Kütüphane uyarısı{kere}: {ilk[:160]}")
+
+
+def _with_library_logs(fn):
+    """@brief Üretim boyunca kütüphane uyarılarını yakalayıp log'a özetleyen dekoratör.
+
+    Fonksiyonun `log` parametresini (anahtar veya konumsal) bulup
+    `_LibraryLogCapture`'a verir. İç içe çağrılarda (birleşik görünüm →
+    `_collect_data`) yalnız en dıştaki blok özet yazar.
+
+    @param fn Sarmalanacak üretim fonksiyonu
+    @return Sarmalanmış fonksiyon
+    """
+    import functools
+
+    @functools.wraps(fn)
+    def wrapper(*args, **kwargs):
+        log = kwargs.get("log")
+        if log is None:
+            try:
+                names = fn.__code__.co_varnames[:fn.__code__.co_argcount]
+                idx = names.index("log")
+                if idx < len(args):
+                    log = args[idx]
+            except Exception:
+                log = None
+        with _LibraryLogCapture(log or print):
+            return fn(*args, **kwargs)
+
+    return wrapper
 
 
 def patch_altium_text_decoding(log=None):
@@ -712,6 +837,100 @@ def _resolve_pcbdoc_paths(project_path, log):
     return found
 
 
+# --- Doğru PcbDoc'u seçme + tek seferlik parse -----------------------------
+# Bir PrjPcb birden çok PcbDoc referansı taşıyabilir (asıl board + gabari/panel/
+# montaj dokümanı). Gerçek board KOMPONENTİ OLANDIR. Eskiden her çağıran kendi
+# kuralını uyguluyordu: cross-probe ve netlist-PCB doğrulaması "adında 'panel'
+# geçmeyen İLK dosya"yı alıyor, görüntüleyiciler ise "komponenti olan ilk
+# dosya"yı arıyordu → BRK-209'da ilk referans (BRK-218, 0 komponent / 0 pad /
+# 12 iz) cross-probe ve netlist tarafından seçilip "komponent bulunamadı" +
+# "net'e bağlı pad yok" uyarılarına yol açıyor, geometri/3D ise doğru dosyayı
+# (BRK-213: 947 komponent) kullanıyordu. Artık TEK kural, tek yerde.
+_PCB_DOC_CACHE = {}    # çözülmüş dosya yolu (lower) -> AltiumPcbDoc
+_PCB_PICK_CACHE = {}   # proje yolu (lower)          -> (Path, AltiumPcbDoc)
+
+
+def _load_pcbdoc(path):
+    """@brief PcbDoc'u parse et; aynı dosya süreç boyunca BİR KEZ okunur.
+
+    Birleşik görünüm aynı PcbDoc'u cross-probe, netlist doğrulaması, geometri
+    ve 3D için ayrı ayrı açıyordu (BRK-213 = 34.7 MB, her açılış ~2.7 s).
+
+    @param path PcbDoc dosya yolu
+    @return AltiumPcbDoc nesnesi
+    """
+    from altium_monkey.altium_pcbdoc import AltiumPcbDoc
+    key = str(Path(path).resolve()).lower()
+    doc = _PCB_DOC_CACHE.get(key)
+    if doc is None:
+        doc = AltiumPcbDoc.from_file(str(path))
+        _PCB_DOC_CACHE[key] = doc
+    return doc
+
+
+def _pick_pcbdoc(project_path, log):
+    """@brief Projenin GERÇEK board dosyasını seç ve parse edilmiş halini döndür.
+
+    @details
+    Kural: adayları komponent (sonra pad) sayısına göre puanla, en yükseği
+    kazansın. Hiçbirinde komponent yoksa eski davranışa dönülür (adında "panel"
+    geçmeyen ilk dosya) — böylece komponenti gerçekten olmayan tasarımlarda da
+    bir board seçilir. Seçim proje başına bir kez yapılır ve loglanır; kaybeden
+    adaylar bellekte tutulmaz.
+
+    @param project_path Altium proje dosyası (.PrjPcb) yolu
+    @param log Log mesajı callback'i (str alır)
+    @return (Path, AltiumPcbDoc) çifti; PCB yoksa/parse edilemezse (None, None)
+    """
+    ckey = str(Path(project_path).resolve()).lower()
+    if ckey in _PCB_PICK_CACHE:
+        return _PCB_PICK_CACHE[ckey]
+
+    paths = _resolve_pcbdoc_paths(project_path, log)
+    if not paths:
+        _PCB_PICK_CACHE[ckey] = (None, None)
+        return (None, None)
+
+    best, best_doc, best_score, notes = None, None, (-1, -1), []
+    for p in paths:
+        try:
+            doc = _load_pcbdoc(p)
+        except Exception as e:
+            log(f"  · {p.name} okunamadı: {e}")
+            continue
+        score = (len(getattr(doc, "components", []) or []),
+                 len(getattr(doc, "pads", []) or []))
+        notes.append(f"{p.name}: {score[0]} komponent")
+        if score > best_score:
+            best, best_doc, best_score = p, doc, score
+        if len(paths) == 1:
+            break
+
+    if best is None:
+        _PCB_PICK_CACHE[ckey] = (None, None)
+        return (None, None)
+
+    if best_score[0] == 0 and len(paths) > 1:
+        # Hiçbir adayda komponent yok — eski "panel olmayan ilk dosya" kuralı.
+        alt = next((p for p in paths if "panel" not in p.stem.lower()), paths[0])
+        try:
+            best, best_doc = alt, _load_pcbdoc(alt)
+        except Exception:
+            pass
+
+    if len(paths) > 1:
+        log(f"  · {len(paths)} PcbDoc adayından **{best.name}** seçildi "
+            f"({'; '.join(notes)}).")
+
+    # Kaybeden adayları bellekten düş (34 MB'lık board'ları tutmanın anlamı yok).
+    keep = str(Path(best).resolve()).lower()
+    for k in [k for k in _PCB_DOC_CACHE if k != keep]:
+        _PCB_DOC_CACHE.pop(k, None)
+
+    _PCB_PICK_CACHE[ckey] = (best, best_doc)
+    return (best, best_doc)
+
+
 def _collect_data(project_path: str, log, with_pcb=False, progress=None):
     """@brief Projeyi yükle, tüm sayfa/net/komponent verilerini topla.
     
@@ -1038,20 +1257,17 @@ def collect_pcb_placement(project_path, log):
         log("\n! AltiumPcbDoc API yok — PCB cross-probe atlanıyor.")
         return result
 
-    # PcbDoc bul (kardeş klasör dahil, Panel olmayanı tercih et)
-    pcb_paths = _resolve_pcbdoc_paths(project_path, log)
-    if not pcb_paths:
-        log("\n· PCB dosyası bulunamadı — cross-probe atlanıyor.")
-        return result
-    # "Panel" içermeyen ilk PCB'yi seç (panel = üretim paneli, asıl board değil)
-    pcb_path = next((p for p in pcb_paths if "panel" not in p.stem.lower()), pcb_paths[0])
-
-    log(f"\nPCB cross-probe: {pcb_path.name}")
+    # PcbDoc bul (kardeş klasör dahil; komponenti olan = gerçek board)
     try:
-        pcb = AltiumPcbDoc.from_file(pcb_path)
+        pcb_path, pcb = _pick_pcbdoc(project_path, log)
     except Exception as e:
         log(f"! PCB parse hatası: {e}")
         return result
+    if pcb is None:
+        log("\n· PCB dosyası bulunamadı — cross-probe atlanıyor.")
+        return result
+
+    log(f"\nPCB cross-probe: {pcb_path.name}")
 
     if not pcb.components:
         log("! PCB'de komponent bulunamadı (parse boş).")
@@ -1308,20 +1524,16 @@ def _merge_netlist_with_pcb(netlist, project_path, log):
     if not nets:
         return
     try:
-        paths = _resolve_pcbdoc_paths(project_path, lambda m: None)
+        # collect_pcb_placement / görüntüleyicilerle AYNI seçim (ve aynı önbellek)
+        pcb_path, pcb = _pick_pcbdoc(project_path, log)
     except Exception:
-        paths = []
-    if not paths:
+        pcb_path, pcb = None, None
+    if pcb is None:
         log("  · PCB bulunamadı — netlist PCB ile doğrulanamadı (şematik esas).")
         return
-    # Panel olmayan PcbDoc tercih (collect_pcb_placement ile aynı kural)
-    pcb_path = next((p for p in paths if "panel" not in p.name.lower()), paths[0])
 
     log(f"  · Netlist PCB'den doğrulanıyor: {pcb_path.name} (büyük board'da sürebilir)...")
     try:
-        from altium_monkey.altium_pcbdoc import AltiumPcbDoc
-        pcb = (AltiumPcbDoc.from_file(str(pcb_path))
-               if hasattr(AltiumPcbDoc, "from_file") else AltiumPcbDoc(str(pcb_path)))
         comps = {i: str(getattr(c, "designator", "") or "")
                  for i, c in enumerate(pcb.components)}
         pcb_net_names = {i: getattr(n, "name", "") or "" for i, n in enumerate(pcb.nets)}
@@ -1480,6 +1692,24 @@ def collect_design_extras(project_path, log):
         return result
 
     result["available"] = True
+
+    # --- BOM/PnP'nin kullanacağı PcbDoc'u BİZİM seçimimize sabitle -----------
+    # `design.to_pnp()` seçici (selector) parametresi almıyor; içeride her zaman
+    # `load_pcbdoc(selector=None)` çağırıp aday listesinin İLKİNİ alıyor ve
+    # "Multiple PcbDoc files found, using first: ..." uyarısını basıyor. BRK-209'da
+    # ilk aday komponentsiz gabari dokümanı (BRK-218) olduğu için Pick&Place
+    # "0 yerleşim" dönüyordu. Zaten parse ettiğimiz doğru board'u (BRK-213)
+    # doğrudan bağlıyoruz → hem doğru sonuç, hem 34 MB'lık dosya ikinci kez
+    # parse edilmiyor.
+    try:
+        _pp, _pdoc = _pick_pcbdoc(project_path, lambda m: None)
+        if _pdoc is not None:
+            design.load_pcbdoc = lambda selector=None, _d=_pdoc: _d
+            design._pcbdoc = _pdoc
+            design._pcbdoc_loaded = True
+            log(f"  · BOM/PnP için PCB sabitlendi: {_pp.name}")
+    except Exception as e:
+        log(f"  · PcbDoc bağlanamadı ({e}) — kütüphane kendi seçimini kullanacak.")
 
     # Varyantlar
     try:
@@ -2617,23 +2847,11 @@ def collect_pcb_layers(project_path, log, max_layer_mb=8):
         log("\n! AltiumPcbDoc API yok — PCB görüntüleyici atlanıyor.")
         return result
 
-    pcb_paths = _resolve_pcbdoc_paths(project_path, log)
-    if not pcb_paths:
-        log("\n· PCB dosyası bulunamadı.")
-        return result
-    # Komponenti olan PCB'yi seç (panel genelde boş)
-    pcb_path = None
-    pcb = None
-    for p in sorted(pcb_paths, key=lambda x: "panel" in x.stem.lower()):
-        try:
-            cand = AltiumPcbDoc.from_file(p)
-            if cand.components:
-                pcb_path, pcb = p, cand
-                break
-        except Exception:
-            continue
+    # Komponenti olan PCB'yi seç (gabari/panel dokümanı genelde boş) — seçim ve
+    # parse önbelleği tüm çıktı yollarıyla ortak.
+    pcb_path, pcb = _pick_pcbdoc(project_path, log)
     if pcb is None:
-        log("\n! PCB parse edilemedi veya komponent yok.")
+        log("\n! PCB dosyası bulunamadı veya parse edilemedi.")
         return result
 
     log(f"\nPCB görüntüleyici: {pcb_path.name} ({len(pcb.components)} komponent)")
@@ -2806,6 +3024,7 @@ def collect_pcb_layers(project_path, log, max_layer_mb=8):
     return result
 
 
+@_with_library_logs
 def generate_viewer(
     project_path: str,
     output_path: str,
@@ -2857,6 +3076,7 @@ def _extract_svg_inner(svg_str):
     return svg_str[start + 1:end]
 
 
+@_with_library_logs
 def generate_pcb_viewer(project_path, output_path, log=print, progress=None):
     """@brief Tam ekran PCB görüntüleyici HTML üret — Altium benzeri.
     
@@ -2904,6 +3124,7 @@ def generate_pcb_viewer(project_path, output_path, log=print, progress=None):
     return True
 
 
+@_with_library_logs
 def generate_combined_viewer(
     project_path: str,
     output_path: str,
@@ -2990,19 +3211,7 @@ def generate_combined_viewer(
         # en pahalı adımı buydu. 3D verisi PCB'den doğrudan çıkarılır; yüzey
         # dokusu katman SVG'lerine dayandığından bu modda ÜRETİLMEZ.
         prog(60, "PCB geometrisi çıkarılıyor (hızlı mod)")
-        from altium_monkey.altium_pcbdoc import AltiumPcbDoc
-        pcb_doc, pcb_path = None, None
-        for cand_path in _resolve_pcbdoc_paths(project_path, log):
-            try:
-                cand = AltiumPcbDoc.from_file(str(cand_path))
-            except Exception as e:
-                log(f"  · {cand_path.name} okunamadı: {e}")
-                continue
-            if getattr(cand, "components", None):
-                pcb_doc, pcb_path = cand, cand_path
-                break
-            if pcb_doc is None:
-                pcb_doc, pcb_path = cand, cand_path
+        pcb_path, pcb_doc = _pick_pcbdoc(project_path, log)
         geo = extract_pcb_geometry(pcb_doc, log) if pcb_doc else {"available": False}
         have_pcb = bool(geo.get("available"))
         if have_pcb:
@@ -6674,6 +6883,7 @@ def build_pcb_canvas_html(geo, comp_info, timestamp, project_name, pcb_name=""):
             .replace("__TIME__", timestamp))
 
 
+@_with_library_logs
 def generate_pcb_canvas_viewer(project_path, output_path, log=print, progress=None):
     """@brief Geometri tabanlı PCB görüntüleyici üret (küçük dosya, akıcı zoom).
 
@@ -6692,25 +6902,9 @@ def generate_pcb_canvas_viewer(project_path, output_path, log=print, progress=No
     prog = progress or (lambda p, l: None)
     patch_altium_text_decoding()
     prog(5, "PCB okunuyor")
-    paths = _resolve_pcbdoc_paths(project_path, log)
-    if not paths:
-        log("\n! PCB dosyası bulunamadı.")
-        return False
-    pcb_path = None
-    pcb = None
-    for p in paths:
-        try:
-            cand = AltiumPcbDoc.from_file(str(p))
-        except Exception as e:
-            log(f"  · {p.name} okunamadı: {e}")
-            continue
-        if getattr(cand, "components", None):
-            pcb, pcb_path = cand, p
-            break
-        if pcb is None:
-            pcb, pcb_path = cand, p
+    pcb_path, pcb = _pick_pcbdoc(project_path, log)
     if pcb is None:
-        log("\n! PCB parse edilemedi.")
+        log("\n! PCB dosyası bulunamadı veya parse edilemedi.")
         return False
     log(f"\nPCB (geometri): {pcb_path.name}")
     prog(35, "Geometri çıkarılıyor")
@@ -6743,6 +6937,7 @@ def generate_pcb_canvas_viewer(project_path, output_path, log=print, progress=No
     prog(100, "Tamamlandı")
     return True
 
+@_with_library_logs
 def generate_json(
     project_path: str,
     output_path: str,
@@ -6925,6 +7120,7 @@ def generate_json(
     log(f"  Boyut: {out.stat().st_size / 1024:.1f} KB")
 
 
+@_with_library_logs
 def generate_bom_csv(project_path, output_path, variant=None,
                      log: Callable[[str], None] = print):
     """@brief BOM'u CSV dosyası olarak üret. variant verilirse o varyanta filtrele.
@@ -6967,6 +7163,7 @@ def generate_bom_csv(project_path, output_path, variant=None,
     return True
 
 
+@_with_library_logs
 def generate_pnp_csv(project_path, output_path, variant=None, units="mm",
                      log: Callable[[str], None] = print):
     """@brief Pick&Place'i CSV dosyası olarak üret (PCB gerektirir).
@@ -7222,6 +7419,7 @@ def _net_port_dir(ports, main_sheet):
             "BIDIRECTIONAL": "I/O"}.get((pick.get("io_type") or "").upper(), "")
 
 
+@_with_library_logs
 def generate_ic_map_xlsx(project_path, output_path, min_pins=4,
                          main_designators=None, exclude_prefixes=None,
                          log: Callable[[str], None] = print):
@@ -7629,6 +7827,7 @@ def generate_ic_map_xlsx(project_path, output_path, min_pins=4,
     return True
 
 
+@_with_library_logs
 def generate_mcu_pinout_xlsx(project_path, output_path, mcu_designator,
                              include_power=True,
                              log: Callable[[str], None] = print):

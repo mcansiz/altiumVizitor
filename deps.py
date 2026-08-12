@@ -82,7 +82,7 @@ DEPENDENCIES = (
     # --- Doğrudan import edilenler (gui.py / viewer.py) ---
     Dep("PyQt5", "PyQt5", "5.15.11",
         "Masaüstü arayüz (gui.py + gui.ui)", True),
-    Dep("altium-monkey", "altium_monkey", "2026.6.21",
+    Dep("altium-monkey", "altium_monkey", "2026.8.11",
         "Altium SchDoc/PcbDoc okuma, SVG render, netlist derleme", True),
     Dep("openpyxl", "openpyxl", "3.1",
         "Excel çıktıları (IC bağlantı haritası, MCU pin listesi)", True),
@@ -417,14 +417,14 @@ def _main() -> int:
         return 0
     rows = status_table()
     out = [f"Schematic Viz — bağımlılıklar ({sys.version.split()[0]} @ {sys.executable})", ""]
-    hdr = f"  {'PAKET':<16s} {'SÜRÜM':<12s} {'DURUM':<26s} AÇIKLAMA"
+    hdr = f"  {'PAKET':<16s} {'SÜRÜM':<16s} {'DURUM':<26s} AÇIKLAMA"
     out += [hdr, "-" * max(len(hdr), 96)]
     for grup, dogrudan in (("Doğrudan kullanılan", True), ("Alt bağımlılıklar", False)):
         out.append(f"\n[{grup}]")
         for dist, ver, durum, purpose, direct in rows:
             if direct is dogrudan:
                 isaret = "✓" if durum == "tamam" else "✗"
-                out.append(f"{isaret} {dist:<16s} {ver:<12s} {durum:<26s} {purpose}")
+                out.append(f"{isaret} {dist:<16s} {ver:<16s} {durum:<26s} {purpose}")
     _write("\n".join(out), sys.stdout)
     problems = check()
     if problems:

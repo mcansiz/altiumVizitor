@@ -47,6 +47,8 @@ deps.enforce(gui=True)
 from PyQt5 import QtWidgets, QtCore, QtGui, uic
 from PyQt5.QtCore import QT_VERSION_STR, PYQT_VERSION_STR
 
+import i18n
+from i18n import tr
 from viewer import (generate_viewer, generate_json,
                     generate_bom_csv, generate_pnp_csv,
                     generate_ic_map_xlsx, generate_mcu_pinout_xlsx,
@@ -61,9 +63,9 @@ def collect_versions() -> dict:
     @return Üretilen sonuç.
     """
     info = {
-        "Uygulama": APP_VERSION,
+        tr("Uygulama"): APP_VERSION,
         "Python": platform.python_version(),
-        "İşletim Sistemi": f"{platform.system()} {platform.release()}",
+        tr("İşletim Sistemi"): f"{platform.system()} {platform.release()}",
         "Qt": QT_VERSION_STR,
         "PyQt5": PYQT_VERSION_STR,
     }
@@ -73,7 +75,7 @@ def collect_versions() -> dict:
     for dist, ver, durum, _purpose, _direct in deps.status_table():
         if dist == "PyQt5":
             continue  # yukarıda PYQT_VERSION_STR ile zaten listelendi
-        info[dist] = ver if durum == "tamam" else f"{ver}  ({durum})"
+        info[dist] = ver if durum == "tamam" else f"{ver}  ({tr(durum)})"
     return info
 
 
@@ -156,7 +158,7 @@ class GeneratorThread(QtCore.QThread):
                     log=lambda msg: self.log_signal.emit(msg),
                 )
                 if not ok:
-                    self.done_signal.emit(False, "BOM verisi yok")
+                    self.done_signal.emit(False, tr("BOM verisi yok"))
                     return
             elif self.mode == "pnp":
                 ok = generate_pnp_csv(
@@ -165,7 +167,8 @@ class GeneratorThread(QtCore.QThread):
                     log=lambda msg: self.log_signal.emit(msg),
                 )
                 if not ok:
-                    self.done_signal.emit(False, "Pick&Place verisi yok (PCB gerekli)")
+                    self.done_signal.emit(
+                        False, tr("Pick&Place verisi yok (PCB gerekli)"))
                     return
             elif self.mode == "icmap":
                 ok = generate_ic_map_xlsx(
@@ -177,7 +180,8 @@ class GeneratorThread(QtCore.QThread):
                     log=lambda msg: self.log_signal.emit(msg),
                 )
                 if not ok:
-                    self.done_signal.emit(False, "IC haritası üretilemedi (netlist yok)")
+                    self.done_signal.emit(
+                        False, tr("IC haritası üretilemedi (netlist yok)"))
                     return
             elif self.mode == "mcupin":
                 ok = generate_mcu_pinout_xlsx(
@@ -188,7 +192,9 @@ class GeneratorThread(QtCore.QThread):
                 )
                 if not ok:
                     self.done_signal.emit(
-                        False, "MCU pin listesi üretilemedi (MCU designator gir / netlist yok)")
+                        False,
+                        tr("MCU pin listesi üretilemedi "
+                           "(MCU designator gir / netlist yok)"))
                     return
             elif self.mode == "pcbview":
                 ok = generate_pcb_viewer(
@@ -199,7 +205,9 @@ class GeneratorThread(QtCore.QThread):
                 )
                 if not ok:
                     self.done_signal.emit(
-                        False, "PCB görüntüleyici üretilemedi (PCB dosyası yok/okunamadı)")
+                        False,
+                        tr("PCB görüntüleyici üretilemedi "
+                           "(PCB dosyası yok/okunamadı)"))
                     return
             elif self.mode == "pcbgeo":
                 ok = generate_pcb_canvas_viewer(
@@ -210,7 +218,9 @@ class GeneratorThread(QtCore.QThread):
                 )
                 if not ok:
                     self.done_signal.emit(
-                        False, "PCB (geometri) görüntüleyici üretilemedi (PCB dosyası yok/okunamadı)")
+                        False,
+                        tr("PCB (geometri) görüntüleyici üretilemedi "
+                           "(PCB dosyası yok/okunamadı)"))
                     return
             elif self.mode == "combined":
                 ok = generate_combined_viewer(
@@ -224,7 +234,7 @@ class GeneratorThread(QtCore.QThread):
                 )
                 if not ok:
                     self.done_signal.emit(
-                        False, "Birleşik görünüm üretilemedi")
+                        False, tr("Birleşik görünüm üretilemedi"))
                     return
             else:
                 generate_viewer(
@@ -252,7 +262,7 @@ class GeneratorThread(QtCore.QThread):
             self.done_signal.emit(True, final_out)
         except Exception as e:
             tb = traceback.format_exc()
-            self.log_signal.emit(f"\nHATA: {e}\n{tb}")
+            self.log_signal.emit(tr("\nHATA: {hata}\n{iz}").format(hata=e, iz=tb))
             self.done_signal.emit(False, str(e))
 
 
@@ -312,6 +322,17 @@ QScrollBar::add-page, QScrollBar::sub-page { background: transparent; }
 
 QSpinBox::up-button, QSpinBox::down-button { width: 16px; background: #232834;
   border-left: 1px solid #2b303b; }
+QMenuBar { background: #15171c; color: #d4d9e0; border-bottom: 1px solid #2a2f38; }
+QMenuBar::item { background: transparent; padding: 6px 11px; border-radius: 6px; }
+QMenuBar::item:selected { background: #2a303b; color: #e9eef4; }
+QMenuBar::item:pressed { background: #1f8a66; color: #f0fff8; }
+QMenu { background: #21252e; color: #d4d9e0; border: 1px solid #2f3540;
+  border-radius: 8px; padding: 5px; }
+QMenu::item { padding: 6px 26px 6px 22px; border-radius: 5px; }
+QMenu::item:selected { background: #2c7a62; color: #ffffff; }
+QMenu::item:disabled { color: #5a616c; }
+QMenu::separator { height: 1px; background: #2f3540; margin: 5px 8px; }
+QMenu::indicator { width: 13px; height: 13px; left: 6px; }
 QStatusBar { background: #15171c; color: #7e8794; border-top: 1px solid #2a2f38; }
 QToolTip { background: #2a303b; color: #e8ecf1; border: 1px solid #4ec9b0;
   border-radius: 4px; padding: 4px 7px; }
@@ -338,6 +359,18 @@ class MainWindow(QtWidgets.QMainWindow):
         # Kalıcı ayarlar (son açılan proje klasörü vb.) — Windows'ta registry,
         # Linux/macOS'ta ini dosyası; yol ayracı OS'a göre çözülür.
         self.settings = QtCore.QSettings("SchematicViz", "SchematicViz")
+
+        # --- Dil altyapısı ------------------------------------------------
+        # gui.ui'den gelen metinler HENÜZ TÜRKÇEYKEN yedeklenir; dil her
+        # değiştiğinde çeviri bu kaynak yedekten yeniden uygulanır (İngilizceye
+        # çevrilmiş metin bir sonraki geçişte katalog anahtarı olarak
+        # bulunamayacağı için doğrudan yerinde çeviri geri dönüşü engellerdi).
+        # Renk butonlarının metni bir ETİKET değil VERİDİR (seçili hex kodu) —
+        # yedeğe alınırsa dil değişiminde kullanıcının seçtiği rengi ezerdi.
+        self._ui_snapshot = i18n.snapshot_widgets(
+            self, exclude=("interColorBtn", "intraColorBtn"))
+        self._menu_texts = []   # [(QAction|QMenu, kaynak_metin), ...]
+        self._menu_tips = []    # [(QAction, kaynak_ipucu), ...]
 
         # Default renkler
         self.inter_color = "#4ec9b0"
@@ -385,16 +418,190 @@ class MainWindow(QtWidgets.QMainWindow):
         if about_btn is not None:
             about_btn.clicked.connect(self.show_about)
 
-        # Alt durum çubuğunda kalıcı versiyon özeti
+        # Üst menü çubuğu (butonlarla aynı eylemler + klavye kısayolları + dil)
+        self._build_menu()
+
+        # Kayıtlı dili uygula (yoksa kaynak dil: Türkçe → mevcut davranış)
+        saved_lang = self.settings.value("language", i18n.SOURCE_LANGUAGE, type=str)
+        self.set_language(saved_lang, persist=False)
+
+    # === Menü çubuğu ===
+    def _add_action(self, menu, text, slot, shortcut=None, tip=None,
+                    checkable=False, checked=False):
+        """@brief Menüye eylem ekler ve metnini dil yedeğine kaydeder.
+
+        @param menu Hedef QMenu
+        @param text Türkçe kaynak metin (çeviri anahtarı)
+        @param slot Tetiklendiğinde çağrılacak fonksiyon (None = bağlama yok)
+        @param shortcut Klavye kısayolu (ör. "Ctrl+O")
+        @param tip Durum çubuğu ipucu (Türkçe kaynak metin)
+        @param checkable Eylem işaretlenebilir mi
+        @param checked İlk işaret durumu
+        @return Oluşturulan QAction.
+        """
+        act = QtWidgets.QAction(tr(text), self)
+        if shortcut:
+            act.setShortcut(QtGui.QKeySequence(shortcut))
+        if checkable:
+            act.setCheckable(True)
+            act.setChecked(checked)
+        if tip:
+            act.setStatusTip(tr(tip))
+            self._menu_tips.append((act, tip))
+        if slot is not None:
+            act.triggered.connect(slot)
+        menu.addAction(act)
+        self._menu_texts.append((act, text))
+        return act
+
+    def _add_menu(self, parent, text):
+        """@brief Menü (veya alt menü) ekler ve başlığını dil yedeğine kaydeder.
+
+        @param parent Üst QMenuBar / QMenu
+        @param text Türkçe kaynak başlık
+        @return Oluşturulan QMenu.
+        """
+        menu = parent.addMenu(tr(text))
+        self._menu_texts.append((menu, text))
+        return menu
+
+    def _build_menu(self):
+        """@brief Üst menü çubuğunu kurar (Dosya / Üret / Ayarlar / Yardım).
+
+        @details Menü eylemleri mevcut buton slotlarını yeniden kullanır; üretim
+        eylemleri `self._menu_action_items` listesinde tutulur ve üretim sırasında
+        butonlarla birlikte devre dışı bırakılır.
+        """
+        bar = self.menuBar()
+
+        # --- Dosya ---
+        file_menu = self._add_menu(bar, "&Dosya")
+        self._add_action(file_menu, "Proje &Aç…", self.browse_project, "Ctrl+O",
+                         tip="Proje dosyası seç (Ctrl+O)")
+        self._add_action(file_menu, "Çı&ktı Yolu Seç…", self.browse_output, "Ctrl+S")
+        file_menu.addSeparator()
+        self.openOutputAct = self._add_action(
+            file_menu, "Son Çıktıyı Tarayıcıda Aç", self.open_in_browser, "Ctrl+B")
+        self.openOutputAct.setEnabled(False)
+        self._add_action(file_menu, "Çıktı Klasörünü Aç", self.open_output_folder)
+        file_menu.addSeparator()
+        self._add_action(file_menu, "Log'u Temizle", self.clear_log)
+        file_menu.addSeparator()
+        self._add_action(file_menu, "Çıkış", self.close, "Ctrl+Q",
+                         tip="Uygulamadan çık")
+
+        # --- Üret --- (butonlarla aynı eylemler, kısayollu)
+        gen_menu = self._add_menu(bar, "&Üret")
+        self._menu_action_items = [
+            self._add_action(gen_menu, "Şematik Viewer", self.generate, "Ctrl+1"),
+            self._add_action(gen_menu, "PCB Görüntüleyici",
+                             self.generate_pcbview_action, "Ctrl+2"),
+            self._add_action(gen_menu, "PCB Hızlı (geometri)",
+                             self.generate_pcbgeo_action, "Ctrl+3"),
+            self._add_action(gen_menu, "Şematik + PCB + 3D  ★",
+                             self.generate_combined_action, "Ctrl+4"),
+        ]
+        gen_menu.addSeparator()
+        self._menu_action_items += [
+            self._add_action(gen_menu, "MCU Pin Listesi (Excel)",
+                             self.generate_mcupin_action),
+            self._add_action(gen_menu, "IC Bağlantı Haritası (Excel)",
+                             self.generate_icmap_action),
+            self._add_action(gen_menu, "BOM (CSV)", self.generate_bom_action),
+            self._add_action(gen_menu, "Pick && Place (CSV)", self.generate_pnp_action),
+            self._add_action(gen_menu, "JSON (AI / LLM için)",
+                             self.generate_json_action),
+        ]
+
+        # --- Ayarlar ---
+        set_menu = self._add_menu(bar, "&Ayarlar")
+        lang_menu = self._add_menu(set_menu, "Dil / Language")
+        self._lang_group = QtWidgets.QActionGroup(self)
+        self._lang_group.setExclusive(True)
+        self._lang_actions = {}
+        for code, name in i18n.LANGUAGES.items():
+            # Dil adları çevrilmez: her dil kendi adıyla yazılır (Türkçe/English)
+            act = QtWidgets.QAction(name, self)
+            act.setCheckable(True)
+            act.setData(code)
+            act.triggered.connect(lambda _checked, c=code: self.set_language(c))
+            self._lang_group.addAction(act)
+            lang_menu.addAction(act)
+            self._lang_actions[code] = act
+
+        set_menu.addSeparator()
+        self._add_action(set_menu, "Sayfalar Arası Renk…",
+                         lambda: self.pick_color("inter"))
+        self._add_action(set_menu, "Sayfa İçi Renk…",
+                         lambda: self.pick_color("intra"))
+        set_menu.addSeparator()
+        fast_chk = getattr(self, "fastPcbCheck", None)
+        self.fastPcbAct = self._add_action(
+            set_menu, "Birleşikte Hızlı PCB Kullan (geometri)", None,
+            checkable=True,
+            checked=bool(fast_chk is not None and fast_chk.isChecked()))
+        # Menü ↔ kutucuk çift yönlü senkron (tek durum, iki giriş noktası)
+        if fast_chk is not None:
+            self.fastPcbAct.toggled.connect(fast_chk.setChecked)
+            fast_chk.toggled.connect(self.fastPcbAct.setChecked)
+        else:
+            self.fastPcbAct.setEnabled(False)
+
+        # --- Yardım ---
+        help_menu = self._add_menu(bar, "&Yardım")
+        self._add_action(help_menu, "Hakkında / Sürümler", self.show_about, "F1")
+        self._add_action(help_menu, "Sürümleri Panoya Kopyala", self.copy_versions)
+        self._add_action(help_menu, "Bağımlılık Durumu", self.show_dependencies)
+
+    # === Dil ===
+    def set_language(self, code, persist=True):
+        """@brief Arayüz dilini değiştirir ve tüm metinleri yeniden çevirir.
+
+        @param code Dil kodu ("tr" | "en")
+        @param persist Seçim QSettings'e kaydedilsin mi (açılışta kaydı uygularken False)
+        """
+        code = i18n.set_language(code)
+        if persist:
+            self.settings.setValue("language", code)
+        # Dil menüsündeki işareti seçime eşitle (menüden gelmeyen çağrılar için)
+        act = getattr(self, "_lang_actions", {}).get(code)
+        if act is not None and not act.isChecked():
+            act.setChecked(True)
+        self.retranslate_ui()
+
+    def retranslate_ui(self):
+        """@brief Tüm arayüz metinlerini etkin dile göre yeniden yazar.
+
+        @details gui.ui widget'ları kaynak yedekten (`_ui_snapshot`), menü
+        öğeleri `_menu_texts`/`_menu_tips` listelerinden çevrilir. Üretim
+        sırasında "Üretiliyor..." yazan buton bozulmasın diye aktif buton
+        etiketleri yalnız üretim yokken sıfırlanır.
+        """
+        i18n.apply_snapshot(self._ui_snapshot)
+        for obj, source in self._menu_texts:
+            if isinstance(obj, QtWidgets.QMenu):
+                obj.setTitle(tr(source))
+            else:
+                obj.setText(tr(source))
+        for act, source in self._menu_tips:
+            act.setStatusTip(tr(source))
+        # Üretim sürüyorsa aktif butonun "Üretiliyor..." etiketini koru
+        if self.worker is not None and self.worker.isRunning():
+            active = getattr(self, self._MODE_BTN.get(
+                getattr(self, "_current_mode", ""), ""), None)
+            if active is not None:
+                active.setText(tr("Üretiliyor..."))
+        self._update_status_bar()
+
+    def _update_status_bar(self):
+        """@brief Alt durum çubuğundaki kalıcı sürüm/dil özetini yazar.
+        """
         sb = self.statusBar()
         py = platform.python_version()
-        try:
-            am = metadata.version("altium-monkey")
-        except Exception:
-            am = "—"
         sb.showMessage(
             f"v{APP_VERSION}  ·  Python {py}  ·  PyQt5 {PYQT_VERSION_STR}  "
-            f"·  altium_monkey {am}"
+            f"·  altium_monkey {self._am_version()}"
+            f"  ·  {tr('Dil: {ad}').format(ad=i18n.LANGUAGES[i18n.language()])}"
             f"							coded by Mcansız"
         )
 
@@ -403,23 +610,59 @@ class MainWindow(QtWidgets.QMainWindow):
         """@brief Hakkında / sürüm bilgisi diyaloğunu açar.
         """
         box = QtWidgets.QMessageBox(self)
-        box.setWindowTitle("Hakkında / Sürüm Bilgisi")
+        box.setWindowTitle(tr("Hakkında / Sürüm Bilgisi"))
         box.setIcon(QtWidgets.QMessageBox.Information)
         box.setText(f"Schematic Viz Generator  v{APP_VERSION}")
         box.setInformativeText(
-            "Altium şematik projelerini interaktif HTML viewer'a ve "
-            "AI analizine uygun JSON'a dönüştürür.\n\r"
-            "Desing by Mikail Cansız"
+            tr("Altium şematik projelerini interaktif HTML viewer'a ve "
+               "AI analizine uygun JSON'a dönüştürür.")
+            + "\n\rDesign by Mikail Cansız"
         )
         # Sürüm listesini monospace detay bölümünde göster
         box.setDetailedText(versions_text())
         # Kopyalama için detayları açıkça öner
-        copy_btn = box.addButton("Sürümleri Kopyala", QtWidgets.QMessageBox.ActionRole)
+        copy_btn = box.addButton(tr("Sürümleri Kopyala"),
+                                 QtWidgets.QMessageBox.ActionRole)
         box.addButton(QtWidgets.QMessageBox.Ok)
         box.exec_()
         if box.clickedButton() == copy_btn:
-            QtWidgets.QApplication.clipboard().setText(versions_text())
-            self.log("✓ Sürüm bilgisi panoya kopyalandı.")
+            self.copy_versions()
+
+    def copy_versions(self):
+        """@brief Sürüm listesini panoya kopyalar (Yardım menüsü + Hakkında diyaloğu).
+        """
+        QtWidgets.QApplication.clipboard().setText(versions_text())
+        self.log(tr("✓ Sürüm bilgisi panoya kopyalandı."))
+
+    def show_dependencies(self):
+        """@brief Kurulu bağımlılıkları durumlarıyla birlikte log paneline yazar.
+        """
+        rows = deps.status_table()
+        self.log("")
+        self.log(tr("Bağımlılıklar ({sayi} paket):").format(sayi=len(rows)))
+        for dist, ver, durum, purpose, direct in rows:
+            mark = "✓" if durum == "tamam" else "✗"
+            kind = tr("doğrudan") if direct else tr("alt bağımlılık")
+            self.log(f"  {mark} {dist:<16s} {ver:<14s} {tr(durum):<22s} "
+                     f"[{kind}]  {purpose}")
+
+    def clear_log(self):
+        """@brief Log panelini temizler.
+        """
+        self.logEdit.clear()
+
+    def open_output_folder(self):
+        """@brief Son üretilen çıktının bulunduğu klasörü dosya yöneticisinde açar.
+        """
+        target = self.last_output or self.outputPathEdit.text().strip()
+        folder = Path(target).parent if target else None
+        if not folder or not folder.is_dir():
+            QtWidgets.QMessageBox.information(
+                self, tr("Çıktı klasörü yok"),
+                tr("Henüz üretilmiş bir çıktı yok (veya dosya taşınmış)."))
+            return
+        QtGui.QDesktopServices.openUrl(
+            QtCore.QUrl.fromLocalFile(str(folder)))
 
     # === Proje seçimi ===
     def _last_project_dir(self) -> str:
@@ -446,9 +689,9 @@ class MainWindow(QtWidgets.QMainWindow):
         """
         path, _ = QtWidgets.QFileDialog.getOpenFileName(
             self,
-            "Altium proje dosyası seç",
+            tr("Altium proje dosyası seç"),
             self._last_project_dir(),
-            "Altium Project (*.PrjPcb *.PrjPCB);;Tüm Dosyalar (*)",
+            tr("Altium Project (*.PrjPcb *.PrjPCB);;Tüm Dosyalar (*)"),
         )
         if not path:
             return
@@ -481,12 +724,12 @@ class MainWindow(QtWidgets.QMainWindow):
                 item = QtWidgets.QListWidgetItem(p.stem)
                 item.setToolTip(str(p))
                 self.schematicsList.addItem(item)
-            self.log(f"✓ Proje açıldı, {len(paths)} şema bulundu.")
+            self.log(tr("✓ Proje açıldı, {sayi} şema bulundu.").format(sayi=len(paths)))
         except Exception as e:
-            self.log(f"✗ Proje açılamadı: {e}")
+            self.log(tr("✗ Proje açılamadı: {hata}").format(hata=e))
             QtWidgets.QMessageBox.critical(
-                self, "Proje yükleme hatası",
-                f"Proje dosyası açılırken hata:\n\n{e}"
+                self, tr("Proje yükleme hatası"),
+                tr("Proje dosyası açılırken hata:\n\n{hata}").format(hata=e)
             )
 
     # === Çıktı seçimi ===
@@ -495,7 +738,8 @@ class MainWindow(QtWidgets.QMainWindow):
         """
         suggested = self.outputPathEdit.text() or "schematic_viz.html"
         path, _ = QtWidgets.QFileDialog.getSaveFileName(
-            self, "Çıktı yolunu seç", suggested, "HTML (*.html);;Tüm Dosyalar (*)"
+            self, tr("Çıktı yolunu seç"), suggested,
+            tr("HTML (*.html);;Tüm Dosyalar (*)")
         )
         if path:
             self.outputPathEdit.setText(path)
@@ -507,8 +751,10 @@ class MainWindow(QtWidgets.QMainWindow):
         @param which Hedef seçici
         """
         current = self.inter_color if which == "inter" else self.intra_color
+        title = tr("Sayfalar arası bağlantı rengi") if which == "inter" \
+            else tr("Sayfa içi bağlantı rengi")
         color = QtWidgets.QColorDialog.getColor(
-            QtGui.QColor(current), self, f"{which} rengi"
+            QtGui.QColor(current), self, title
         )
         if not color.isValid():
             return
@@ -600,16 +846,16 @@ class MainWindow(QtWidgets.QMainWindow):
         mcu = main_edit.text().strip() if main_edit else ""
         if not mcu:
             QtWidgets.QMessageBox.warning(
-                self, "MCU gerekli",
-                "MCU pin listesi için 'Ana İşlemci(ler)' kutusuna MCU "
-                "designator'ını yaz (örn. U2).")
+                self, tr("MCU gerekli"),
+                tr("MCU pin listesi için 'MCU / Ana İşlemci' kutusuna MCU "
+                   "designator'ını yaz (örn. U2)."))
             return
         # Tek MCU bekleniyor — virgüllüyse ilkini al
         if "," in mcu:
             QtWidgets.QMessageBox.information(
-                self, "Tek MCU",
-                "MCU pin listesi tek entegre içindir. İlk designator kullanılacak: "
-                + mcu.split(",")[0].strip())
+                self, tr("Tek MCU"),
+                tr("MCU pin listesi tek entegre içindir. İlk designator "
+                   "kullanılacak: {desig}").format(desig=mcu.split(",")[0].strip()))
         self._start_generation(mode="mcupin")
 
     def _all_action_buttons(self):
@@ -618,19 +864,23 @@ class MainWindow(QtWidgets.QMainWindow):
         @return Üretilen sonuç.
         """
         names = ["generateBtn", "generateJsonBtn", "bomBtn", "pnpBtn",
-                 "icmapBtn", "mcuPinBtn", "pcbViewerBtn", "combinedBtn"]
+                 "icmapBtn", "mcuPinBtn", "pcbViewerBtn", "pcbGeoBtn",
+                 "combinedBtn"]
         return [getattr(self, n) for n in names if getattr(self, n, None)]
 
+    ## @brief Buton adı → gui.ui'deki KAYNAK (Türkçe) etiket.
+    #  Üretim bitince etiketler buradan `tr()` ile geri yazılır; değerler
+    #  gui.ui ile BİREBİR aynı olmalı (aksi halde etiket üretimden sonra değişir).
     _BTN_LABELS = {
-        "generateBtn": "Şematik Viewer",
+        "generateBtn": "Şematik Viewer üret",
         "generateJsonBtn": "JSON (AI / LLM için)",
         "bomBtn": "BOM (CSV)",
         "pnpBtn": "Pick && Place (CSV)",
         "icmapBtn": "IC Bağlantı Haritası (Excel)",
         "mcuPinBtn": "MCU Pin Listesi (Excel)",
-        "pcbViewerBtn": "PCB Görüntüleyici",
-        "pcbGeoBtn": "PCB Hızlı (geometri)",
-        "combinedBtn": "Şematik + PCB + 3D  ★",
+        "pcbViewerBtn": "PCB Görüntüleyici üret",
+        "pcbGeoBtn": "PCB Hızlı (geometri) üret",
+        "combinedBtn": "Şematik + PCB + 3D hepsini üret",
     }
     _MODE_BTN = {
         "html": "generateBtn",
@@ -653,12 +903,12 @@ class MainWindow(QtWidgets.QMainWindow):
         output_path = self.outputPathEdit.text().strip()
         if not project_path or not Path(project_path).exists():
             QtWidgets.QMessageBox.warning(
-                self, "Eksik", "Önce geçerli bir proje dosyası seç."
+                self, tr("Eksik"), tr("Önce geçerli bir proje dosyası seç.")
             )
             return
         if not output_path:
             QtWidgets.QMessageBox.warning(
-                self, "Eksik", "Çıktı yolunu belirt."
+                self, tr("Eksik"), tr("Çıktı yolunu belirt.")
             )
             return
 
@@ -704,13 +954,16 @@ class MainWindow(QtWidgets.QMainWindow):
                  f"  ·  altium_monkey {self._am_version()}")
         self.log("-" * 60)
 
-        # Tüm butonları devre dışı bırak, aktif mod butonuna "Üretiliyor..." yaz
+        # Tüm butonları (ve aynı işi yapan menü eylemlerini) devre dışı bırak,
+        # aktif mod butonuna "Üretiliyor..." yaz
         for btn in self._all_action_buttons():
             btn.setEnabled(False)
+        for act in getattr(self, "_menu_action_items", []):
+            act.setEnabled(False)
         active_btn = getattr(self, self._MODE_BTN.get(mode, "generateBtn"), None)
         if active_btn:
-            active_btn.setText("Üretiliyor...")
-        self.openBtn.setEnabled(False)
+            active_btn.setText(tr("Üretiliyor..."))
+        self._set_open_enabled(False)
         self._current_mode = mode
 
         # İlerleme çubuğunu sıfırla ve göster
@@ -718,7 +971,7 @@ class MainWindow(QtWidgets.QMainWindow):
         if pbar is not None:
             pbar.setRange(0, 100)
             pbar.setValue(0)
-            pbar.setFormat("Başlatılıyor… %p%")
+            pbar.setFormat(tr("Başlatılıyor… %p%"))
             pbar.setVisible(True)
 
         fast_chk = getattr(self, "fastPcbCheck", None)
@@ -764,24 +1017,36 @@ class MainWindow(QtWidgets.QMainWindow):
             pbar.setRange(0, 100)
             if success:
                 pbar.setValue(100)
-                pbar.setFormat("Tamamlandı  %p%")
+                pbar.setFormat(tr("Tamamlandı  %p%"))
             else:
                 pbar.setValue(0)
-                pbar.setFormat("Başarısız")
-        # Tüm butonları geri etkinleştir ve etiketleri sıfırla
+                pbar.setFormat(tr("Başarısız"))
+        # Tüm butonları geri etkinleştir ve etiketleri (etkin dilde) sıfırla
         for name, label in self._BTN_LABELS.items():
             btn = getattr(self, name, None)
             if btn:
                 btn.setEnabled(True)
-                btn.setText(label)
+                btn.setText(tr(label))
+        for act in getattr(self, "_menu_action_items", []):
+            act.setEnabled(True)
         if success:
             self.last_output = message
             # HTML üretildiyse tarayıcıda aç butonunu etkinleştir
             if message.lower().endswith(".html"):
-                self.openBtn.setEnabled(True)
-            self.log(f"\n✓ TAMAMLANDI: {message}")
+                self._set_open_enabled(True)
+            self.log(tr("\n✓ TAMAMLANDI: {yol}").format(yol=message))
         else:
             self.log(f"\n✗ {message}")
+
+    def _set_open_enabled(self, enabled):
+        """@brief "Son çıktıyı tarayıcıda aç" buton ve menü eylemini birlikte ayarlar.
+
+        @param enabled Etkin mi (bool)
+        """
+        self.openBtn.setEnabled(enabled)
+        act = getattr(self, "openOutputAct", None)
+        if act is not None:
+            act.setEnabled(enabled)
 
     def open_in_browser(self):
         """@brief Son üretilen çıktıyı varsayılan tarayıcıda açar.

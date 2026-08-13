@@ -47,12 +47,39 @@ from typing import Callable
 import deps
 deps.require()
 
+# Üretim log'u / ilerleme etiketleri arayüz diline çevrilir. Kaynak dil
+# TÜRKÇE olduğundan (bkz. i18n.py) dil seçilmemişken metinler AYNEN kalır —
+# viewer.py'yi kütüphane olarak kullanan script'lerde davranış değişmez.
+from i18n import tr
+
+## @brief HTML şablonlarındaki arayüz metni işareti: ⟪metin⟫.
+#  Şablonlarda (build_html / build_pcb_html / … ) çevrilecek her arayüz metni
+#  bu köşeli çift parantezlerle sarılıdır; `_tr_html()` üretimin SONUNDA
+#  hepsini etkin dile çevirip işaretleri kaldırır.
+_TR_MARK_RE = re.compile(r"⟪([^⟪⟫]*)⟫")
+
+
+def _tr_html(html: str) -> str:
+    """@brief Üretilmiş HTML'deki ⟪…⟫ arayüz metinlerini etkin dile çevirir.
+
+    @details Çeviri neden ÜRETİM SONUNDA yapılıyor: şablonların bir kısmı
+    f-string, bir kısmı ham `.replace()` şablonu; tek bir işaret sözdizimi
+    ikisinde de çalışır. İşaretler KAYNAK şablonda durduğundan çalışma-anı
+    verisiyle (net adı, designator, kullanıcı notu, gömülü base64 blob)
+    çakışma riski yoktur — veri asla ⟪⟫ içermez.
+
+    @param html İşaretli HTML metni
+    @return Çevrilmiş, işaretleri kaldırılmış HTML
+    """
+    return _TR_MARK_RE.sub(lambda m: tr(m.group(1)), html)
+
+
 from altium_monkey.altium_prjpcb import AltiumPrjPcb
 from altium_monkey.altium_schdoc import AltiumSchDoc
 
 # Uygulama sürümü — tek kaynak burası; gui.py buradan import eder.
 # HTML çıktılarında sağ üst köşedeki rozette görünür (build saati yerine).
-APP_VERSION = "2.19.3"
+APP_VERSION = "2.21.0"
 
 # Önerilen minimum altium_monkey sürümü. Bu sürümden öncesinde:
 #   · 2026.6.21 öncesi — STM32 gibi IC'lerde dikey pin adları yatay çiziliyordu.
@@ -163,16 +190,17 @@ class _LibraryLogCapture:
         """@brief Toplanan uyarıları tek satırlık Türkçe özetlere çevir."""
         for key, e in self.msgs.items():
             n, ilk = e["n"], e["ilk"]
-            kere = f" ({n} kayıt)" if n > 1 else ""
+            kere = tr(" ({a0} kayıt)").format(a0=n) if n > 1 else ""
             if "Recovered unmarked UTF-8" in key:
-                self.log(f"  · İşaretsiz UTF-8 metin kurtarıldı{kere} — bir "
-                         f"parametre/metin `%UTF8%` işareti olmadan UTF-8 "
-                         f"kaydedilmiş (genelde datasheet'ten yapıştırılmış "
-                         f"°C / ± gibi karakterler). **Veri kaybı yok**; uyarıyı "
-                         f"kaldırmak için o sayfaları Altium'da açıp kaydetmek "
-                         f"yeterli.")
+                self.log(tr("  · İşaretsiz UTF-8 metin kurtarıldı{a0} — bir "
+                            "parametre/metin `%UTF8%` işareti olmadan UTF-8 "
+                            "kaydedilmiş (genelde datasheet'ten yapıştırılmış "
+                            "°C / ± gibi karakterler). **Veri kaybı yok**; uyarıyı "
+                            "kaldırmak için o sayfaları Altium'da açıp kaydetmek "
+                            "yeterli.").format(a0=kere))
             else:
-                self.log(f"  · Kütüphane uyarısı{kere}: {ilk[:160]}")
+                self.log(tr("  · Kütüphane uyarısı{a0}: {a1}").format(
+                    a0=kere, a1=ilk[:160]))
 
 
 def _with_library_logs(fn):
@@ -258,7 +286,7 @@ def patch_altium_text_decoding(log=None):
             mod.decode_byte_array = patched
             n += 1
     if log:
-        log(f"  · metin çözücü toleranslı moda alındı (cp1252 → UTF-8 fallback, {n} modül)")
+        log(tr('  · metin çözücü toleranslı moda alındı (cp1252 → UTF-8 fallback, {a0} modül)').format(a0=n))
     return True
 
 # Mobil/dokunmatik ekranlarda kullanılacak `<head>` etiketleri. Viewport meta'sı
@@ -435,9 +463,7 @@ def _check_altium_monkey_version(log):
         """
         return deps.parse_version(v) or (0,)
     if parse(ver) < parse(MIN_RECOMMENDED_AM):
-        log(f"  ! Not: altium_monkey {ver} kullanılıyor. Dikey pin adları "
-            f"(STM32 vb.) {MIN_RECOMMENDED_AM} öncesinde yatay render edilir. "
-            f"Güncelleme önerilir: pip install --upgrade altium-monkey")
+        log(tr('  ! Not: altium_monkey {a0} kullanılıyor. Dikey pin adları (STM32 vb.) {a1} öncesinde yatay render edilir. Güncelleme önerilir: pip install --upgrade altium-monkey').format(a0=ver, a1=MIN_RECOMMENDED_AM))
 
 
 THUMB_W = 700
@@ -762,17 +788,16 @@ def _resolve_schdoc_paths(project, project_path, log):
                 seen.add(key)
                 unique.append(p)
         if unique:
-            log(f"  · PrjPcb referanslarından {len(unique)} SchDoc çözüldü "
-                f"(path normalize edildi).")
+            log(tr('  · PrjPcb referanslarından {a0} SchDoc çözüldü (path normalize edildi).').format(a0=len(unique)))
             return unique
     except Exception as e:
-        log(f"  · PrjPcb parse edilemedi: {e}")
+        log(tr('  · PrjPcb parse edilemedi: {a0}').format(a0=e))
 
     # 3) Son çare: klasör taraması
-    log("  · Klasörden taranıyor (*.SchDoc)...")
+    log(tr('  · Klasörden taranıyor (*.SchDoc)...'))
     found = sorted(base.rglob("*.SchDoc"))
     if found:
-        log(f"  · {len(found)} SchDoc dosyadan bulundu.")
+        log(tr('  · {a0} SchDoc dosyadan bulundu.').format(a0=len(found)))
     return found
 
 
@@ -824,11 +849,10 @@ def _resolve_pcbdoc_paths(project_path, log):
                 seen.add(key)
                 unique.append(p)
         if unique:
-            log(f"  · PrjPcb referanslarından {len(unique)} PcbDoc çözüldü "
-                f"(path normalize edildi).")
+            log(tr('  · PrjPcb referanslarından {a0} PcbDoc çözüldü (path normalize edildi).').format(a0=len(unique)))
             return unique
     except Exception as e:
-        log(f"  · PrjPcb PcbDoc için parse edilemedi: {e}")
+        log(tr('  · PrjPcb PcbDoc için parse edilemedi: {a0}').format(a0=e))
 
     # 2) Son çare: klasör + üst dizin taraması (kardeş klasörler dahil)
     found = sorted(base.rglob("*.PcbDoc"))
@@ -896,7 +920,7 @@ def _pick_pcbdoc(project_path, log):
         try:
             doc = _load_pcbdoc(p)
         except Exception as e:
-            log(f"  · {p.name} okunamadı: {e}")
+            log(tr('  · {a0} okunamadı: {a1}').format(a0=p.name, a1=e))
             continue
         score = (len(getattr(doc, "components", []) or []),
                  len(getattr(doc, "pads", []) or []))
@@ -919,8 +943,7 @@ def _pick_pcbdoc(project_path, log):
             pass
 
     if len(paths) > 1:
-        log(f"  · {len(paths)} PcbDoc adayından **{best.name}** seçildi "
-            f"({'; '.join(notes)}).")
+        log(tr('  · {a0} PcbDoc adayından **{a1}** seçildi ({a2}).').format(a0=len(paths), a1=best.name, a2='; '.join(notes)))
 
     # Kaybeden adayları bellekten düş (34 MB'lık board'ları tutmanın anlamı yok).
     keep = str(Path(best).resolve()).lower()
@@ -948,11 +971,11 @@ def _collect_data(project_path: str, log, with_pcb=False, progress=None):
     patch_altium_text_decoding()   # cp1252'ye sığmayan metin sayfayı düşürmesin
 
     prog = progress or (lambda frac, label: None)
-    log(f"Proje: {project_path}")
+    log(tr('Proje: {a0}').format(a0=project_path))
     _check_altium_monkey_version(log)
     project = AltiumPrjPcb(project_path)
     sch_paths = _resolve_schdoc_paths(project, project_path, log)
-    log(f"{len(sch_paths)} şema bulundu.\n")
+    log(tr('{a0} şema bulundu.\n').format(a0=len(sch_paths)))
 
     sheets_raw = []
     components = []
@@ -962,11 +985,11 @@ def _collect_data(project_path: str, log, with_pcb=False, progress=None):
     # Sheet adı → id eşleştirmesi (block hedeflerini çözmek için)
     sheet_name_to_id = {p.stem: safe_id(p.stem) for p in sch_paths}
 
-    log("Pass 1: SchDoc yükleme + SVG render...")
+    log(tr('Pass 1: SchDoc yükleme + SVG render...'))
     n_sheets = max(1, len(sch_paths))
     for idx, sch_path in enumerate(sch_paths):
         sheet_name = sch_path.stem
-        prog(0.45 * idx / n_sheets, f"Sayfa render: {sheet_name}")
+        prog(0.45 * idx / n_sheets, tr('Sayfa render: {a0}').format(a0=sheet_name))
         sheet_id = safe_id(sheet_name)
         col = idx % GRID_COLS
         row = idx // GRID_COLS
@@ -1027,7 +1050,7 @@ def _collect_data(project_path: str, log, with_pcb=False, progress=None):
                         "sch_box": sch_box,
                     })
             except Exception as e:
-                log(f"  ! Component okuma hatası ({sheet_name}): {e}")
+                log(tr('  ! Component okuma hatası ({a0}): {a1}').format(a0=sheet_name, a1=e))
 
             # Sheet symbol (block) bilgisi — block navigation için
             blocks_for_sheet = []
@@ -1051,27 +1074,27 @@ def _collect_data(project_path: str, log, with_pcb=False, progress=None):
                             "target_id": target_id,
                         })
             except Exception as e:
-                log(f"  ! Block okuma hatası ({sheet_name}): {e}")
+                log(tr('  ! Block okuma hatası ({a0}): {a1}').format(a0=sheet_name, a1=e))
 
             sheets_raw.append({
                 "id": sheet_id, "name": sheet_name,
                 "x": cx, "y": cy, "svg": svg, "sheet_nets": sheet_nets,
                 "blocks": blocks_for_sheet,
             })
-            log(f"  OK {sheet_name}  ({len(sheet_nets)} net, {len(blocks_for_sheet)} block)")
+            log(tr('  OK {a0}  ({a1} net, {a2} block)').format(a0=sheet_name, a1=len(sheet_nets), a2=len(blocks_for_sheet)))
 
         except Exception as e:
-            log(f"  ERR {sheet_name}: {e}")
+            log(tr('  ERR {a0}: {a1}').format(a0=sheet_name, a1=e))
 
-    log(f"\nToplam {len(all_net_names)} farklı net adı toplandı (tüm sayfalar).")
+    log(tr('\nToplam {a0} farklı net adı toplandı (tüm sayfalar).').format(a0=len(all_net_names)))
 
-    log("\nPass 2: Pozisyon çıkarımı (block pinleri dahil)...")
+    log(tr('\nPass 2: Pozisyon çıkarımı (block pinleri dahil)...'))
     sheets = []
     net_index = {}
 
     for j, raw in enumerate(sheets_raw):
         prog(0.45 + 0.45 * j / max(1, len(sheets_raw)),
-             f"Pozisyon çıkarımı: {raw['name']}")
+             tr('Pozisyon çıkarımı: {a0}').format(a0=raw['name']))
         positions = extract_label_positions(raw["svg"], all_net_names)
         total_pos = sum(len(v) for v in positions.values())
 
@@ -1097,7 +1120,7 @@ def _collect_data(project_path: str, log, with_pcb=False, progress=None):
             "svg": strip_aspect_ratio(raw["svg"]),
             "blocks": raw["blocks"],
         })
-        log(f"  + {raw['name']}: {total_pos} kesin pozisyon")
+        log(tr('  + {a0}: {a1} kesin pozisyon').format(a0=raw['name'], a1=total_pos))
 
     net_list = [
         {"name": n, "occurrences": occs, "count": len(occs)}
@@ -1157,19 +1180,18 @@ def _collect_data(project_path: str, log, with_pcb=False, progress=None):
     components.sort(key=lambda c: (c["sheet_name"], c["designator"]))
 
     if multipart_count:
-        log(f"\n{len(net_list)} net · {len(components)} komponent "
-            f"({multipart_count} multi-part birleştirildi)")
+        log(tr('\n{a0} net · {a1} komponent ({a2} multi-part birleştirildi)').format(a0=len(net_list), a1=len(components), a2=multipart_count))
     else:
-        log(f"\n{len(net_list)} net · {len(components)} komponent")
+        log(tr('\n{a0} net · {a1} komponent').format(a0=len(net_list), a1=len(components)))
 
     # === Netlist derlemesi (gerçek pin→net elektriksel bağlantı) ===
-    prog(0.92, "Netlist derleniyor")
+    prog(0.92, tr('Netlist derleniyor'))
     netlist = compile_project_netlist(loaded_schdocs, project, log)
     if netlist:
         try:
             _merge_netlist_with_pcb(netlist, project_path, log)
         except Exception as e:
-            log(f"  ! PCB netlist doğrulaması atlandı: {e}")
+            log(tr('  ! PCB netlist doğrulaması atlandı: {a0}').format(a0=e))
         # Şematik etiketi → PCB net adı köprüsü (cross-probe için). PCB'de
         # otomatik adlı (NetU5_20) netlerin şematikteki adı etiketten gelir;
         # ad eşleşmediği sürece PCB tarafı o net'i bulamıyordu. Bir etiket
@@ -1207,18 +1229,17 @@ def _collect_data(project_path: str, log, with_pcb=False, progress=None):
                 if a:
                     net["pcb"] = a
                     hit += 1
-            log(f"  · Cross-probe için {hit} net PCB adıyla eşleştirildi "
-                f"(ör. şematik etiketi ↔ NetU5_20 gibi otomatik PCB adı).")
+            log(tr('  · Cross-probe için {a0} net PCB adıyla eşleştirildi (ör. şematik etiketi ↔ NetU5_20 gibi otomatik PCB adı).').format(a0=hit))
 
     # === BOM / Pick&Place / Varyant (AltiumDesign API) ===
-    prog(0.96, "Tasarım verileri")
+    prog(0.96, tr('Tasarım verileri'))
     design_extras = collect_design_extras(project_path, log)
 
     # === PCB cross-probe (opsiyonel, maliyetli) ===
     if with_pcb:
-        prog(0.98, "PCB konumları (cross-probe)")
+        prog(0.98, tr('PCB konumları (cross-probe)'))
     pcb_data = collect_pcb_placement(project_path, log) if with_pcb else {"available": False}
-    prog(1.0, "Şematik verisi hazır")
+    prog(1.0, tr('Şematik verisi hazır'))
 
     return {
         "sheets": sheets,
@@ -1254,23 +1275,23 @@ def collect_pcb_placement(project_path, log):
     try:
         from altium_monkey.altium_pcbdoc import AltiumPcbDoc
     except Exception:
-        log("\n! AltiumPcbDoc API yok — PCB cross-probe atlanıyor.")
+        log(tr('\n! AltiumPcbDoc API yok — PCB cross-probe atlanıyor.'))
         return result
 
     # PcbDoc bul (kardeş klasör dahil; komponenti olan = gerçek board)
     try:
         pcb_path, pcb = _pick_pcbdoc(project_path, log)
     except Exception as e:
-        log(f"! PCB parse hatası: {e}")
+        log(tr('! PCB parse hatası: {a0}').format(a0=e))
         return result
     if pcb is None:
-        log("\n· PCB dosyası bulunamadı — cross-probe atlanıyor.")
+        log(tr('\n· PCB dosyası bulunamadı — cross-probe atlanıyor.'))
         return result
 
-    log(f"\nPCB cross-probe: {pcb_path.name}")
+    log(tr('\nPCB cross-probe: {a0}').format(a0=pcb_path.name))
 
     if not pcb.components:
-        log("! PCB'de komponent bulunamadı (parse boş).")
+        log(tr("! PCB'de komponent bulunamadı (parse boş)."))
         return result
 
     MM = 0.0254  # 1 mil = 0.0254 mm
@@ -1318,7 +1339,7 @@ def collect_pcb_placement(project_path, log):
         all_y.append(y_mil)
 
     if not raw:
-        log("! PCB komponent konumu çıkarılamadı.")
+        log(tr('! PCB komponent konumu çıkarılamadı.'))
         return result
 
     # Sınır yoksa komponentlerden türet (biraz pay bırak)
@@ -1350,7 +1371,7 @@ def collect_pcb_placement(project_path, log):
     bw = round(board_w_mil * MM, 2)
     bh = round(board_h_mil * MM, 2)
 
-    log(f"  ✓ {len(comps)} komponent konumu · board {bw:.0f}×{bh:.0f}mm")
+    log(tr('  ✓ {a0} komponent konumu · board {a1:.0f}×{a2:.0f}mm').format(a0=len(comps), a1=bw, a2=bh))
     result.update({
         "available": True,
         "board_w_mm": bw, "board_h_mm": bh,
@@ -1378,10 +1399,10 @@ def compile_project_netlist(schdocs, project, log):
     try:
         from altium_monkey.altium_netlist_compilation import compile_netlist
     except Exception as e:
-        log(f"\n! Netlist modülü import edilemedi: {e}")
+        log(tr('\n! Netlist modülü import edilemedi: {a0}').format(a0=e))
         return None
 
-    log("\nNetlist derleniyor (pin→net bağlantısı)...")
+    log(tr('\nNetlist derleniyor (pin→net bağlantısı)...'))
     # KRİTİK: Projenin KENDİ netlist ayarlarıyla derle (scope, kanal formatı).
     # options=None varsayılanı GLOBAL scope kullanır; hiyerarşik projelerde
     # (port ↔ sheet entry bağlantılı) sayfalar arası netler birleşmez — MCU
@@ -1393,12 +1414,12 @@ def compile_project_netlist(schdocs, project, log):
             from altium_monkey.altium_netlist_options import NetlistOptions
             options = NetlistOptions.from_prjpcb(project)
         except Exception as e:
-            log(f"  ! Proje netlist ayarları okunamadı, varsayılan: {e}")
+            log(tr('  ! Proje netlist ayarları okunamadı, varsayılan: {a0}').format(a0=e))
     try:
         nl = compile_netlist(schdocs, project, options)
         raw = nl.to_json()
     except Exception as e:
-        log(f"! Netlist derleme hatası: {e}")
+        log(tr('! Netlist derleme hatası: {a0}').format(a0=e))
         return None
 
     # Port adı → yön (io_type) haritası: (sayfa_dosyaadı_lower, port_adı).
@@ -1488,7 +1509,7 @@ def compile_project_netlist(schdocs, project, log):
             "labels": labels,
         })
 
-    log(f"  ✓ {len(nets_out)} net, {total_terminals} pin bağlantısı çıkarıldı")
+    log(tr('  ✓ {a0} net, {a1} pin bağlantısı çıkarıldı').format(a0=len(nets_out), a1=total_terminals))
     return {
         "schema": raw.get("schema", ""),
         "nets": nets_out,
@@ -1529,10 +1550,10 @@ def _merge_netlist_with_pcb(netlist, project_path, log):
     except Exception:
         pcb_path, pcb = None, None
     if pcb is None:
-        log("  · PCB bulunamadı — netlist PCB ile doğrulanamadı (şematik esas).")
+        log(tr('  · PCB bulunamadı — netlist PCB ile doğrulanamadı (şematik esas).'))
         return
 
-    log(f"  · Netlist PCB'den doğrulanıyor: {pcb_path.name} (büyük board'da sürebilir)...")
+    log(tr("  · Netlist PCB'den doğrulanıyor: {a0} (büyük board'da sürebilir)...").format(a0=pcb_path.name))
     try:
         comps = {i: str(getattr(c, "designator", "") or "")
                  for i, c in enumerate(pcb.components)}
@@ -1547,11 +1568,11 @@ def _merge_netlist_with_pcb(netlist, project_path, log):
             if d and p:
                 pcb_groups.setdefault(ni, []).append((d, p))
     except Exception as e:
-        log(f"  · PCB netlist doğrulaması atlandı (PCB okunamadı): {e}")
+        log(tr('  · PCB netlist doğrulaması atlandı (PCB okunamadı): {a0}').format(a0=e))
         return
 
     if not pcb_groups:
-        log("  · PCB'de net'e bağlı pad yok — şematik netlist'i korunuyor.")
+        log(tr("  · PCB'de net'e bağlı pad yok — şematik netlist'i korunuyor."))
         return
 
     # Güvenlik: yanlış PcbDoc'a karşı designator örtüşme kontrolü
@@ -1570,9 +1591,7 @@ def _merge_netlist_with_pcb(netlist, project_path, log):
     hit = sum(1 for d in pcb_desigs
               if d in sch_desigs or base_desig(d) in sch_bases)
     if hit < len(pcb_desigs) * 0.5:
-        log(f"  ! PCB komponentleri şematikle örtüşmüyor "
-            f"({hit}/{len(pcb_desigs)}) — yanlış PcbDoc olabilir, "
-            f"şematik netlist'i korunuyor.")
+        log(tr("  ! PCB komponentleri şematikle örtüşmüyor ({a0}/{a1}) — yanlış PcbDoc olabilir, şematik netlist'i korunuyor.").format(a0=hit, a1=len(pcb_desigs)))
         return
 
     # Pin adı/tipi sözlükleri: tam designator → taban designator fallback'i.
@@ -1657,10 +1676,7 @@ def _merge_netlist_with_pcb(netlist, project_path, log):
             kept_sch += 1
 
     netlist["nets"] = new_nets
-    log(f"  ✓ Netlist PCB'den kuruldu: {len(pcb_groups)} PCB neti "
-        f"({total_pins} pad; {named_pins} pin adı şematikten eşleşti; "
-        f"{renamed} otomatik ad şematik etiket/port adıyla değiştirildi) "
-        f"+ {kept_sch} şematik-yalnız net korundu.")
+    log(tr("  ✓ Netlist PCB'den kuruldu: {a0} PCB neti ({a1} pad; {a2} pin adı şematikten eşleşti; {a3} otomatik ad şematik etiket/port adıyla değiştirildi) + {a4} şematik-yalnız net korundu.").format(a0=len(pcb_groups), a1=total_pins, a2=named_pins, a3=renamed, a4=kept_sch))
 
 
 def collect_design_extras(project_path, log):
@@ -1680,15 +1696,14 @@ def collect_design_extras(project_path, log):
     try:
         from altium_monkey.altium_design import AltiumDesign
     except Exception:
-        log("\n! AltiumDesign API yok (eski altium_monkey sürümü) — "
-            "BOM/PnP atlanıyor.")
+        log(tr('\n! AltiumDesign API yok (eski altium_monkey sürümü) — BOM/PnP atlanıyor.'))
         return result
 
-    log("\nTasarım verileri (BOM / Pick&Place / Varyant)...")
+    log(tr('\nTasarım verileri (BOM / Pick&Place / Varyant)...'))
     try:
         design = AltiumDesign.from_prjpcb(project_path)
     except Exception as e:
-        log(f"! AltiumDesign yüklenemedi: {e}")
+        log(tr('! AltiumDesign yüklenemedi: {a0}').format(a0=e))
         return result
 
     result["available"] = True
@@ -1707,28 +1722,27 @@ def collect_design_extras(project_path, log):
             design.load_pcbdoc = lambda selector=None, _d=_pdoc: _d
             design._pcbdoc = _pdoc
             design._pcbdoc_loaded = True
-            log(f"  · BOM/PnP için PCB sabitlendi: {_pp.name}")
+            log(tr('  · BOM/PnP için PCB sabitlendi: {a0}').format(a0=_pp.name))
     except Exception as e:
-        log(f"  · PcbDoc bağlanamadı ({e}) — kütüphane kendi seçimini kullanacak.")
+        log(tr('  · PcbDoc bağlanamadı ({a0}) — kütüphane kendi seçimini kullanacak.').format(a0=e))
 
     # Varyantlar
     try:
         result["variants"] = list(design.get_variants() or [])
         if result["variants"]:
-            log(f"  ✓ {len(result['variants'])} varyant: "
-                f"{', '.join(result['variants'])}")
+            log(tr('  ✓ {a0} varyant: {a1}').format(a0=len(result['variants']), a1=', '.join(result['variants'])))
         else:
-            log("  · Varyant tanımlı değil")
+            log(tr('  · Varyant tanımlı değil'))
     except Exception as e:
-        log(f"  ! Varyant okuma hatası: {e}")
+        log(tr('  ! Varyant okuma hatası: {a0}').format(a0=e))
 
     # BOM (tüm komponentler, varyant=None → hepsi)
     try:
         bom = design.to_bom(variant=None)
         result["bom"] = bom or []
-        log(f"  ✓ BOM: {len(result['bom'])} komponent")
+        log(tr('  ✓ BOM: {a0} komponent').format(a0=len(result['bom'])))
     except Exception as e:
-        log(f"  ! BOM hatası: {e}")
+        log(tr('  ! BOM hatası: {a0}').format(a0=e))
 
     # Pick & Place (PCB gerekir — yoksa graceful)
     try:
@@ -1750,10 +1764,10 @@ def collect_design_extras(project_path, log):
                 })
         result["pnp"] = pnp_list
         result["has_pcb"] = bool(pnp_list)
-        log(f"  ✓ Pick&Place: {len(pnp_list)} yerleşim (mm)")
+        log(tr('  ✓ Pick&Place: {a0} yerleşim (mm)').format(a0=len(pnp_list)))
     except Exception as e:
         # PCB yoksa ValueError beklenir — sessizce geç
-        log(f"  · Pick&Place atlandı (PCB yok veya hata): {e}")
+        log(tr('  · Pick&Place atlandı (PCB yok veya hata): {a0}').format(a0=e))
 
     return result
 
@@ -1920,9 +1934,10 @@ def _build_board_surface(all_layers, view_w, view_h, log=print, board_wh_mm=None
             bcx, bcy = candidates[0][1], candidates[0][2]
             aligned = True
             win_bbox = candidates[0][3]
-            log("  · board outline merkezi: %s eşleşme (bcx=%.2f, bcy=%.2f, %d aday)"
-                % ("boyut+#C0A000" if candidates[0][0] == 0 else "boyut",
-                   bcx, bcy, len(candidates)))
+            log(tr("  · board outline merkezi: {a0} eşleşme "
+                   "(bcx={a1}, bcy={a2}, {a3} aday)").format(
+                a0=(tr("boyut+#C0A000") if candidates[0][0] == 0 else tr("boyut")),
+                a1=f"{bcx:.2f}", a2=f"{bcy:.2f}", a3=len(candidates)))
             # Board, viewBox'tan çok küçükse (büyük fab/mekanik içerik board dışında)
             # doku kanvası tüm viewBox'a yayılıp board yazılarını bulanıklaştırır.
             # viewBox'ı board bbox'ı + margin'e KIRP (kaynak viewBox'a clamp) → 2048px
@@ -1936,16 +1951,18 @@ def _build_board_surface(all_layers, view_w, view_h, log=print, board_wh_mm=None
                (cx1 - cx0) < vbw * 0.92:   # anlamlı kırpma varsa uygula
                 cvbx, cvby = cx0, cy0
                 cvbw, cvbh = cx1 - cx0, cy1 - cy0
-                log("  · doku viewBox board'a kırpıldı: %.0f×%.0f → %.0f×%.0fmm "
-                    "(silk çözünürlüğü artar)" % (vbw, vbh, cvbw, cvbh))
+                log(tr("  · doku viewBox board'a kırpıldı: {a0}×{a1} → {a2}×{a3}mm "
+                       "(silk çözünürlüğü artar)").format(
+                    a0=f"{vbw:.0f}", a1=f"{vbh:.0f}",
+                    a2=f"{cvbw:.0f}", a3=f"{cvbh:.0f}"))
         elif hint_only is not None:
             bcx, bcy = hint_only
             aligned = True
-            log("  · board outline boyut eşleşmedi, #C0A000 ipucu kullanıldı.")
+            log(tr('  · board outline boyut eşleşmedi, #C0A000 ipucu kullanıldı.'))
         else:
-            log("  · board outline bulunamadı — doku merkezlendi (hizalama yaklaşık).")
+            log(tr('  · board outline bulunamadı — doku merkezlendi (hizalama yaklaşık).'))
     except Exception as e:
-        log(f"  · board merkezi tespiti başarısız ({e}) — doku merkezlendi.")
+        log(tr('  · board merkezi tespiti başarısız ({a0}) — doku merkezlendi.').format(a0=e))
     COPPER = "#c07a35"; GOLD = "#e0b030"; SILK = "#f0f0f0"; DRILL = "#141414"
     def _recolor(s, color):
         s = re.sub(r'(fill|stroke)="#[0-9A-Fa-f]{6}"',
@@ -2022,9 +2039,9 @@ def _build_board_surface(all_layers, view_w, view_h, log=print, board_wh_mm=None
         top = comp("TOP", "TOPPASTE", "TOPOVERLAY")
         bot = comp("BOTTOM", "BOTTOMPASTE", "BOTTOMOVERLAY")
     except Exception as e:
-        log(f"  · yüzey dokusu üretilemedi: {e}")
+        log(tr('  · yüzey dokusu üretilemedi: {a0}').format(a0=e))
         return None
-    log(f"  ✓ 3D yüzey dokusu: top {len(top)//1024}KB + bot {len(bot)//1024}KB (gzip)")
+    log(tr('  ✓ 3D yüzey dokusu: top {a0}KB + bot {a1}KB (gzip)').format(a0=len(top) // 1024, a1=len(bot) // 1024))
     # Düzlem boyutu = KIRPILMIŞ viewBox boyutu; ofset kırpılmış origin'i hesaba katar.
     # Board merkezi (bcx,bcy) yine dünya origin'ine düşer (board mesh de orada).
     # "ok": board outline güvenle bulundu → doku dünya-gerçeğine demirli; delik
@@ -2068,14 +2085,14 @@ def _extract_step_models(pcb, log=print):
     try:
         import cascadio, trimesh
     except Exception:
-        log("  · cascadio/trimesh yok — STEP yerine extrude gövdeler kullanılacak.")
+        log(tr('  · cascadio/trimesh yok — STEP yerine extrude gövdeler kullanılacak.'))
         return {}
     import zlib, tempfile, os
     import numpy as np
     try:
         ents = pcb.get_embedded_model_entries()
     except Exception as e:
-        log(f"  · gömülü model girişleri okunamadı: {e}")
+        log(tr('  · gömülü model girişleri okunamadı: {a0}').format(a0=e))
         return {}
     td = tempfile.mkdtemp(prefix="amstep_")
     out = {}
@@ -2109,10 +2126,10 @@ def _extract_step_models(pcb, log=print):
             if parts:
                 out[mid] = {"name": name, "parts": parts}
         except Exception as e:
-            log(f"  · STEP '{name}' atlandı: {repr(e)[:70]}")
+            log(tr("  · STEP '{a0}' atlandı: {a1}").format(a0=name, a1=repr(e)[:70]))
     if out:
         nt = sum(len(p["f"])//3 for m in out.values() for p in m["parts"])
-        log(f"  ✓ 3D STEP: {len(out)} model tessellate edildi (~{nt} üçgen)")
+        log(tr('  ✓ 3D STEP: {a0} model tessellate edildi (~{a1} üçgen)').format(a0=len(out), a1=nt))
     return out
 
 
@@ -2297,18 +2314,15 @@ def _extract_3d(pcb, log=print):
                 drills = drills[:1200]
         except Exception:
             drills = []
-        log(f"  ✓ 3D: board {maxx-minx:.0f}×{maxy-miny:.0f}mm · {th_mm:.2f}mm ·"
-            f" {len(placements)} STEP + {len(bodies)} extrude gövde ·"
-            f" {len(drills)} gerçek delik")
+        log(tr('  ✓ 3D: board {a0:.0f}×{a1:.0f}mm · {a2:.2f}mm · {a3} STEP + {a4} extrude gövde · {a5} gerçek delik').format(a0=maxx - minx, a1=maxy - miny, a2=th_mm, a3=len(placements), a4=len(bodies), a5=len(drills)))
         if n_skipped:
-            log(f"  · 3D: {n_skipped} gövde Altium'da tam saydam (opacity 0) —"
-                " çizilmedi (mekanik hacim/gabari)")
+            log(tr("  · 3D: {a0} gövde Altium'da tam saydam (opacity 0) — çizilmedi (mekanik hacim/gabari)").format(a0=n_skipped))
         return {"available": True, "thickness": round(th_mm, 3),
                 "outline": outline, "bodies": bodies,
                 "models": models, "placements": placements, "drills": drills,
                 "w": round(maxx - minx, 2), "h": round(maxy - miny, 2)}
     except Exception as e:
-        log(f"  · 3D çıkarılamadı: {e}")
+        log(tr('  · 3D çıkarılamadı: {a0}').format(a0=e))
         return {"available": False}
 
 
@@ -2541,10 +2555,9 @@ def _build_surface_from_geometry(geo, log=print):
         top = side("Top Copper", "Top Silkscreen")
         bot = side("Bottom Copper", "Bottom Silkscreen")
     except Exception as e:
-        log(f"  · geometriden yüzey dokusu üretilemedi: {e}")
+        log(tr('  · geometriden yüzey dokusu üretilemedi: {a0}').format(a0=e))
         return None
-    log(f"  ✓ 3D yüzey dokusu (geometriden): top {len(top)//1024}KB + "
-        f"bot {len(bot)//1024}KB (gzip)")
+    log(tr('  ✓ 3D yüzey dokusu (geometriden): top {a0}KB + bot {a1}KB (gzip)').format(a0=len(top) // 1024, a1=len(bot) // 1024))
     # ok=1 yalnız sınır kutusu board OUTLINE'ından geldiyse: delik alfa-delmesi
     # dünya koordinatlı, kayık dokuda hilal artefaktı yapardı.
     return {"top": top, "bot": bot, "gz": 1, "ok": 1 if geo.get("obb") else 0,
@@ -2573,7 +2586,7 @@ def extract_pcb_geometry(pcb, log=print):
     try:
         from altium_monkey.altium_pcb_layer_ref import PcbLayer
     except Exception as e:
-        log(f"  ! katman referansı okunamadı: {e}")
+        log(tr('  ! katman referansı okunamadı: {a0}').format(a0=e))
         return {"available": False}
 
     MM = 0.0254
@@ -2749,7 +2762,7 @@ def extract_pcb_geometry(pcb, log=print):
                     stexts.append([layer_of(t.layer),
                                    round(float(res.stroke_width_mm or 0.15), 3), segs])
     except Exception as e:
-        log(f"  · metin poligonları atlandı: {e}")
+        log(tr('  · metin poligonları atlandı: {a0}').format(a0=e))
 
     # --- Komponentler: designator + katman + sınır kutusu (hit-test/vurgulama) ---
     comps = []
@@ -2811,9 +2824,11 @@ def extract_pcb_geometry(pcb, log=print):
     for row in stexts:
         row[0] = remap[row[0]]
 
-    log(f"  ✓ geometri: {len(tracks)} iz · {len(arcs)} yay · {len(pads)} pad · "
-        f"{len(vias)} via · {len(regions)}+{len(stexts)} region/metin · "
-        f"{len(layers)} katman" + (f" ({t_err} metin atlandı)" if t_err else ""))
+    log(tr("  ✓ geometri: {a0} iz · {a1} yay · {a2} pad · {a3} via · "
+           "{a4}+{a5} region/metin · {a6} katman").format(
+        a0=len(tracks), a1=len(arcs), a2=len(pads), a3=len(vias),
+        a4=len(regions), a5=len(stexts), a6=len(layers))
+        + (tr(" ({a0} metin atlandı)").format(a0=t_err) if t_err else ""))
     return {
         "available": True, "w": round(W, 3), "h": round(H, 3), "obb": obb,
         "layers": layers, "nets": [getattr(n, "name", "") for n in pcb.nets],
@@ -2844,17 +2859,17 @@ def collect_pcb_layers(project_path, log, max_layer_mb=8):
     try:
         from altium_monkey.altium_pcbdoc import AltiumPcbDoc
     except Exception:
-        log("\n! AltiumPcbDoc API yok — PCB görüntüleyici atlanıyor.")
+        log(tr('\n! AltiumPcbDoc API yok — PCB görüntüleyici atlanıyor.'))
         return result
 
     # Komponenti olan PCB'yi seç (gabari/panel dokümanı genelde boş) — seçim ve
     # parse önbelleği tüm çıktı yollarıyla ortak.
     pcb_path, pcb = _pick_pcbdoc(project_path, log)
     if pcb is None:
-        log("\n! PCB dosyası bulunamadı veya parse edilemedi.")
+        log(tr('\n! PCB dosyası bulunamadı veya parse edilemedi.'))
         return result
 
-    log(f"\nPCB görüntüleyici: {pcb_path.name} ({len(pcb.components)} komponent)")
+    log(tr('\nPCB görüntüleyici: {a0} ({a1} komponent)').format(a0=pcb_path.name, a1=len(pcb.components)))
 
     # Katman render sırası ve renkleri (Altium'a yakın)
     # role: bakır / silkscreen / pasta / lehim / mekanik / drill
@@ -2880,7 +2895,7 @@ def collect_pcb_layers(project_path, log, max_layer_mb=8):
     try:
         all_layers = pcb.to_layer_svgs()
     except Exception as e:
-        log(f"! Katman render hatası: {e}")
+        log(tr('! Katman render hatası: {a0}').format(a0=e))
         return result
 
     view_w = view_h = 0
@@ -2888,7 +2903,7 @@ def collect_pcb_layers(project_path, log, max_layer_mb=8):
     for name, svg in all_layers.items():
         size_mb = len(svg) / 1024 / 1024
         if size_mb > max_layer_mb:
-            log(f"  · {name} atlandı ({size_mb:.0f}MB > {max_layer_mb}MB limit)")
+            log(tr('  · {a0} atlandı ({a1:.0f}MB > {a2}MB limit)').format(a0=name, a1=size_mb, a2=max_layer_mb))
             continue
         # viewBox'ı ilk katmandan al
         if not view_w:
@@ -2973,8 +2988,7 @@ def collect_pcb_layers(project_path, log, max_layer_mb=8):
                   "drill": 3, "silk": 4, "mech": 5, "other": 6}
     layers_out.sort(key=lambda l: role_order.get(l["role"], 9))
 
-    log(f"  ✓ {len(layers_out)} katman render edildi · "
-        f"{len(comps)} komponent · görüntü {view_w:.0f}×{view_h:.0f}mm")
+    log(tr('  ✓ {a0} katman render edildi · {a1} komponent · görüntü {a2:.0f}×{a3:.0f}mm').format(a0=len(layers_out), a1=len(comps), a2=view_w, a3=view_h))
     board3d = _extract_3d(pcb, log)
     if board3d.get("available"):
         try:
@@ -2985,7 +2999,7 @@ def collect_pcb_layers(project_path, log, max_layer_mb=8):
             board3d["surf"] = _build_board_surface(
                 all_layers, view_w, view_h, log, board_wh_mm)
         except Exception as e:
-            log(f"  · yüzey dokusu atlandı: {e}")
+            log(tr('  · yüzey dokusu atlandı: {a0}').format(a0=e))
             board3d["surf"] = None
     # Net listesi (görüntüleyicideki "Netler" paneli için): ad + bağlı pad/iz
     # sayısı. Ad taraması SVG üzerinden yapılsaydı tüm katmanların DOM'a
@@ -3008,9 +3022,9 @@ def collect_pcb_layers(project_path, log, max_layer_mb=8):
             nets_out.append({"name": name, "pads": pad_n.get(i, 0),
                              "tracks": trk_n.get(i, 0)})
         nets_out.sort(key=lambda d: (-d["pads"], d["name"]))
-        log(f"  ✓ {len(nets_out)} net listelendi")
+        log(tr('  ✓ {a0} net listelendi').format(a0=len(nets_out)))
     except Exception as e:
-        log(f"  · net listesi çıkarılamadı: {e}")
+        log(tr('  · net listesi çıkarılamadı: {a0}').format(a0=e))
 
     result.update({
         "available": True,
@@ -3043,12 +3057,12 @@ def generate_viewer(
     @param progress İlerleme callback'i (yüzde:int, etiket:str)
     """
     prog = progress or (lambda percent, label: None)
-    prog(2, "Şematik verisi toplanıyor")
+    prog(2, tr('Şematik verisi toplanıyor'))
     data = _collect_data(
         project_path, log, with_pcb=True,
         progress=lambda frac, label: prog(2 + int(frac * 88), label),
     )
-    prog(92, "HTML oluşturuluyor")
+    prog(92, tr('HTML oluşturuluyor'))
     timestamp = datetime.datetime.now().strftime("%H:%M:%S")
     html = build_html(
         data["sheets"], data["net_list"], data["components"], timestamp,
@@ -3058,9 +3072,9 @@ def generate_viewer(
     out = Path(output_path)
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(html, encoding="utf-8")
-    log(f"\n✓ HTML üretildi: {out}")
-    log(f"  build: {timestamp}  ({out.stat().st_size / 1024 / 1024:.1f} MB)")
-    prog(100, "Tamamlandı")
+    log(tr('\n✓ HTML üretildi: {a0}').format(a0=out))
+    log(tr('  build: {a0}  ({a1:.1f} MB)').format(a0=timestamp, a1=out.stat().st_size / 1024 / 1024))
+    prog(100, tr('Tamamlandı'))
 
 
 def _extract_svg_inner(svg_str):
@@ -3092,16 +3106,16 @@ def generate_pcb_viewer(project_path, output_path, log=print, progress=None):
     """
     prog = progress or (lambda percent, label: None)
     # to_layer_svgs() süresi kestirilemeyen ağır adım → marquee.
-    prog(-1, "PCB katmanları render ediliyor (uzun sürebilir)…")
+    prog(-1, tr('PCB katmanları render ediliyor (uzun sürebilir)…'))
     pcb = collect_pcb_layers(project_path, log)
     if not pcb.get("available"):
-        log("! PCB görüntüleyici üretilemedi (PCB yok veya parse edilemedi).")
+        log(tr('! PCB görüntüleyici üretilemedi (PCB yok veya parse edilemedi).'))
         return False
 
     comp_info = {}
     try:
-        prog(70, "Şematik komponent bilgisi")
-        log("\nŞematik komponent bilgisi (cross-probe zenginleştirme)...")
+        prog(70, tr('Şematik komponent bilgisi'))
+        log(tr('\nŞematik komponent bilgisi (cross-probe zenginleştirme)...'))
         data = _collect_data(project_path, lambda m: None, with_pcb=False)
         for c in data.get("components", []):
             comp_info[c["designator"]] = {
@@ -3110,17 +3124,17 @@ def generate_pcb_viewer(project_path, output_path, log=print, progress=None):
                 "sheet": c.get("sheet_name", ""),
             }
     except Exception as e:
-        log(f"  · Şematik bilgisi alınamadı (yine de devam): {e}")
+        log(tr('  · Şematik bilgisi alınamadı (yine de devam): {a0}').format(a0=e))
 
-    prog(90, "PCB HTML oluşturuluyor")
+    prog(90, tr('PCB HTML oluşturuluyor'))
     timestamp = datetime.datetime.now().strftime("%H:%M:%S")
     html = build_pcb_html(pcb, comp_info, timestamp, Path(project_path).stem)
     out = Path(output_path)
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(html, encoding="utf-8")
-    log(f"\n✓ PCB görüntüleyici üretildi: {out}")
-    log(f"  build: {timestamp}  ({out.stat().st_size / 1024 / 1024:.1f} MB)")
-    prog(100, "Tamamlandı")
+    log(tr('\n✓ PCB görüntüleyici üretildi: {a0}').format(a0=out))
+    log(tr('  build: {a0}  ({a1:.1f} MB)').format(a0=timestamp, a1=out.stat().st_size / 1024 / 1024))
+    prog(100, tr('Tamamlandı'))
     return True
 
 
@@ -3164,16 +3178,15 @@ def generate_combined_viewer(
     # eksikliği fark etsin — bkz. CLAUDE.md "STEP gösterme özelliği çalışmıyor").
     missing = _check_step_deps()
     if missing:
-        raise RuntimeError(
-            "3D STEP modelleri için gerekli bağımlılık(lar) eksik: "
-            + ", ".join(missing)
-            + ".\nKur:  py -3.12 -m pip install " + " ".join(missing)
-            + "\n(Bu paketler olmadan birleşik görünümün 3D sekmesi gerçek STEP "
-            "geometrisi yerine basit extrude kutular gösterir.)"
-        )
+        raise RuntimeError(tr(
+            "3D STEP modelleri için gerekli bağımlılık(lar) eksik: {a0}.\n"
+            "Kur:  py -3.12 -m pip install {a1}\n"
+            "(Bu paketler olmadan birleşik görünümün 3D sekmesi gerçek STEP "
+            "geometrisi yerine basit extrude kutular gösterir.)").format(
+            a0=", ".join(missing), a1=" ".join(missing)))
 
-    log("Birleşik görünüm: şematik + PCB toplanıyor...")
-    prog(2, "Şematik verisi toplanıyor")
+    log(tr('Birleşik görünüm: şematik + PCB toplanıyor...'))
+    prog(2, tr('Şematik verisi toplanıyor'))
 
     # Tek sefer veri topla (şematik + PCB birlikte). _collect_data 0..1
     # ilerlemesini genel barda %2..%50 bandına eşle.
@@ -3184,7 +3197,7 @@ def generate_combined_viewer(
     timestamp = datetime.datetime.now().strftime("%H:%M:%S")
 
     # 1) Şematik HTML
-    prog(52, "Şematik HTML oluşturuluyor")
+    prog(52, tr('Şematik HTML oluşturuluyor'))
     sch_html = build_html(
         data["sheets"], data["net_list"], data["components"], timestamp,
         inter_sheet_color, intra_sheet_color, pcb=data.get("pcb"),
@@ -3202,7 +3215,7 @@ def generate_combined_viewer(
     empty_pcb_html = ("<!DOCTYPE html><html><body style='background:#0a0a0a;"
                       "color:#888;font-family:sans-serif;display:flex;"
                       "align-items:center;justify-content:center;height:100vh;'>"
-                      "<div>Bu projede okunabilir PCB dosyası bulunamadı.</div>"
+                      "<div>⟪Bu projede okunabilir PCB dosyası bulunamadı.⟫</div>"
                       "</body></html>")
 
     if fast_pcb:
@@ -3210,7 +3223,7 @@ def generate_combined_viewer(
         # Katman SVG'leri HİÇ render edilmez (to_layer_svgs atlanır) — üretimin
         # en pahalı adımı buydu. 3D verisi PCB'den doğrudan çıkarılır; yüzey
         # dokusu katman SVG'lerine dayandığından bu modda ÜRETİLMEZ.
-        prog(60, "PCB geometrisi çıkarılıyor (hızlı mod)")
+        prog(60, tr('PCB geometrisi çıkarılıyor (hızlı mod)'))
         pcb_path, pcb_doc = _pick_pcbdoc(project_path, log)
         geo = extract_pcb_geometry(pcb_doc, log) if pcb_doc else {"available": False}
         have_pcb = bool(geo.get("available"))
@@ -3218,9 +3231,9 @@ def generate_combined_viewer(
             pcb_html = build_pcb_canvas_html(geo, comp_info, timestamp,
                                              Path(project_path).stem, pcb_path.name)
         else:
-            log("  · PCB yok — birleşik görünümde sağ panel boş olacak.")
+            log(tr('  · PCB yok — birleşik görünümde sağ panel boş olacak.'))
             pcb_html = empty_pcb_html
-        prog(80, "3D verisi")
+        prog(80, tr('3D verisi'))
         board3d = _extract_3d(pcb_doc, log) if pcb_doc else {}
         # 3D board yüzey dokusu: klasik yolda katman SVG'lerinden gelir; hızlı
         # modda o adım yok → aynı dokuyu GEOMETRİDEN çiziyoruz (izler, pad'ler,
@@ -3229,20 +3242,20 @@ def generate_combined_viewer(
             try:
                 board3d["surf"] = _build_surface_from_geometry(geo, log)
             except Exception as e:
-                log(f"  · yüzey dokusu atlandı: {e}")
+                log(tr('  · yüzey dokusu atlandı: {a0}').format(a0=e))
                 board3d["surf"] = None
     else:
         # --- KLASİK YOL: tam katmanlı SVG görüntüleyici ----------------------
         # to_layer_svgs() tek bloklu, süresi kestirilemeyen ağır çağrı → marquee.
-        prog(-1, "PCB katmanları render ediliyor (uzun sürebilir)…")
+        prog(-1, tr('PCB katmanları render ediliyor (uzun sürebilir)…'))
         pcb_layers = collect_pcb_layers(project_path, log)
         have_pcb = pcb_layers.get("available", False)
-        prog(86, "PCB HTML oluşturuluyor")
+        prog(86, tr('PCB HTML oluşturuluyor'))
         if have_pcb:
             pcb_html = build_pcb_html(pcb_layers, comp_info, timestamp,
                                       Path(project_path).stem)
         else:
-            log("  · PCB yok — birleşik görünümde sağ panel boş olacak.")
+            log(tr('  · PCB yok — birleşik görünümde sağ panel boş olacak.'))
             pcb_html = empty_pcb_html
         board3d = pcb_layers.get("board3d", {}) if have_pcb else {}
 
@@ -3251,16 +3264,16 @@ def generate_combined_viewer(
     td_html = build_3d_html(board3d, timestamp, Path(project_path).stem) if have_3d else ""
 
     # 4) Kabuk: üç iframe + splitter + köprü
-    prog(94, "Birleştiriliyor ve yazılıyor")
+    prog(94, tr('Birleştiriliyor ve yazılıyor'))
     shell = build_combined_shell(sch_html, pcb_html, timestamp,
                                  Path(project_path).stem, have_pcb,
                                  td_html=td_html, have_3d=have_3d)
     out = Path(output_path)
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(shell, encoding="utf-8")
-    log(f"\n✓ Birleşik görünüm üretildi: {out}")
-    log(f"  build: {timestamp}  ({out.stat().st_size / 1024 / 1024:.1f} MB)")
-    prog(100, "Tamamlandı")
+    log(tr('\n✓ Birleşik görünüm üretildi: {a0}').format(a0=out))
+    log(tr('  build: {a0}  ({a1:.1f} MB)').format(a0=timestamp, a1=out.stat().st_size / 1024 / 1024))
+    prog(100, tr('Tamamlandı'))
     return True
 
 
@@ -3298,14 +3311,14 @@ def build_3d_html(d3d, timestamp, project_name):
 <canvas id="c3d"></canvas>
 <div id="tb3d">
   <button class="b3d" id="v-iso">3B</button>
-  <button class="b3d" id="v-top">Üst</button>
-  <button class="b3d" id="v-bot">Alt</button>
-  <button class="b3d" id="v-rot">Döndür</button>
-  <button class="b3d on" id="v-comp" title="Komponentleri gizle/göster — çıplak board'u incele">Parçalar</button>
-  <button class="b3d on" id="v-lod" title="LOD: döndürme/zoom sırasında çözünürlük düşürülür (akıcılık), durunca netleşir">LOD</button>
+  <button class="b3d" id="v-top">⟪Üst⟫</button>
+  <button class="b3d" id="v-bot">⟪Alt⟫</button>
+  <button class="b3d" id="v-rot">⟪Döndür⟫</button>
+  <button class="b3d on" id="v-comp" title="⟪Komponentleri gizle/göster — çıplak board'u incele⟫">⟪Parçalar⟫</button>
+  <button class="b3d on" id="v-lod" title="⟪LOD: döndürme/zoom sırasında çözünürlük düşürülür (akıcılık), durunca netleşir⟫">LOD</button>
 </div>
 <div id="lbl3d"></div>
-<div id="info3d">Sürükle / tek parmak: döndür · Tekerlek / iki parmak: imlecin olduğu yere zoom · Sağ-sürükle veya iki parmak kaydır: taşı · Tıkla: komponent</div>
+<div id="info3d">⟪Sürükle / tek parmak: döndür · Tekerlek / iki parmak: imlecin olduğu yere zoom · Sağ-sürükle veya iki parmak kaydır: taşı · Tıkla: komponent⟫</div>
 <script>__THREE__</script>
 <script>
 const D = __DATA__;
@@ -3790,7 +3803,7 @@ function init(){
   camera = new THREE.PerspectiveCamera(42, W/H, 0.1, 8000);
   camera.up.set(0,1,0);
   try { renderer = new THREE.WebGLRenderer({canvas, antialias:true}); }
-  catch(e){ fail('WebGL bu tarayıcıda kullanılamıyor.'); return; }
+  catch(e){ fail('⟪WebGL bu tarayıcıda kullanılamıyor.⟫'); return; }
   renderer.setPixelRatio(Math.min(devicePixelRatio||1, 1.5));  // yüksek-DPI'de piksel sınırı → FPS
   renderer.setSize(W,H,false);
   buildScene();
@@ -3800,14 +3813,14 @@ function init(){
   loop();
 }
 if(D && D.available && D.outline && D.outline.length>=3) init();
-else fail('Bu projede 3D verisi bulunamadı.');
+else fail('⟪Bu projede 3D verisi bulunamadı.⟫');
 </script>
 </body></html>'''
-    return (tpl
-            .replace("__VIEWPORT__", _MOBILE_META)
-            .replace("__GESTURE__", _GESTURE_JS)
-            .replace("__THREE__", _three_js_source())
-            .replace("__DATA__", json.dumps(d3d)))
+    return _tr_html(tpl
+                    .replace("__VIEWPORT__", _MOBILE_META)
+                    .replace("__GESTURE__", _GESTURE_JS)
+                    .replace("__THREE__", _three_js_source())
+                    .replace("__DATA__", json.dumps(d3d)))
 
 
 def build_combined_shell(sch_html, pcb_html, timestamp, project_name, have_pcb,
@@ -3835,18 +3848,18 @@ def build_combined_shell(sch_html, pcb_html, timestamp, project_name, have_pcb,
     sch_b64 = _gz(sch_html)
     pcb_b64 = _gz(pcb_html)
     td_b64 = _gz(td_html) if have_3d else ""
-    btn_3d = ('<button class="vm-btn" id="vm-3d" title="3D görünüm ( 4 )">3D</button>'
+    btn_3d = ('<button class="vm-btn" id="vm-3d" title="⟪3D görünüm ( 4 )⟫">3D</button>'
               if have_3d else '')
     pane_3d = ('<div class="pane" id="pane-3d" style="display:none;width:100%">'
-               '<div class="pane-loading" id="load-3d">3D hazırlanıyor…</div>'
+               '<div class="pane-loading" id="load-3d">⟪3D hazırlanıyor…⟫</div>'
                '<iframe id="frame-3d"></iframe></div>'
                if have_3d else '')
     have_3d_js = 'true' if have_3d else 'false'
-    return f"""<!DOCTYPE html>
+    return _tr_html(f"""<!DOCTYPE html>
 <html lang="tr"><head>
 <meta charset="utf-8">
 {_MOBILE_META}
-<title>Şematik + PCB · {project_name} · {timestamp}</title>
+<title>⟪Şematik + PCB ·⟫ {project_name} · {timestamp}</title>
 <style>
   * {{ margin:0; padding:0; box-sizing:border-box; }}
   /* dvh: mobilde adres çubuğu açılıp kapanırken 100vh taşma yapar (alt kısım
@@ -3902,12 +3915,12 @@ def build_combined_shell(sch_html, pcb_html, timestamp, project_name, have_pcb,
 </head>
 <body>
 <div id="topbar">
-  <span class="title">Şematik + PCB</span>
-  <span class="hint">Bir tarafta komponente tıkla → diğerlerinde otomatik gösterilir</span>
+  <span class="title">⟪Şematik + PCB⟫</span>
+  <span class="hint">⟪Bir tarafta komponente tıkla → diğerlerinde otomatik gösterilir⟫</span>
   <div id="view-modes">
-    <button class="vm-btn active" id="vm-sch" title="Sadece şematik ( 1 )">Şematik</button>
-    <button class="vm-btn" id="vm-both" title="Yan yana ( 2 )">Böl</button>
-    <button class="vm-btn" id="vm-pcb" title="Sadece PCB ( 3 )">PCB</button>
+    <button class="vm-btn active" id="vm-sch" title="⟪Sadece şematik ( 1 )⟫">⟪Şematik⟫</button>
+    <button class="vm-btn" id="vm-both" title="⟪Yan yana ( 2 )⟫">⟪Böl⟫</button>
+    <button class="vm-btn" id="vm-pcb" title="⟪Sadece PCB ( 3 )⟫">PCB</button>
     {btn_3d}
   </div>
   <span class="badge">{project_name} · v{APP_VERSION}</span>
@@ -3918,7 +3931,7 @@ def build_combined_shell(sch_html, pcb_html, timestamp, project_name, have_pcb,
   </div>
   <div id="divider"></div>
   <div class="pane" id="pane-pcb">
-    <div class="pane-loading" id="load-pcb">PCB hazırlanıyor…</div>
+    <div class="pane-loading" id="load-pcb">⟪PCB hazırlanıyor…⟫</div>
     <iframe id="frame-pcb"></iframe>
   </div>
   {pane_3d}
@@ -3952,8 +3965,8 @@ async function loadFrame(id, b64) {{
   const html = await gunzipB64(b64);
   fr.srcdoc = (html === null)
     ? '<body style="font:14px sans-serif;color:#999;background:#111;padding:24px">'
-      + 'Bu tarayıcı sıkıştırılmış görünümü açamıyor (DecompressionStream gerekli). '
-      + 'Lütfen tarayıcıyı güncelleyin.</body>'
+      + '⟪Bu tarayıcı sıkıştırılmış görünümü açamıyor (DecompressionStream gerekli).⟫ '
+      + '⟪Lütfen tarayıcıyı güncelleyin.⟫</body>'
     : html;
 }}
 // Performans: açılış SADECE şematik — PCB ve 3D tembel yüklenir (ilk o moda
@@ -4080,7 +4093,7 @@ if (HAVE_3D) vmButtons.td.onclick = () => setViewMode('td');
 setViewMode('sch');
 // Komponent seçilince görünüm modu DEĞİŞMEZ; cross-probe arka planda çalışır.
 </script>
-</body></html>"""
+</body></html>""")
 
 
 def build_pcb_html(pcb, comp_info, timestamp, project_name):
@@ -4127,11 +4140,11 @@ def build_pcb_html(pcb, comp_info, timestamp, project_name):
         _gzip.compress(json.dumps(layer_src, separators=(",", ":")).encode("utf-8"), 6)
     ).decode()
 
-    return f"""<!DOCTYPE html>
+    return _tr_html(f"""<!DOCTYPE html>
 <html lang="tr"><head>
 <meta charset="utf-8">
 {_MOBILE_META}
-<title>PCB Görüntüleyici · {project_name} · {timestamp}</title>
+<title>⟪PCB Görüntüleyici ·⟫ {project_name} · {timestamp}</title>
 <style>
   * {{ margin:0; padding:0; box-sizing:border-box; }}
   body {{ background:#0a0a0a; color:#ddd; font-family:'Segoe UI',sans-serif;
@@ -4365,27 +4378,27 @@ def build_pcb_html(pcb, comp_info, timestamp, project_name):
 <body>
 <div id="app">
   <div id="sidebar">
-    <button id="sb-toggle" title="Paneli gizle ( B )">◂</button>
+    <button id="sb-toggle" title="⟪Paneli gizle ( B )⟫">◂</button>
     <h2>PCB · {pcb["pcb_name"]}</h2>
     <div class="build-info">{view_w:.0f}×{view_h:.0f}mm</div>
     <div id="search-box" class="collapsed">
-      <button id="pcb-search-toggle"><span id="pcb-search-caret">▸</span> Ara</button>
-      <input type="text" id="comp-search" placeholder="Komponent / değer ara... ( / )">
+      <button id="pcb-search-toggle"><span id="pcb-search-caret">▸</span> ⟪Ara⟫</button>
+      <input type="text" id="comp-search" placeholder="⟪Komponent / değer ara... ( / )⟫">
     </div>
     <div class="sb-tabs">
-      <button class="sb-tab active" data-panel="layer-list">Katmanlar</button>
-      <button class="sb-tab" data-panel="net-panel">Netler</button>
-      <button class="sb-tab" data-panel="bom-panel">BOM · Montaj</button>
+      <button class="sb-tab active" data-panel="layer-list">⟪Katmanlar⟫</button>
+      <button class="sb-tab" data-panel="net-panel">⟪Netler⟫</button>
+      <button class="sb-tab" data-panel="bom-panel">⟪BOM · Montaj⟫</button>
     </div>
     <div id="layer-list"></div>
     <div id="net-panel" class="hidden">
       <div id="net-head">
         <span id="net-count"></span>
         <div id="net-chips">
-          <button class="bom-chip active" data-nf="">Tümü</button>
-          <button class="bom-chip" data-nf="power">Güç</button>
+          <button class="bom-chip active" data-nf="">⟪Tümü⟫</button>
+          <button class="bom-chip" data-nf="power">⟪Güç⟫</button>
           <button class="bom-chip" data-nf="ground">GND</button>
-          <button class="bom-chip" data-nf="signal">Sinyal</button>
+          <button class="bom-chip" data-nf="signal">⟪Sinyal⟫</button>
         </div>
       </div>
       <div id="net-list"></div>
@@ -4394,25 +4407,25 @@ def build_pcb_html(pcb, comp_info, timestamp, project_name):
       <div id="bom-head">
         <div id="bom-progress"><span id="bom-done">0</span>/<span id="bom-total">0</span>
              yerleştirildi
-             <button id="bom-export" title="Montaj işaretlerini dosyaya kaydet">Dışa</button>
-             <button id="bom-import" title="Kaydedilmiş işaretleri yükle">İçe</button>
-             <button id="bom-reset" title="Tüm işaretleri temizle">Sıfırla</button>
+             <button id="bom-export" title="⟪Montaj işaretlerini dosyaya kaydet⟫">⟪Dışa⟫</button>
+             <button id="bom-import" title="⟪Kaydedilmiş işaretleri yükle⟫">⟪İçe⟫</button>
+             <button id="bom-reset" title="⟪Tüm işaretleri temizle⟫">⟪Sıfırla⟫</button>
              <input type="file" id="bom-file" accept=".json,application/json" hidden></div>
         <div id="bom-chips">
-          <button class="bom-chip active" data-side="">Tümü</button>
-          <button class="bom-chip" data-side="TOP">Üst</button>
-          <button class="bom-chip" data-side="BOTTOM">Alt</button>
-          <button class="bom-chip" data-side="todo">Kalan</button>
+          <button class="bom-chip active" data-side="">⟪Tümü⟫</button>
+          <button class="bom-chip" data-side="TOP">⟪Üst⟫</button>
+          <button class="bom-chip" data-side="BOTTOM">⟪Alt⟫</button>
+          <button class="bom-chip" data-side="todo">⟪Kalan⟫</button>
         </div>
       </div>
       <div id="bom-list"></div>
     </div>
     <div id="comp-popup">
-      <div id="popup-resize" title="Sürükle: yeniden boyutlandır"></div>
+      <div id="popup-resize" title="⟪Sürükle: yeniden boyutlandır⟫"></div>
       <div class="popup-hdr">
-        <button class="popup-collapse" id="pp-collapse" title="Küçült / Büyüt">▾</button>
+        <button class="popup-collapse" id="pp-collapse" title="⟪Küçült / Büyüt⟫">▾</button>
         <span class="desig" id="pp-desig"></span>
-        <button class="popup-x" id="pp-close" title="Kapat">×</button>
+        <button class="popup-x" id="pp-close" title="⟪Kapat⟫">×</button>
       </div>
       <div class="popup-body" id="pp-body"></div>
     </div>
@@ -4425,61 +4438,61 @@ def build_pcb_html(pcb, comp_info, timestamp, project_name):
       {layers_svg}
     </svg>
     <div id="toolbar">
-      <button class="tool-btn" id="zoom-in-btn" title="Yaklaş">+</button>
-      <button class="tool-btn" id="zoom-out-btn" title="Uzaklaş">−</button>
-      <button class="tool-btn" id="fit-btn">Sığdır</button>
+      <button class="tool-btn" id="zoom-in-btn" title="⟪Yaklaş⟫">+</button>
+      <button class="tool-btn" id="zoom-out-btn" title="⟪Uzaklaş⟫">−</button>
+      <button class="tool-btn" id="fit-btn">⟪Sığdır⟫</button>
       <button class="tool-btn active" id="lod-toggle"
-              title="LOD: gezinirken board bitmap çizilir (Chromium'da akıcılık). Kapatınca her zaman canlı SVG.">LOD</button>
-      <button class="tool-btn" id="flip-btn">Üst/Alt</button>
+              title="⟪LOD: gezinirken board bitmap çizilir (Chromium'da akıcılık). Kapatınca her zaman canlı SVG.⟫">LOD</button>
+      <button class="tool-btn" id="flip-btn">⟪Üst/Alt⟫</button>
       <button class="tool-btn" id="rot-btn"
-              title="Board'u 90° döndür ( R )">⟳</button>
+              title="⟪Board'u 90° döndür ( R )⟫">⟳</button>
       <button class="tool-btn" id="mir-btn"
-              title="Board'u çevir — alt yüzden bakış (ayna) ( X )">Çevir</button>
+              title="⟪Board'u çevir — alt yüzden bakış (ayna) ( X )⟫">⟪Çevir⟫</button>
       <button class="tool-btn" id="measure-btn"
-              title="Ölçüm: iki noktaya tıkla → mesafe (mm + mil). Esc iptal">Ölç</button>
-      <button class="tool-btn" id="pin-btn" title="Pad pin no + net adı">Pin</button>
-      <button class="tool-btn" id="bg-btn" title="Arka plan rengini değiştir">Zemin</button>
+              title="⟪Ölçüm: iki noktaya tıkla → mesafe (mm + mil). Esc iptal⟫">⟪Ölç⟫</button>
+      <button class="tool-btn" id="pin-btn" title="⟪Pad pin no + net adı⟫">Pin</button>
+      <button class="tool-btn" id="bg-btn" title="⟪Arka plan rengini değiştir⟫">⟪Zemin⟫</button>
       <button class="tool-btn" id="png-btn"
-              title="Görünümü PNG olarak indir (görünür katmanlar + vurgu)">Görüntü</button>
-      <button class="tool-btn" id="all-on">Hepsi</button>
-      <button class="tool-btn" id="all-off">Temizle</button>
-      <button class="tool-btn" id="help-btn" title="Kısayollar / yardım ( ? )">?</button>
+              title="⟪Görünümü PNG olarak indir (görünür katmanlar + vurgu)⟫">⟪Görüntü⟫</button>
+      <button class="tool-btn" id="all-on">⟪Hepsi⟫</button>
+      <button class="tool-btn" id="all-off">⟪Temizle⟫</button>
+      <button class="tool-btn" id="help-btn" title="⟪Kısayollar / yardım ( ? )⟫">?</button>
     </div>
     <div class="comp-hover-label" id="hover-label"></div>
-    <div id="info-bar">Sürükle: kaydır · Tekerlek: zoom · Komponente tıkla: detay</div>
+    <div id="info-bar">⟪Sürükle: kaydır · Tekerlek: zoom · Komponente tıkla: detay⟫</div>
     <div id="pcb-help">
       <div class="help-box">
-        <h3>Fare / Klavye</h3>
+        <h3>⟪Fare / Klavye⟫</h3>
         <table>
-          <tr><td>Sürükle</td><td>Board'u kaydır</td></tr>
-          <tr><td>Tekerlek</td><td>İmleç altına zoom</td></tr>
-          <tr><td>Komponente tıkla</td><td>Detay paneli + şematik/3D cross-probe</td></tr>
-          <tr><td>Bakır ize çift tıkla</td><td>O net'i tüm katmanlarda vurgula</td></tr>
-          <tr><td>Boşluğa tıkla</td><td>Vurguyu temizle</td></tr>
-          <tr><td><kbd>M</kbd></td><td>Ölçüm aracı — iki nokta arası mm/mil;
-              pad/via üzerine tıklarsan MERKEZİNE yapışır</td></tr>
-          <tr><td>Görüntü</td><td>O anki görünümü PNG olarak indir</td></tr>
-          <tr><td><kbd>R</kbd> · ⟳</td><td>Board'u 90° döndür</td></tr>
-          <tr><td><kbd>X</kbd> · Çevir</td><td>Alt yüzden bakış (ayna) — "Üst/Alt" ile birlikte kullan</td></tr>
-          <tr><td><kbd>/</kbd></td><td>Aramayı aç (komponent · net · değer)</td></tr>
-          <tr><td><kbd>B</kbd></td><td>Sol paneli gizle / göster</td></tr>
-          <tr><td><kbd>F</kbd></td><td>Board'u ekrana sığdır</td></tr>
-          <tr><td><kbd>Esc</kbd></td><td>Vurgu / ölçüm / yardım kapat</td></tr>
-          <tr><td><kbd>?</kbd></td><td>Bu pencere</td></tr>
+          <tr><td>⟪Sürükle⟫</td><td>⟪Board'u kaydır⟫</td></tr>
+          <tr><td>⟪Tekerlek⟫</td><td>⟪İmleç altına zoom⟫</td></tr>
+          <tr><td>⟪Komponente tıkla⟫</td><td>⟪Detay paneli + şematik/3D cross-probe⟫</td></tr>
+          <tr><td>⟪Bakır ize çift tıkla⟫</td><td>⟪O net'i tüm katmanlarda vurgula⟫</td></tr>
+          <tr><td>⟪Boşluğa tıkla⟫</td><td>⟪Vurguyu temizle⟫</td></tr>
+          <tr><td><kbd>M</kbd></td><td>⟪Ölçüm aracı — iki nokta arası mm/mil;⟫
+              ⟪pad/via üzerine tıklarsan MERKEZİNE yapışır⟫</td></tr>
+          <tr><td>⟪Görüntü⟫</td><td>⟪O anki görünümü PNG olarak indir⟫</td></tr>
+          <tr><td><kbd>R</kbd> · ⟳</td><td>⟪Board'u 90° döndür⟫</td></tr>
+          <tr><td><kbd>X</kbd> ⟪· Çevir⟫</td><td>⟪Alt yüzden bakış (ayna) — "Üst/Alt" ile birlikte kullan⟫</td></tr>
+          <tr><td><kbd>/</kbd></td><td>⟪Aramayı aç (komponent · net · değer)⟫</td></tr>
+          <tr><td><kbd>B</kbd></td><td>⟪Sol paneli gizle / göster⟫</td></tr>
+          <tr><td><kbd>F</kbd></td><td>⟪Board'u ekrana sığdır⟫</td></tr>
+          <tr><td><kbd>Esc</kbd></td><td>⟪Vurgu / ölçüm / yardım kapat⟫</td></tr>
+          <tr><td><kbd>?</kbd></td><td>⟪Bu pencere⟫</td></tr>
         </table>
-        <h3>Dokunmatik</h3>
+        <h3>⟪Dokunmatik⟫</h3>
         <table>
-          <tr><td>Tek parmak sürükle</td><td>Kaydır</td></tr>
-          <tr><td>İki parmak</td><td>Yakınlaştır (pinch) + kaydır</td></tr>
-          <tr><td>Tek dokunuş / çift dokunuş</td><td>Tıklama / çift tıklama ile aynı</td></tr>
+          <tr><td>⟪Tek parmak sürükle⟫</td><td>⟪Kaydır⟫</td></tr>
+          <tr><td>⟪İki parmak⟫</td><td>⟪Yakınlaştır (pinch) + kaydır⟫</td></tr>
+          <tr><td>⟪Tek dokunuş / çift dokunuş⟫</td><td>⟪Tıklama / çift tıklama ile aynı⟫</td></tr>
         </table>
-        <h3>Paneller</h3>
+        <h3>⟪Paneller⟫</h3>
         <table>
-          <tr><td>Katmanlar</td><td>Göster/gizle · ↑ ile en üste getir · renk = çizim rengi</td></tr>
-          <tr><td>Netler</td><td>Ada göre ara, tıkla → net vurgusu (Güç/GND/Sinyal filtresi)</td></tr>
-          <tr><td>BOM · Montaj</td><td>Değer+footprint grubu; tıkla → grubu vurgula, ✓ ile montaj takibi</td></tr>
+          <tr><td>⟪Katmanlar⟫</td><td>⟪Göster/gizle · ↑ ile en üste getir · renk = çizim rengi⟫</td></tr>
+          <tr><td>⟪Netler⟫</td><td>⟪Ada göre ara, tıkla → net vurgusu (Güç/GND/Sinyal filtresi)⟫</td></tr>
+          <tr><td>⟪BOM · Montaj⟫</td><td>⟪Değer+footprint grubu; tıkla → grubu vurgula, ✓ ile montaj takibi⟫</td></tr>
         </table>
-        <button class="modal-close" id="help-close">Kapat</button>
+        <button class="modal-close" id="help-close">⟪Kapat⟫</button>
       </div>
     </div>
   </div>
@@ -4592,7 +4605,7 @@ function setOrient(newRot, newMir) {{
   centerOnRoot(c.x, c.y);
   applyTransform();
   if (typeof pcbLodInvalidate === 'function') pcbLodInvalidate();
-  const t = 'Yön: ' + rot + '°' + (mir === -1 ? ' · ayna (alt yüzden bakış)' : '');
+  const t = '⟪Yön:⟫ ' + rot + '°' + (mir === -1 ? ' ⟪· ayna (alt yüzden bakış)⟫' : '');
   if (typeof pcbHint === 'function') pcbHint(t);
 }}
 let dragging=false, lastX=0, lastY=0, moved=false;
@@ -4802,7 +4815,7 @@ function renderLayerList() {{
     item.innerHTML=`<span class="layer-swatch" style="background:${{l.color}}"></span>`
       +`<span class="layer-name">${{l.display}}</span>`
       +`<button class="layer-top${{raisedId===l.id?' on':''}}" `
-      +`title="En üste getir (tekrar bas: orijinal sıra)">↑</button>`
+      +`title="⟪En üste getir (tekrar bas: orijinal sıra)⟫">↑</button>`
       +`<span class="layer-check">✓</span>`;
     item.onclick=() => {{
       const gg=document.getElementById('layer-'+l.id);
@@ -4854,7 +4867,7 @@ const sbToggle=document.getElementById('sb-toggle');
 function setSbOpen(open) {{
   sbEl.classList.toggle('collapsed', !open);
   sbToggle.textContent = open ? '◂' : '▸';
-  sbToggle.title = (open ? 'Paneli gizle' : 'Paneli göster') + ' ( B )';
+  sbToggle.title = (open ? '⟪Paneli gizle⟫' : '⟪Paneli göster⟫') + ' ( B )';
   lsSet({{ pcbSidebar: open }});
 }}
 sbToggle.addEventListener('click', () => setSbOpen(sbEl.classList.contains('collapsed')));
@@ -4932,11 +4945,11 @@ function bomRender() {{
     html += '<div class="bom-row'+(done?' done':'')+'" data-i="'+i+'" data-key="'+bomEsc(g.key)+'">'
       + '<span class="bom-chk">'+(done?'✓':'')+'</span>'
       + '<span class="bom-qty">'+g.desigs.length+'</span>'
-      + '<span class="bom-mid"><span class="bom-val">'+bomEsc(g.val||'(değer yok)')+'</span>'
+      + '<span class="bom-mid"><span class="bom-val">'+bomEsc(g.val||'⟪(değer yok)⟫')+'</span>'
       + (g.fp ? ' <span class="bom-fp">'+bomEsc(g.fp)+'</span>' : '')
       + '<div class="bom-desigs">'+bomEsc(g.desigs.join(', '))+'</div></span></div>';
   }});
-  list.innerHTML = shown ? html : '<div class="bom-empty">eşleşen yok</div>';
+  list.innerHTML = shown ? html : '<div class="bom-empty">⟪eşleşen yok⟫</div>';
   bomProgress();
 }}
 document.getElementById('bom-list').addEventListener('click', e => {{
@@ -4979,7 +4992,7 @@ document.querySelectorAll('.bom-chip').forEach(ch => ch.onclick = () => {{
   bomRender();
 }});
 document.getElementById('bom-reset').onclick = () => {{
-  if(!confirm('Tüm montaj işaretleri silinsin mi?')) return;
+  if(!confirm('⟪Tüm montaj işaretleri silinsin mi?⟫')) return;
   bomState = {{}}; bomSave(); bomRender();
 }};
 // Montaj işaretlerini dosyaya aktar / dosyadan al — localStorage tarayıcıya
@@ -4998,7 +5011,7 @@ document.getElementById('bom-export').onclick = () => {{
   a.download = {json.dumps(project_name)} + '_montaj.json';
   a.click();
   setTimeout(() => URL.revokeObjectURL(a.href), 5000);
-  pcbHint(items.length + ' grup dosyaya aktarıldı');
+  pcbHint(items.length + ' ⟪grup dosyaya aktarıldı⟫');
 }};
 document.getElementById('bom-import').onclick = () =>
   document.getElementById('bom-file').click();
@@ -5009,14 +5022,14 @@ document.getElementById('bom-file').onchange = e => {{
   rd.onload = () => {{
     let d = null;
     try {{ d = JSON.parse(rd.result); }} catch(err) {{}}
-    if(!d || !Array.isArray(d.items)) {{ pcbHint('Geçersiz dosya'); return; }}
+    if(!d || !Array.isArray(d.items)) {{ pcbHint('⟪Geçersiz dosya⟫'); return; }}
     const known = new Set(BOM_GROUPS.map(g => g.key));
     let ok = 0, miss = 0;
     d.items.forEach(it => {{
       if(known.has(it.key)) {{ bomState[it.key] = 1; ok++; }} else miss++;
     }});
     bomSave(); bomRender();
-    pcbHint(ok + ' grup yüklendi' + (miss ? ' · ' + miss + ' grup bu board\\'da yok' : ''));
+    pcbHint(ok + ' ⟪grup yüklendi⟫' + (miss ? ' · ' + miss + ' ⟪grup bu board\\'da yok⟫' : ''));
   }};
   rd.readAsText(f);
   e.target.value = '';        // aynı dosya tekrar seçilebilsin
@@ -5053,11 +5066,11 @@ function netRender() {{
     shown++;
     html += '<div class="net-row '+k+'" data-net="'+bomEsc(n.name)+'">'
           + '<span class="nn">'+bomEsc(n.name)+'</span>'
-          + '<span class="nc">'+n.pads+' pad · '+n.tracks+' iz</span></div>';
+          + '<span class="nc">'+n.pads+' ⟪pad⟫ · '+n.tracks+' ⟪iz⟫</span></div>';
   }});
-  list.innerHTML = shown ? html : '<div class="bom-empty">eşleşen yok</div>';
+  list.innerHTML = shown ? html : '<div class="bom-empty">⟪eşleşen yok⟫</div>';
   document.getElementById('net-count').textContent =
-    shown + ' / ' + NETS.length + ' net' + (q ? ' (filtreli)' : '');
+    shown + ' / ' + NETS.length + ' net' + (q ? ' (⟪filtreli⟫)' : '');
 }}
 // Netler panelinde bir satırı seçili işaretle (şematikten gelen seçim için de
 // kullanılır — kullanıcı hangi net'in vurgulandığını listede görsün).
@@ -5086,10 +5099,10 @@ document.querySelectorAll('#net-chips .bom-chip').forEach(ch => ch.onclick = () 
 // === Arka plan rengi: üst toolbar'dan döngüyle değiştirilir (siyah↔gri↔açık).
 //     Nokta ızgarası rengi zemine göre kontrastlı seçilir. ===
 const BG_PRESETS = [
-  {{name:'Siyah',  bg:'#0a0a0a', dot:'#1a1a1a'}},
-  {{name:'Koyu gri', bg:'#3a3d42', dot:'#4a4e54'}},
-  {{name:'Gri',    bg:'#808890', dot:'#6f767e'}},
-  {{name:'Açık',   bg:'#c8ccd2', dot:'#b3b7be'}},
+  {{name:'⟪Siyah⟫',  bg:'#0a0a0a', dot:'#1a1a1a'}},
+  {{name:'⟪Koyu gri⟫', bg:'#3a3d42', dot:'#4a4e54'}},
+  {{name:'⟪Gri⟫',    bg:'#808890', dot:'#6f767e'}},
+  {{name:'⟪Açık⟫',   bg:'#c8ccd2', dot:'#b3b7be'}},
 ];
 let bgIndex=0;
 function applyBg() {{
@@ -5098,7 +5111,7 @@ function applyBg() {{
   wrap.style.backgroundImage =
     'radial-gradient(circle, '+p.dot+' 1px, transparent 1px)';
   const btn = document.getElementById('bg-btn');
-  if(btn) btn.title = 'Arka plan: '+p.name+' (tıkla: değiştir)';
+  if(btn) btn.title = '⟪Arka plan:⟫ '+p.name+' ⟪(tıkla: değiştir)⟫';
 }}
 document.getElementById('bg-btn').onclick=() => {{
   bgIndex = (bgIndex+1) % BG_PRESETS.length; applyBg();
@@ -5202,13 +5215,13 @@ function showComp(desig) {{
   document.getElementById('pp-desig').textContent=desig;
   const row=(k,v)=>v?`<div class="prow"><span class="pk">${{k}}</span><span class="pv">${{v}}</span></div>`:'';
   let html='';
-  html+=row('Değer',info.value);
-  html+=row('Açıklama',info.description);
-  html+=row('Şema Sayfası',info.sheet);
+  html+=row('⟪Değer⟫',info.value);
+  html+=row('⟪Açıklama⟫',info.description);
+  html+=row('⟪Şema Sayfası⟫',info.sheet);
   html+=row('Footprint',pc.footprint);
-  html+=row('Katman',pc.layer);
-  html+=row('Konum (mm)',(pc.abs_x_mm!==undefined)?`X=${{pc.abs_x_mm}} Y=${{pc.abs_y_mm}}`:'');
-  if(pc.rotation) html+=row('Dönüş',pc.rotation+'°');
+  html+=row('⟪Katman⟫',pc.layer);
+  html+=row('⟪Konum (mm)⟫',(pc.abs_x_mm!==undefined)?`X=${{pc.abs_x_mm}} Y=${{pc.abs_y_mm}}`:'');
+  if(pc.rotation) html+=row('⟪Dönüş⟫',pc.rotation+'°');
   if(!html) html='<div style="color:#888">Bilgi yok</div>';
   document.getElementById('pp-body').innerHTML=html;
   if (typeof clearNetHighlight === 'function') clearNetHighlight();
@@ -5311,7 +5324,7 @@ function highlightComps(desigs, focus) {{
   // Gizli katmandaki komponentin ekran kutusu 0 olur → vurgulanamaz. Sessizce
   // eksik göstermek yerine kullanıcıya söyle (Üst/Alt ile karşı yüz açılır).
   if(n < desigs.length)
-    pcbHint((desigs.length-n)+' komponent gizli katmanda — "Üst/Alt" ile karşı yüzü aç');
+    pcbHint((desigs.length-n)+' ⟪komponent gizli katmanda — "Üst/Alt" ile karşı yüzü aç⟫');
   if(desigs.length===1) {{
     // Pin 1 işareti: pad numarası '1' (veya 'A1') olan pad'in merkezine halka.
     // Aynı pad birden çok katmanda (bakır/maske/pasta) çizilidir; GİZLİ
@@ -5381,7 +5394,7 @@ function setMeasure(on) {{
   measureBtn.classList.toggle('active', on);
   wrap.classList.toggle('measuring', on);
   if(!on) {{ mPts = []; mPreview = null; drawMeasure(); }}
-  else infoBar.textContent = 'Ölçüm: iki noktaya tıkla (Esc iptal)';
+  else infoBar.textContent = '⟪Ölçüm: iki noktaya tıkla (Esc iptal)⟫';
 }}
 measureBtn.onclick = () => setMeasure(!measureOn);
 function drawMeasure() {{
@@ -5414,10 +5427,10 @@ function drawMeasure() {{
   measureLayer = g;
   updateMeasureMetrics();
   const snapped = pts.filter(p => p.snap).length;
-  infoBar.textContent = 'Ölçüm: ' + d.toFixed(3) + ' mm / ' + (d/0.0254).toFixed(1)
+  infoBar.textContent = '⟪Ölçüm:⟫ ' + d.toFixed(3) + ' mm / ' + (d/0.0254).toFixed(1)
                       + ' mil · Δx ' + dx.toFixed(3) + ' Δy ' + dy.toFixed(3)
-                      + (snapped ? ' · ' + snapped + ' nokta pad merkezine yapıştı' : '')
-                      + (mPts.length === 2 ? ' · yeni ölçüm için tıkla, Esc kapatır' : '');
+                      + (snapped ? ' · ' + snapped + ' ⟪nokta pad merkezine yapıştı⟫' : '')
+                      + (mPts.length === 2 ? ' ⟪· yeni ölçüm için tıkla, Esc kapatır⟫' : '');
 }}
 function updateMeasureMetrics() {{
   if(!measureLayer) return;
@@ -5466,18 +5479,18 @@ document.getElementById('png-btn').onclick = () => {{
   let url = '', tried = false;
   const fin = ok => {{
     if (url) {{ URL.revokeObjectURL(url); url=''; }}
-    if (!ok) {{ pcbHint('PNG üretilemedi'); return; }}
+    if (!ok) {{ pcbHint('⟪PNG üretilemedi⟫'); return; }}
     const cv = document.createElement('canvas');
     cv.width = W; cv.height = H;
     cv.getContext('2d').drawImage(img, 0, 0, W, H);
     cv.toBlob(b => {{
-      if (!b) {{ pcbHint('PNG üretilemedi'); return; }}
+      if (!b) {{ pcbHint('⟪PNG üretilemedi⟫'); return; }}
       const a = document.createElement('a');
       a.href = URL.createObjectURL(b);
       a.download = {json.dumps(project_name)} + '_pcb.png';
       a.click();
       setTimeout(() => URL.revokeObjectURL(a.href), 5000);
-      pcbHint('PNG indirildi (' + W + '×' + H + ')');
+      pcbHint('⟪PNG indirildi⟫ (' + W + '×' + H + ')');
     }}, 'image/png');
   }};
   img.onload = () => fin(true);
@@ -5560,8 +5573,8 @@ function clearPcbSel() {{
 
 // === Bakır yol / net highlight: çift tıkla → net'i TÜM katmanlarda göster,
 //     gerisini karart. data-net render edilmiş bakır elemanlarda mevcut. ===
-const INFO_DEFAULT = 'Sürükle / tek parmak: kaydır · Tekerlek / iki parmak: zoom · '
-                   + 'Tıkla: komponent · Çift tıkla: bakır yol';
+const INFO_DEFAULT = '⟪Sürükle / tek parmak: kaydır · Tekerlek / iki parmak: zoom ·⟫ '
+                   + '⟪Tıkla: komponent · Çift tıkla: bakır yol⟫';
 const infoBar = document.getElementById('info-bar');
 infoBar.textContent = INFO_DEFAULT;
 // Geçici bilgi mesajı (4 sn) — net highlight aktif değilse varsayılana döner
@@ -5626,7 +5639,7 @@ function highlightNet(netName) {{
   }});
   svg.appendChild(g);
   netHlGroup = g;
-  infoBar.textContent = `Net: ${{label}} · ${{els.length}} bakır eleman · Esc temizler`;
+  infoBar.textContent = `Net: ${{label}} · ${{els.length}} ⟪bakır eleman · Esc temizler⟫`;
 }}
 // Katman rengini biraz parlatıp doygunlaştır ki gri zeminde net görünsün
 function boostColor(col) {{
@@ -5682,7 +5695,7 @@ document.getElementById('comp-search').addEventListener('keydown', e => {{
     showComp(d); crossProbeOut(d);
     return;
   }}
-  alert(q+' bulunamadı');
+  alert(q+' ⟪bulunamadı⟫');
 }});
 // Esc: net / komponent highlight'ı temizle, detay panelini kapat
 window.addEventListener('keydown', e => {{
@@ -5754,7 +5767,7 @@ window.addEventListener('message', ev => {{
           if (n && found.indexOf(n.name) < 0) found.push(n.name);
         }});
         if (found.length) {{ highlightNet(found); netMark(found[0]); }}
-        else infoBar.textContent = 'Net PCB\\'de bulunamadı: ' + d.net;
+        else infoBar.textContent = 'Net PCB\\'⟪de bulunamadı:⟫ ' + d.net;
       }}
     }} finally {{ xpApplying = false; }}
     return;
@@ -5782,8 +5795,8 @@ document.getElementById('pin-btn').classList.add('active');  // pad etiketleri v
   let txt = null;
   try {{ txt = await gunzipB64(LAYER_GZ); }} catch(e) {{ txt = null; }}
   if (txt === null) {{
-    infoBar.textContent = 'Bu tarayıcı sıkıştırılmış katmanları açamıyor '
-                        + '(DecompressionStream gerekli) — lütfen tarayıcıyı güncelleyin.';
+    infoBar.textContent = '⟪Bu tarayıcı sıkıştırılmış katmanları açamıyor⟫ '
+                        + '⟪(DecompressionStream gerekli) — lütfen tarayıcıyı güncelleyin.⟫';
     return;
   }}
   LAZY_SVG = JSON.parse(txt);
@@ -5813,7 +5826,7 @@ new ResizeObserver(() => {{
 // Pencere/pane yeniden boyutlandığında otomatik sığdırma yok (kullanıcı
 // zoom'unu bozmasın diye), ama ilk yükte garanti.
 </script>
-</body></html>"""
+</body></html>""")
 
 
 _PCB_CANVAS_TPL = r"""<!DOCTYPE html>
@@ -5958,21 +5971,21 @@ __MOBILE_META__
 <body>
 <div id="app">
   <div id="sidebar">
-    <button id="sb-toggle" title="Paneli gizle ( B )">&#9666;</button>
+    <button id="sb-toggle" title="⟪Paneli gizle ( B )⟫">&#9666;</button>
     <h2>PCB · __PCBNAME__</h2>
     <div class="sub" id="dims"></div>
-    <div id="search-box"><input id="q" placeholder="Komponent / net ara..."></div>
+    <div id="search-box"><input id="q" placeholder="⟪Komponent / net ara...⟫"></div>
     <div class="sb-tabs">
-      <button class="sb-tab active" data-p="p-layers">Katmanlar</button>
-      <button class="sb-tab" data-p="p-nets">Netler</button>
-      <button class="sb-tab" data-p="p-comps">Komponentler</button>
+      <button class="sb-tab active" data-p="p-layers">⟪Katmanlar⟫</button>
+      <button class="sb-tab" data-p="p-nets">⟪Netler⟫</button>
+      <button class="sb-tab" data-p="p-comps">⟪Komponentler⟫</button>
       <button class="sb-tab" data-p="p-bom">BOM</button>
     </div>
     <div id="chips" class="hidden">
-      <button class="chip active" data-nf="">Tümü</button>
-      <button class="chip" data-nf="power">Güç</button>
+      <button class="chip active" data-nf="">⟪Tümü⟫</button>
+      <button class="chip" data-nf="power">⟪Güç⟫</button>
       <button class="chip" data-nf="ground">GND</button>
-      <button class="chip" data-nf="signal">Sinyal</button>
+      <button class="chip" data-nf="signal">⟪Sinyal⟫</button>
     </div>
     <div id="p-layers" class="panel"></div>
     <div id="p-nets" class="panel hidden"></div>
@@ -5980,16 +5993,16 @@ __MOBILE_META__
     <div id="p-bom" class="panel hidden nopad">
       <div id="bom-head">
         <div id="bom-prog"><span id="bom-done">0</span>/<span id="bom-total">0</span> yerleştirildi
-          <button id="bom-exp" title="Montaj işaretlerini dosyaya kaydet">Dışa</button>
-          <button id="bom-imp" title="Kaydedilmiş işaretleri yükle">İçe</button>
-          <button id="bom-rst" title="Tüm işaretleri temizle">Sıfırla</button>
+          <button id="bom-exp" title="⟪Montaj işaretlerini dosyaya kaydet⟫">⟪Dışa⟫</button>
+          <button id="bom-imp" title="⟪Kaydedilmiş işaretleri yükle⟫">⟪İçe⟫</button>
+          <button id="bom-rst" title="⟪Tüm işaretleri temizle⟫">⟪Sıfırla⟫</button>
           <input type="file" id="bom-file" accept=".json,application/json" hidden>
         </div>
         <div id="bom-chips">
-          <button class="chip active" data-bf="">Tümü</button>
-          <button class="chip" data-bf="TOP">Üst</button>
-          <button class="chip" data-bf="BOTTOM">Alt</button>
-          <button class="chip" data-bf="todo">Kalan</button>
+          <button class="chip active" data-bf="">⟪Tümü⟫</button>
+          <button class="chip" data-bf="TOP">⟪Üst⟫</button>
+          <button class="chip" data-bf="BOTTOM">⟪Alt⟫</button>
+          <button class="chip" data-bf="todo">⟪Kalan⟫</button>
         </div>
       </div>
       <div id="bom-list"></div>
@@ -6005,48 +6018,48 @@ __MOBILE_META__
     <div id="toolbar">
       <button class="tb" id="b-in">+</button>
       <button class="tb" id="b-out">&minus;</button>
-      <button class="tb" id="b-fit">Sığdır</button>
-      <button class="tb" id="b-rot" title="90° döndür ( R )">&#10227;</button>
-      <button class="tb" id="b-mir" title="Alt yüzden bakış / ayna ( X )">Çevir</button>
-      <button class="tb" id="b-flip" title="Üst / alt katman setini değiştir ( T )">Üst/Alt</button>
-      <button class="tb" id="b-all" title="Tüm katmanları göster">Hepsi</button>
-      <button class="tb" id="b-none" title="Tüm katmanları gizle">Temizle</button>
-      <button class="tb" id="b-meas" title="Ölçüm ( M )">Ölç</button>
-      <button class="tb active" id="b-pin" title="Pad no + net ( P )">Pin</button>
-      <button class="tb" id="b-bg" title="Zemin rengi">Zemin</button>
-      <button class="tb" id="b-png" title="Görünümü PNG indir">Görüntü</button>
-      <button class="tb" id="b-help" title="Yardım ( ? )">?</button>
+      <button class="tb" id="b-fit">⟪Sığdır⟫</button>
+      <button class="tb" id="b-rot" title="⟪90° döndür ( R )⟫">&#10227;</button>
+      <button class="tb" id="b-mir" title="⟪Alt yüzden bakış / ayna ( X )⟫">⟪Çevir⟫</button>
+      <button class="tb" id="b-flip" title="⟪Üst / alt katman setini değiştir ( T )⟫">⟪Üst/Alt⟫</button>
+      <button class="tb" id="b-all" title="⟪Tüm katmanları göster⟫">⟪Hepsi⟫</button>
+      <button class="tb" id="b-none" title="⟪Tüm katmanları gizle⟫">⟪Temizle⟫</button>
+      <button class="tb" id="b-meas" title="⟪Ölçüm ( M )⟫">⟪Ölç⟫</button>
+      <button class="tb active" id="b-pin" title="⟪Pad no + net ( P )⟫">Pin</button>
+      <button class="tb" id="b-bg" title="⟪Zemin rengi⟫">⟪Zemin⟫</button>
+      <button class="tb" id="b-png" title="⟪Görünümü PNG indir⟫">⟪Görüntü⟫</button>
+      <button class="tb" id="b-help" title="⟪Yardım ( ? )⟫">?</button>
     </div>
-    <div id="info">Sürükle / tek parmak: kaydır · Tekerlek / iki parmak: zoom · Tıkla: komponent · Çift tık: net</div>
+    <div id="info">⟪Sürükle / tek parmak: kaydır · Tekerlek / iki parmak: zoom · Tıkla: komponent · Çift tık: net⟫</div>
     <div id="stat"></div>
     <div id="help"><div class="hb">
-      <h3>Fare / Klavye</h3>
+      <h3>⟪Fare / Klavye⟫</h3>
       <table>
-        <tr><td>Sürükle</td><td>Kaydır</td></tr>
-        <tr><td>Tekerlek</td><td>İmleç altına zoom</td></tr>
-        <tr><td>Tıkla</td><td>Komponent seç (detay + cross-probe)</td></tr>
-        <tr><td>Çift tıkla</td><td>Altındaki net'i vurgula</td></tr>
-        <tr><td><kbd>M</kbd></td><td>Ölçüm (mm/mil, pad merkezine yapışır)</td></tr>
-        <tr><td><kbd>R</kbd> / <kbd>X</kbd></td><td>Döndür / çevir (ayna)</td></tr>
-        <tr><td><kbd>P</kbd> · <kbd>T</kbd></td><td>Pad etiketleri · Üst/Alt katman seti</td></tr>
+        <tr><td>⟪Sürükle⟫</td><td>⟪Kaydır⟫</td></tr>
+        <tr><td>⟪Tekerlek⟫</td><td>⟪İmleç altına zoom⟫</td></tr>
+        <tr><td>⟪Tıkla⟫</td><td>⟪Komponent seç (detay + cross-probe)⟫</td></tr>
+        <tr><td>⟪Çift tıkla⟫</td><td>⟪Altındaki net'i vurgula⟫</td></tr>
+        <tr><td><kbd>M</kbd></td><td>⟪Ölçüm (mm/mil, pad merkezine yapışır)⟫</td></tr>
+        <tr><td><kbd>R</kbd> / <kbd>X</kbd></td><td>⟪Döndür / çevir (ayna)⟫</td></tr>
+        <tr><td><kbd>P</kbd> · <kbd>T</kbd></td><td>⟪Pad etiketleri · Üst/Alt katman seti⟫</td></tr>
         <tr><td><kbd>F</kbd> · <kbd>B</kbd> · <kbd>Esc</kbd> · <kbd>?</kbd></td>
-            <td>Sığdır · panel · temizle · yardım</td></tr>
+            <td>⟪Sığdır · panel · temizle · yardım⟫</td></tr>
       </table>
-      <h3>Dokunmatik</h3>
+      <h3>⟪Dokunmatik⟫</h3>
       <table>
-        <tr><td>Tek parmak</td><td>Kaydır</td></tr>
-        <tr><td>İki parmak</td><td>Yakınlaştır + kaydır</td></tr>
-        <tr><td>Dokun / çift dokun</td><td>Komponent / net</td></tr>
+        <tr><td>⟪Tek parmak⟫</td><td>⟪Kaydır⟫</td></tr>
+        <tr><td>⟪İki parmak⟫</td><td>⟪Yakınlaştır + kaydır⟫</td></tr>
+        <tr><td>⟪Dokun / çift dokun⟫</td><td>⟪Komponent / net⟫</td></tr>
       </table>
-      <h3>Bu görünüm hakkında</h3>
+      <h3>⟪Bu görünüm hakkında⟫</h3>
       <table>
-        <tr><td>BOM · Montaj</td><td>Değer+footprint grubuna tıkla → grubun tamamı
-            vurgulanır; ✓ ile montaj takibi (tarayıcıda saklanır, Dışa/İçe ile taşınır)</td></tr>
-        <tr><td>Geometri tabanlı</td><td>Board SVG olarak değil, ham geometri (iz/pad/via/
-            region/metin) olarak gömülür ve canvas'a çizilir → dosya çok küçük,
-            her zoom'da akıcı.</td></tr>
+        <tr><td>⟪BOM · Montaj⟫</td><td>⟪Değer+footprint grubuna tıkla → grubun tamamı⟫
+            ⟪vurgulanır; ✓ ile montaj takibi (tarayıcıda saklanır, Dışa/İçe ile taşınır)⟫</td></tr>
+        <tr><td>⟪Geometri tabanlı⟫</td><td>⟪Board SVG olarak değil, ham geometri (iz/pad/via/⟫
+            ⟪region/metin) olarak gömülür ve canvas'a çizilir → dosya çok küçük,⟫
+            ⟪her zoom'da akıcı.⟫</td></tr>
       </table>
-      <button class="cls" id="hclose">Kapat</button>
+      <button class="cls" id="hclose">⟪Kapat⟫</button>
     </div></div>
   </div>
 </div>
@@ -6232,7 +6245,7 @@ function draw() {
   }
   ctx.restore();
   drawOverlay(r);
-  stat.textContent = (G.tracks.length + G.pads.length + G.vias.length) + ' primitif · '
+  stat.textContent = (G.tracks.length + G.pads.length + G.vias.length) + ' ⟪primitif⟫ · '
     + scale.toFixed(1) + ' px/mm' + (rot ? ' · ' + rot + '°' : '') + (mir < 0 ? ' · ayna' : '');
 }
 // Ekran uzayında çizilenler: seçim kutusu, pad etiketleri, ölçüm
@@ -6299,8 +6312,8 @@ function drawOverlay(r) {
     ctx.strokeStyle = '#1a1a00'; ctx.lineWidth = 3;
     ctx.strokeText(txt, (a.x + b.x) / 2, (a.y + b.y) / 2 - 6);
     ctx.fillStyle = '#ffeb3b'; ctx.fillText(txt, (a.x + b.x) / 2, (a.y + b.y) / 2 - 6);
-    info.textContent = 'Ölçüm: ' + txt + ' · Δx ' + (pts[1].x - pts[0].x).toFixed(3)
-                     + ' Δy ' + (pts[1].y - pts[0].y).toFixed(3) + ' · Esc kapatır';
+    info.textContent = '⟪Ölçüm:⟫ ' + txt + ' · Δx ' + (pts[1].x - pts[0].x).toFixed(3)
+                     + ' Δy ' + (pts[1].y - pts[0].y).toFixed(3) + ' ⟪· Esc kapatır⟫';
   }
   ctx.restore();
 }
@@ -6435,7 +6448,7 @@ function renderLayers() {
     + '<span class="sw" style="background:' + l.color + '"></span>'
     + '<span class="ln">' + esc(l.name) + '</span>'
     + '<button class="ltop' + (topLayer === i ? ' on' : '') + '" data-top="' + i
-    + '" title="Bu katmanı en üste getir (tekrar bas: normal sıra)">&#8593;</button>'
+    + '" title="⟪Bu katmanı en üste getir (tekrar bas: normal sıra)⟫">&#8593;</button>'
     + '<span class="lc">&#10003;</span></div>').join('');
 }
 function renderNets() {
@@ -6452,7 +6465,7 @@ function renderNets() {
     html += '<div class="row ' + k + (selNets.indexOf(i) >= 0 ? ' sel' : '') + '" data-net="' + i + '">'
          + '<span class="nm">' + esc(nm) + '</span><span class="ct">' + (cnt[i] || 0) + ' pad</span></div>';
   });
-  document.getElementById('p-nets').innerHTML = n ? html : '<div class="empty">eşleşen yok</div>';
+  document.getElementById('p-nets').innerHTML = n ? html : '<div class="empty">⟪eşleşen yok⟫</div>';
 }
 function renderComps() {
   const q = qs.toLowerCase();
@@ -6465,7 +6478,7 @@ function renderComps() {
          + '<span class="nm">' + esc(c.d) + '</span><span class="ct">'
          + esc((COMP_INFO[c.d] || {}).value || '') + ' · ' + c.l[0] + '</span></div>';
   });
-  document.getElementById('p-comps').innerHTML = n ? html : '<div class="empty">eşleşen yok</div>';
+  document.getElementById('p-comps').innerHTML = n ? html : '<div class="empty">⟪eşleşen yok⟫</div>';
 }
 document.getElementById('p-layers').addEventListener('click', e => {
   const tb = e.target.closest('.ltop');
@@ -6475,7 +6488,7 @@ document.getElementById('p-layers').addEventListener('click', e => {
     if (topLayer >= 0) vis[topLayer] = true;
     renderLayers(); draw();
     info.textContent = topLayer >= 0
-      ? G.layers[topLayer].name + ' en üstte' : 'Katman sırası normal';
+      ? G.layers[topLayer].name + ' ⟪en üstte⟫' : '⟪Katman sırası normal⟫';
     return;
   }
   const it = e.target.closest('.layer-item'); if (!it) return;
@@ -6514,7 +6527,7 @@ function selectNets(idxs, emit) {
   selComp = null; selComps = [];
   popup.classList.remove('open');
   if (selNets.length)
-    info.textContent = 'Net: ' + selNets.map(i => G.nets[i]).join(' + ') + ' · Esc temizler';
+    info.textContent = 'Net: ' + selNets.map(i => G.nets[i]).join(' + ') + ' · ⟪Esc temizler⟫';
   else info.textContent = INFO_DEFAULT;
   renderNets(); draw();
   if (emit) crossNet(selNets.length ? G.nets[selNets[0]] : null);
@@ -6534,10 +6547,10 @@ function showComp(d) {
   const inf = COMP_INFO[d] || {};
   const row = (k, v) => v ? '<div class="pr"><span class="pk">' + k + '</span><span class="pv">' + esc(v) + '</span></div>' : '';
   document.getElementById('pbody').innerHTML =
-    row('Değer', inf.value) + row('Açıklama', inf.description) + row('Şema Sayfası', inf.sheet)
-    + row('Footprint', c.fp) + row('Katman', c.l)
+    row('⟪Değer⟫', inf.value) + row('⟪Açıklama⟫', inf.description) + row('⟪Şema Sayfası⟫', inf.sheet)
+    + row('Footprint', c.fp) + row('⟪Katman⟫', c.l)
     + row('Konum (mm)', 'X=' + c.x.toFixed(2) + ' Y=' + c.y.toFixed(2))
-    + (c.r ? row('Dönüş', c.r + '°') : '');
+    + (c.r ? row('⟪Dönüş⟫', c.r + '°') : '');
   popup.classList.add('open');
   // görünürde değilse ortala
   const s = w2s(c.x, c.y), r = wrap.getBoundingClientRect();
@@ -6574,7 +6587,7 @@ function setMeasure(on) {
   measureOn = on;
   document.getElementById('b-meas').classList.toggle('active', on);
   if (!on) { mPts = []; mPrev = null; info.textContent = INFO_DEFAULT; }
-  else info.textContent = 'Ölçüm: iki noktaya tıkla (pad merkezine yapışır) · Esc iptal';
+  else info.textContent = '⟪Ölçüm: iki noktaya tıkla (pad merkezine yapışır) · Esc iptal⟫';
   draw();
 }
 document.getElementById('b-in').onclick = () => zoomBy(1.35);
@@ -6601,7 +6614,7 @@ document.getElementById('b-flip').onclick = () => {
     else if (n.startsWith('BOTTOM')) vis[i] = !showingTop;
   });
   renderLayers(); draw();
-  info.textContent = showingTop ? 'Üst katmanlar' : 'Alt katmanlar';
+  info.textContent = showingTop ? '⟪Üst katmanlar⟫' : '⟪Alt katmanlar⟫';
 };
 document.getElementById('b-all').onclick = () => {
   vis = vis.map(() => true); renderLayers(); draw();
@@ -6725,7 +6738,7 @@ document.getElementById('bom-list').addEventListener('click', e => {
     x1 = Math.max(x1, c.b[2]); y1 = Math.max(y1, c.b[3]);
   });
   if (x0 < x1) centerOn((x0 + x1) / 2, (y0 + y1) / 2);
-  info.textContent = g.desigs.length + ' komponent vurgulandi (' + (g.val || '-') + ')';
+  info.textContent = g.desigs.length + ' ⟪komponent vurgulandi⟫ (' + (g.val || '-') + ')';
   draw();
 });
 // Board'da komponent secilince BOM satirini da isaretle
@@ -6742,7 +6755,7 @@ document.querySelectorAll('#bom-chips .chip').forEach(ch => ch.onclick = () => {
   bomRender();
 });
 document.getElementById('bom-rst').onclick = () => {
-  if (!confirm('Tum montaj isaretleri silinsin mi?')) return;
+  if (!confirm('⟪Tum montaj isaretleri silinsin mi?⟫')) return;
   bomState = {}; bomSave(); bomRender();
 };
 // Disa / ice aktarma: localStorage tarayiciya bagli oldugundan montaj durumunu
@@ -6757,7 +6770,7 @@ document.getElementById('bom-exp').onclick = () => {
   const a = document.createElement('a');
   a.href = URL.createObjectURL(blob); a.download = PROJECT + '_montaj.json'; a.click();
   setTimeout(() => URL.revokeObjectURL(a.href), 5000);
-  info.textContent = items.length + ' grup dosyaya aktarildi';
+  info.textContent = items.length + ' ⟪grup dosyaya aktarildi⟫';
 };
 document.getElementById('bom-imp').onclick = () => document.getElementById('bom-file').click();
 document.getElementById('bom-file').onchange = e => {
@@ -6767,12 +6780,12 @@ document.getElementById('bom-file').onchange = e => {
   rd.onload = () => {
     let d = null;
     try { d = JSON.parse(rd.result); } catch (err) {}
-    if (!d || !Array.isArray(d.items)) { info.textContent = 'Gecersiz dosya'; return; }
+    if (!d || !Array.isArray(d.items)) { info.textContent = '⟪Gecersiz dosya⟫'; return; }
     const known = new Set(BOM_GROUPS.map(g => g.key));
     let ok = 0, miss = 0;
     d.items.forEach(it => { if (known.has(it.key)) { bomState[it.key] = 1; ok++; } else miss++; });
     bomSave(); bomRender();
-    info.textContent = ok + ' grup yuklendi' + (miss ? ' - ' + miss + ' grup bu boardda yok' : '');
+    info.textContent = ok + ' ⟪grup yuklendi⟫' + (miss ? ' - ' + miss + ' ⟪grup bu boardda yok⟫' : '');
   };
   rd.readAsText(f);
   e.target.value = '';
@@ -6809,7 +6822,7 @@ window.addEventListener('message', ev => {
           if (i >= 0 && idx.indexOf(i) < 0) idx.push(i);
         });
         if (idx.length) { selectNets(idx, false); netScroll(idx[0]); }
-        else info.textContent = 'Net PCB\'de bulunamadı: ' + d.net;
+        else info.textContent = 'Net PCB\'⟪de bulunamadı:⟫ ' + d.net;
       }
     } finally { xpApplying = false; }
     return;
@@ -6840,13 +6853,13 @@ async function gunzipB64(b64) {
   let txt = null;
   try { txt = await gunzipB64(GEO_GZ); } catch (e) { txt = null; }
   if (txt === null) {
-    info.textContent = 'Bu tarayıcı sıkıştırılmış geometriyi açamıyor (DecompressionStream gerekli).';
+    info.textContent = '⟪Bu tarayıcı sıkıştırılmış geometriyi açamıyor (DecompressionStream gerekli).⟫';
     return;
   }
   G = JSON.parse(txt);
   prep();
   document.getElementById('dims').textContent =
-    G.w.toFixed(1) + '×' + G.h.toFixed(1) + 'mm · ' + G.comps.length + ' komponent · '
+    G.w.toFixed(1) + '×' + G.h.toFixed(1) + 'mm · ' + G.comps.length + ' ⟪komponent⟫ · '
     + G.nets.filter(Boolean).length + ' net';
   bomBuild();
   renderLayers(); renderNets(); renderComps(); bomRender();
@@ -6872,7 +6885,7 @@ def build_pcb_canvas_html(geo, comp_info, timestamp, project_name, pcb_name=""):
     import gzip as _gzip, base64 as _b64
     gz = _b64.b64encode(_gzip.compress(
         json.dumps(geo, separators=(",", ":")).encode("utf-8"), 6)).decode()
-    return (_PCB_CANVAS_TPL
+    return _tr_html(_PCB_CANVAS_TPL
             .replace("__MOBILE_META__", _MOBILE_META)
             .replace("__GESTURE__", _GESTURE_JS)
             .replace("__GEO_GZ__", gz)
@@ -6901,21 +6914,21 @@ def generate_pcb_canvas_viewer(project_path, output_path, log=print, progress=No
     from altium_monkey.altium_pcbdoc import AltiumPcbDoc
     prog = progress or (lambda p, l: None)
     patch_altium_text_decoding()
-    prog(5, "PCB okunuyor")
+    prog(5, tr('PCB okunuyor'))
     pcb_path, pcb = _pick_pcbdoc(project_path, log)
     if pcb is None:
-        log("\n! PCB dosyası bulunamadı veya parse edilemedi.")
+        log(tr('\n! PCB dosyası bulunamadı veya parse edilemedi.'))
         return False
-    log(f"\nPCB (geometri): {pcb_path.name}")
-    prog(35, "Geometri çıkarılıyor")
+    log(tr('\nPCB (geometri): {a0}').format(a0=pcb_path.name))
+    prog(35, tr('Geometri çıkarılıyor'))
     geo = extract_pcb_geometry(pcb, log)
     if not geo.get("available"):
-        log("! Geometri çıkarılamadı.")
+        log(tr('! Geometri çıkarılamadı.'))
         return False
 
     comp_info = {}
     try:
-        prog(65, "Şematik komponent bilgisi")
+        prog(65, tr('Şematik komponent bilgisi'))
         data = _collect_data(project_path, lambda m: None, with_pcb=False)
         for c in data.get("components", []):
             comp_info[c["designator"]] = {
@@ -6924,17 +6937,17 @@ def generate_pcb_canvas_viewer(project_path, output_path, log=print, progress=No
                 "sheet": c.get("sheet_name", ""),
             }
     except Exception as e:
-        log(f"  · Şematik bilgisi alınamadı (yine de devam): {e}")
+        log(tr('  · Şematik bilgisi alınamadı (yine de devam): {a0}').format(a0=e))
 
-    prog(85, "HTML oluşturuluyor")
+    prog(85, tr('HTML oluşturuluyor'))
     ts = datetime.datetime.now().strftime("%H:%M:%S")
     html = build_pcb_canvas_html(geo, comp_info, ts, Path(project_path).stem, pcb_path.name)
     out = Path(output_path)
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(html, encoding="utf-8")
-    log(f"\n✓ PCB (geometri) görüntüleyici üretildi: {out}")
-    log(f"  build: {ts}  ({out.stat().st_size / 1024 / 1024:.2f} MB)")
-    prog(100, "Tamamlandı")
+    log(tr('\n✓ PCB (geometri) görüntüleyici üretildi: {a0}').format(a0=out))
+    log(tr('  build: {a0}  ({a1:.2f} MB)').format(a0=ts, a1=out.stat().st_size / 1024 / 1024))
+    prog(100, tr('Tamamlandı'))
     return True
 
 @_with_library_logs
@@ -7116,8 +7129,8 @@ def generate_json(
         json.dumps(json_obj, indent=2, ensure_ascii=False),
         encoding="utf-8",
     )
-    log(f"\n✓ JSON üretildi: {out}")
-    log(f"  Boyut: {out.stat().st_size / 1024:.1f} KB")
+    log(tr('\n✓ JSON üretildi: {a0}').format(a0=out))
+    log(tr('  Boyut: {a0:.1f} KB').format(a0=out.stat().st_size / 1024))
 
 
 @_with_library_logs
@@ -7135,7 +7148,7 @@ def generate_bom_csv(project_path, output_path, variant=None,
     extras = collect_design_extras(project_path, log)
     bom = extras.get("bom") or []
     if not bom:
-        log("! BOM verisi yok — CSV üretilemedi.")
+        log(tr('! BOM verisi yok — CSV üretilemedi.'))
         return False
 
     # Tüm parametre anahtarlarını topla (sütun başlıkları için)
@@ -7158,8 +7171,8 @@ def generate_bom_csv(project_path, output_path, variant=None,
             line += [params.get(k, "") for k in param_cols]
             writer.writerow(line)
 
-    log(f"\n✓ BOM CSV üretildi: {out}")
-    log(f"  {len(bom)} komponent · {len(param_cols)} parametre sütunu")
+    log(tr('\n✓ BOM CSV üretildi: {a0}').format(a0=out))
+    log(tr('  {a0} komponent · {a1} parametre sütunu').format(a0=len(bom), a1=len(param_cols)))
     return True
 
 
@@ -7179,7 +7192,7 @@ def generate_pnp_csv(project_path, output_path, variant=None, units="mm",
     extras = collect_design_extras(project_path, log)
     pnp = extras.get("pnp") or []
     if not pnp:
-        log("! Pick&Place verisi yok (PCB dosyası gerekli) — CSV üretilemedi.")
+        log(tr('! Pick&Place verisi yok (PCB dosyası gerekli) — CSV üretilemedi.'))
         return False
 
     cols = ["designator", "comment", "layer", "footprint",
@@ -7193,8 +7206,8 @@ def generate_pnp_csv(project_path, output_path, variant=None, units="mm",
         for e in pnp:
             writer.writerow([e.get(c, "") for c in cols])
 
-    log(f"\n✓ Pick&Place CSV üretildi: {out}")
-    log(f"  {len(pnp)} yerleşim ({units})")
+    log(tr('\n✓ Pick&Place CSV üretildi: {a0}').format(a0=out))
+    log(tr('  {a0} yerleşim ({a1})').format(a0=len(pnp), a1=units))
     return True
 
 
@@ -7457,17 +7470,17 @@ def generate_ic_map_xlsx(project_path, output_path, min_pins=4,
         from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
         from openpyxl.utils import get_column_letter
     except Exception as e:
-        log(f"! openpyxl yok, Excel üretilemedi: {e}  (pip install openpyxl)")
+        log(tr('! openpyxl yok, Excel üretilemedi: {a0}  (pip install openpyxl)').format(a0=e))
         return False
 
     data = _collect_data(project_path, log)
     netlist = data.get("netlist") or {}
     nets = netlist.get("nets") or []
     if not nets:
-        log("! Netlist yok — IC haritası üretilemedi.")
+        log(tr('! Netlist yok — IC haritası üretilemedi.'))
         return False
 
-    log("\nIC Bağlantı Haritası hazırlanıyor...")
+    log(tr('\nIC Bağlantı Haritası hazırlanıyor...'))
 
     def strip_ob(s):
         """@brief strip_ob()
@@ -7496,7 +7509,7 @@ def generate_ic_map_xlsx(project_path, output_path, min_pins=4,
                 comp_pins.setdefault(dd, {})[pp] = {"net": nm, "pin_name": pnn}
 
     if not comp_pins:
-        log("! Pin bağlantısı bulunamadı.")
+        log(tr('! Pin bağlantısı bulunamadı.'))
         return False
 
     # === Ana işlemci(ler) belirle ===
@@ -7516,18 +7529,16 @@ def generate_ic_map_xlsx(project_path, output_path, min_pins=4,
         if real:
             valid_main.append(real)
         else:
-            log(f"  ! Uyarı: '{d}' ana işlemci olarak girildi ama projede bulunamadı, atlanıyor.")
+            log(tr("  ! Uyarı: '{a0}' ana işlemci olarak girildi ama projede bulunamadı, atlanıyor.").format(a0=d))
 
     if not valid_main:
         # Otomatik tespit: en çok pinli U* (yoksa en çok pinli herhangi)
         by_count = sorted(comp_pins.items(), key=lambda kv: -len(kv[1]))
         auto = next((d for d, _ in by_count if d.upper().startswith("U")), by_count[0][0])
         valid_main = [auto]
-        log(f"  · Ana işlemci otomatik seçildi: {auto} "
-            f"({len(comp_pins[auto])} pin). Belirli bir IC istiyorsan "
-            f"main_designators parametresiyle ver.")
+        log(tr('  · Ana işlemci otomatik seçildi: {a0} ({a1} pin). Belirli bir IC istiyorsan main_designators parametresiyle ver.').format(a0=auto, a1=len(comp_pins[auto])))
     else:
-        log(f"  · Ana işlemci(ler): {', '.join(valid_main)}")
+        log(tr('  · Ana işlemci(ler): {a0}').format(a0=', '.join(valid_main)))
 
     main_set = set(valid_main)
 
@@ -7625,8 +7636,7 @@ def generate_ic_map_xlsx(project_path, output_path, min_pins=4,
         n_excl = sum(1 for d in comp_pins
                      if len(comp_pins[d]) >= min_pins and d not in main_set and
                      desig_prefix(d) in excl)
-        log(f"  · Hariç tutulan önekler: {', '.join(sorted(excl))} "
-            f"({n_excl} komponent atlandı)")
+        log(tr('  · Hariç tutulan önekler: {a0} ({a1} komponent atlandı)').format(a0=', '.join(sorted(excl)), a1=n_excl))
 
     def desig_key(item):
         """@brief desig_key()
@@ -7822,8 +7832,8 @@ def generate_ic_map_xlsx(project_path, output_path, min_pins=4,
     out = Path(output_path).with_suffix(".xlsx")
     out.parent.mkdir(parents=True, exist_ok=True)
     wb.save(out)
-    log(f"\n✓ IC Bağlantı Haritası üretildi: {out}")
-    log(f"  {written_ics} IC · {no - 1} sinyal satırı · ana işlemci: {', '.join(valid_main)}")
+    log(tr('\n✓ IC Bağlantı Haritası üretildi: {a0}').format(a0=out))
+    log(tr('  {a0} IC · {a1} sinyal satırı · ana işlemci: {a2}').format(a0=written_ics, a1=no - 1, a2=', '.join(valid_main)))
     return True
 
 
@@ -7855,12 +7865,11 @@ def generate_mcu_pinout_xlsx(project_path, output_path, mcu_designator,
         from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
         from openpyxl.utils import get_column_letter
     except Exception as e:
-        log(f"! openpyxl yok, Excel üretilemedi: {e}  (pip install openpyxl)")
+        log(tr('! openpyxl yok, Excel üretilemedi: {a0}  (pip install openpyxl)').format(a0=e))
         return False
 
     if not mcu_designator or not str(mcu_designator).strip():
-        log("! MCU designator boş — hangi entegrenin pin listesi çıkarılacak "
-            "belirtilmeli (örn 'U2').")
+        log(tr("! MCU designator boş — hangi entegrenin pin listesi çıkarılacak belirtilmeli (örn 'U2')."))
         return False
     mcu_designator = str(mcu_designator).strip()
 
@@ -7868,7 +7877,7 @@ def generate_mcu_pinout_xlsx(project_path, output_path, mcu_designator,
     netlist = data.get("netlist") or {}
     nets = netlist.get("nets") or []
     if not nets:
-        log("! Netlist yok — MCU pin listesi üretilemedi.")
+        log(tr('! Netlist yok — MCU pin listesi üretilemedi.'))
         return False
 
     def strip_ob(s):
@@ -7900,8 +7909,7 @@ def generate_mcu_pinout_xlsx(project_path, output_path, mcu_designator,
     # MCU designator'ını doğrula (case-insensitive)
     all_desigs = {d.upper() for terms in net_terminals.values() for d, _, _ in terms}
     if mcu_designator.upper() not in all_desigs:
-        log(f"! '{mcu_designator}' projede bulunamadı. "
-            f"Mevcut entegrelerden birini gir.")
+        log(tr("! '{a0}' projede bulunamadı. Mevcut entegrelerden birini gir.").format(a0=mcu_designator))
         return False
     # Gerçek designator yazımını bul
     real = next((d for terms in net_terminals.values()
@@ -7917,7 +7925,7 @@ def generate_mcu_pinout_xlsx(project_path, output_path, mcu_designator,
                 mcu_pins[p] = {"net": nm, "pin_name": pn}
 
     if not mcu_pins:
-        log(f"! {mcu_designator} için pin bulunamadı.")
+        log(tr('! {a0} için pin bulunamadı.').format(a0=mcu_designator))
         return False
 
     # Bağlı olmayan (NC) pinleri şematik pin kataloğundan ekle (net='' işareti,
@@ -7931,9 +7939,9 @@ def generate_mcu_pinout_xlsx(project_path, output_path, mcu_designator,
             mcu_pins[p] = {"net": "", "pin_name": strip_ob(pn)}
             nc_added += 1
     if nc_added:
-        log(f"  · {nc_added} bağlı olmayan (NC) pin eklendi.")
+        log(tr('  · {a0} bağlı olmayan (NC) pin eklendi.').format(a0=nc_added))
 
-    log(f"\nMCU pin listesi hazırlanıyor: {mcu_designator} ({len(mcu_pins)} pin)")
+    log(tr('\nMCU pin listesi hazırlanıyor: {a0} ({a1} pin)').format(a0=mcu_designator, a1=len(mcu_pins)))
 
     # meta (MCU değeri başlıkta göstermek için)
     meta = {c["designator"]: c for c in data.get("components", [])}
@@ -8129,8 +8137,8 @@ def generate_mcu_pinout_xlsx(project_path, output_path, mcu_designator,
     out = Path(output_path).with_suffix(".xlsx")
     out.parent.mkdir(parents=True, exist_ok=True)
     wb.save(out)
-    log(f"\n✓ MCU pin listesi üretildi: {out}")
-    log(f"  {mcu_designator} — {written} pin yazıldı")
+    log(tr('\n✓ MCU pin listesi üretildi: {a0}').format(a0=out))
+    log(tr('  {a0} — {a1} pin yazıldı').format(a0=mcu_designator, a1=written))
     return True
 
 
@@ -8184,7 +8192,7 @@ def build_html(sheets, net_list, components, timestamp,
             if box and pl.get("sheet_id"):
                 sch_boxes.setdefault(pl["sheet_id"], {})[c["designator"]] = box
 
-    return f"""<!DOCTYPE html>
+    return _tr_html(f"""<!DOCTYPE html>
 <html lang="tr"><head>
 <meta charset="utf-8">
 {_MOBILE_META}
@@ -8534,30 +8542,30 @@ def build_html(sheets, net_list, components, timestamp,
 </style>
 </head><body>
 <aside id="sidebar">
-  <button id="sidebar-toggle" title="Paneli gizle ( B )">◂</button>
+  <button id="sidebar-toggle" title="⟪Paneli gizle ( B )⟫">◂</button>
   <div class="stat">{len(sheets)} sheets · {len(net_list)} nets · {len(components)} comps</div>
   <div class="tabs">
     <button class="tab active" data-tab="nets">Nets</button>
     <button class="tab" data-tab="components">Comps</button>
   </div>
   <div id="type-chips">
-    <button class="chip active" data-type="">Tümü</button>
-    <button class="chip chip-power" data-type="power">Güç</button>
+    <button class="chip active" data-type="">⟪Tümü⟫</button>
+    <button class="chip chip-power" data-type="power">⟪Güç⟫</button>
     <button class="chip chip-ground" data-type="ground">GND</button>
-    <button class="chip" data-type="signal">Sinyal</button>
+    <button class="chip" data-type="signal">⟪Sinyal⟫</button>
   </div>
   <div id="search-wrap" class="collapsed">
-    <button id="search-toggle" title="Aramayı aç/kapat ( / )"><span id="search-caret">▸</span> Ara</button>
-    <input id="search" placeholder="ara... ( / )">
+    <button id="search-toggle" title="⟪Aramayı aç/kapat ( / )⟫"><span id="search-caret">▸</span> ⟪Ara⟫</button>
+    <input id="search" placeholder="⟪ara... ( / )⟫">
   </div>
   <div id="nets-list" class="list-container"></div>
   <div id="comps-list" class="list-container hidden"></div>
   <div id="comp-popup">
-    <div id="popup-resize" title="Sürükle: yeniden boyutlandır"></div>
+    <div id="popup-resize" title="⟪Sürükle: yeniden boyutlandır⟫"></div>
     <div class="popup-header">
-      <button class="popup-collapse" id="popup-collapse" title="Küçült / Büyüt">▾</button>
+      <button class="popup-collapse" id="popup-collapse" title="⟪Küçült / Büyüt⟫">▾</button>
       <span><span class="popup-title" id="popup-title"></span><span class="popup-sheet" id="popup-sheet"></span></span>
-      <button class="popup-close" id="popup-close" title="Kapat">×</button>
+      <button class="popup-close" id="popup-close" title="⟪Kapat⟫">×</button>
     </div>
     <div class="popup-body" id="popup-body"></div>
   </div>
@@ -8569,34 +8577,34 @@ def build_html(sheets, net_list, components, timestamp,
   </div>
   <div id="toolbar">
     <div id="current-net"></div>
-    <select id="sheet-jump" class="tool-btn" title="Sayfaya git"></select>
-    <button class="tool-btn" id="zoom-in" title="Yaklaş ( + )">+</button>
-    <button class="tool-btn" id="zoom-out" title="Uzaklaş ( − )">−</button>
-    <button class="tool-btn" id="fit-all" title="Tüm sayfaları sığdır">Tümü</button>
+    <select id="sheet-jump" class="tool-btn" title="⟪Sayfaya git⟫"></select>
+    <button class="tool-btn" id="zoom-in" title="⟪Yaklaş ( + )⟫">+</button>
+    <button class="tool-btn" id="zoom-out" title="⟪Uzaklaş ( − )⟫">−</button>
+    <button class="tool-btn" id="fit-all" title="⟪Tüm sayfaları sığdır⟫">⟪Tümü⟫</button>
     <button class="tool-btn active" id="lod-toggle"
-            title="LOD: uzak zoom'da ve gezinirken sayfalar bitmap çizilir (Chromium'da akıcılık). Kapatınca her zaman canlı SVG.">LOD</button>
+            title="⟪LOD: uzak zoom'da ve gezinirken sayfalar bitmap çizilir (Chromium'da akıcılık). Kapatınca her zaman canlı SVG.⟫">LOD</button>
     <div class="toolbar-sep"></div>
-    <label class="color-input" title="Sayfalar arası yay rengi">
+    <label class="color-input" title="⟪Sayfalar arası yay rengi⟫">
       <input type="color" id="inter-color-picker" value="{inter_color}">
     </label>
-    <label class="color-input" title="Sayfa içi eğri rengi">
+    <label class="color-input" title="⟪Sayfa içi eğri rengi⟫">
       <input type="color" id="intra-color-picker" value="{intra_color}">
     </label>
     <div class="toolbar-sep"></div>
     <button class="tool-btn" id="anno-note"
-            title="Not ekle: butona bas, şemada istediğin yere tıkla ve DOĞRUDAN yaz (dışına tıkla = bitir, Enter = yeni satır). Sonradan: çift tık düzenle · sürükle taşı · seç + Del sil · A−/A+ yazı boyutu">Not</button>
+            title="⟪Not ekle: butona bas, şemada istediğin yere tıkla ve DOĞRUDAN yaz (dışına tıkla = bitir, Enter = yeni satır). Sonradan: çift tık düzenle · sürükle taşı · seç + Del sil · A−/A+ yazı boyutu⟫">⟪Not⟫</button>
     <button class="tool-btn" id="anno-box"
-            title="Kutu içine al: butona bas, sürükleyerek çerçeve çiz (Esc iptal). Sonradan: kenarına tıkla seç → sürükle taşı · köşe tutamaçlarıyla boyutlandır · Del sil · −/+ kenar kalınlığı">Kutu</button>
+            title="⟪Kutu içine al: butona bas, sürükleyerek çerçeve çiz (Esc iptal). Sonradan: kenarına tıkla seç → sürükle taşı · köşe tutamaçlarıyla boyutlandır · Del sil · −/+ kenar kalınlığı⟫">⟪Kutu⟫</button>
     <button class="tool-btn" id="anno-save"
-            title="Not ve kutuları HTML dosyasının içine göm ve kaydet. Chromium'da AÇIK DOSYANIN ÜSTÜNE yazabilir (ilk kayıtta dosyayı seç; aynı oturumda sonrakiler sessiz). Firefox'ta kopya indirir. Paylaşınca/başka bilgisayarda da görünür">Kaydet</button>
+            title="⟪Not ve kutuları HTML dosyasının içine göm ve kaydet. Chromium'da AÇIK DOSYANIN ÜSTÜNE yazabilir (ilk kayıtta dosyayı seç; aynı oturumda sonrakiler sessiz). Firefox'ta kopya indirir. Paylaşınca/başka bilgisayarda da görünür⟫">⟪Kaydet⟫</button>
     <div class="toolbar-sep"></div>
-    <button class="tool-btn" id="shortcut-btn" title="Kısayollar (?)">?</button>
+    <button class="tool-btn" id="shortcut-btn" title="⟪Kısayollar (?)⟫">?</button>
     <button class="tool-btn" id="export-png">PNG</button>
     <button class="tool-btn" id="reset-view">Reset</button>
     <button class="tool-btn" id="clear-sel">Clear</button>
   </div>
   <div id="zoom-info">Zoom <span id="zoom-val">0.30x</span></div>
-  <div id="shortcuts">Esc clear · / search · 0 reset · F fit · <kbd style="background:#1a1a1a;padding:1px 4px;border:1px solid #555;border-radius:2px;color:#aaa">?</kbd> tüm kısayollar</div>
+  <div id="shortcuts">Esc clear · / search · 0 reset · F fit · <kbd style="background:#1a1a1a;padding:1px 4px;border:1px solid #555;border-radius:2px;color:#aaa">?</kbd> ⟪tüm kısayollar⟫</div>
   <div id="brand">altium_monkey</div>
   <div id="detail-panel"><div id="detail-content"></div></div>
 </div>
@@ -8604,45 +8612,45 @@ def build_html(sheets, net_list, components, timestamp,
 
 <div id="shortcut-modal">
   <div class="modal-content">
-    <h3>Klavye</h3>
+    <h3>⟪Klavye⟫</h3>
     <table>
-      <tr><td><kbd>Esc</kbd></td><td>Seçimi temizle</td></tr>
-      <tr><td><kbd>/</kbd></td><td>Arama kutusuna git</td></tr>
-      <tr><td><kbd>Enter</kbd></td><td>Aramada ilk sonucu seç</td></tr>
-      <tr><td><kbd>B</kbd></td><td>Sol paneli gizle / göster</td></tr>
-      <tr><td><kbd>0</kbd></td><td>Görünümü sıfırla</td></tr>
-      <tr><td><kbd>F</kbd></td><td>Son sayfaya fit zoom</td></tr>
+      <tr><td><kbd>Esc</kbd></td><td>⟪Seçimi temizle⟫</td></tr>
+      <tr><td><kbd>/</kbd></td><td>⟪Arama kutusuna git⟫</td></tr>
+      <tr><td><kbd>Enter</kbd></td><td>⟪Aramada ilk sonucu seç⟫</td></tr>
+      <tr><td><kbd>B</kbd></td><td>⟪Sol paneli gizle / göster⟫</td></tr>
+      <tr><td><kbd>0</kbd></td><td>⟪Görünümü sıfırla⟫</td></tr>
+      <tr><td><kbd>F</kbd></td><td>⟪Son sayfaya fit zoom⟫</td></tr>
       <tr><td><kbd>+</kbd> / <kbd>-</kbd></td><td>Zoom in / out</td></tr>
-      <tr><td><kbd>?</kbd></td><td>Bu pencereyi aç / kapat</td></tr>
+      <tr><td><kbd>?</kbd></td><td>⟪Bu pencereyi aç / kapat⟫</td></tr>
     </table>
-    <h3>Fare</h3>
+    <h3>⟪Fare⟫</h3>
     <table>
-      <tr><td>Drag</td><td>Kanvası kaydır (pan)</td></tr>
-      <tr><td>Wheel</td><td>Mouse altına zoom</td></tr>
-      <tr><td>Sayfa kartına çift tık</td><td>O sayfayı ekrana sığdır</td></tr>
-      <tr><td>Net adına tık (şema/sol panel)</td><td>Net seç, bağlantıları göster</td></tr>
-      <tr><td>Shift + tık</td><td>Çoklu net karşılaştırma (max 4)</td></tr>
-      <tr><td>Comps listesinde tık</td><td>Komponente zoom + pulse + detay popup</td></tr>
-      <tr><td>Designator'a tık (şema)</td><td>Komponent detay popup'ı aç</td></tr>
-      <tr><td>Block (.SchDoc) yazısına tık</td><td>O sayfaya navigate et</td></tr>
-      <tr><td>Toolbar: Not / Kutu</td><td>Tıklanan yere doğrudan yazı yaz / alanı kutu içine al (Esc iptal)</td></tr>
-      <tr><td>Not/kutuya tık + sürükle</td><td>Seç ve taşı · kutuda köşe tutamacı: boyutlandır</td></tr>
-      <tr><td>Seçiliyken Del · mini bar −/+</td><td>Sil · yazı boyutu / kenar kalınlığı</td></tr>
-      <tr><td>Nota çift tık</td><td>Yerinde düzenle (boş bırak = sil)</td></tr>
+      <tr><td>Drag</td><td>⟪Kanvası kaydır (pan)⟫</td></tr>
+      <tr><td>Wheel</td><td>⟪Mouse altına zoom⟫</td></tr>
+      <tr><td>⟪Sayfa kartına çift tık⟫</td><td>⟪O sayfayı ekrana sığdır⟫</td></tr>
+      <tr><td>⟪Net adına tık (şema/sol panel)⟫</td><td>⟪Net seç, bağlantıları göster⟫</td></tr>
+      <tr><td>⟪Shift + tık⟫</td><td>⟪Çoklu net karşılaştırma (max 4)⟫</td></tr>
+      <tr><td>⟪Comps listesinde tık⟫</td><td>⟪Komponente zoom + pulse + detay popup⟫</td></tr>
+      <tr><td>⟪Designator'a tık (şema)⟫</td><td>⟪Komponent detay popup'ı aç⟫</td></tr>
+      <tr><td>⟪Block (.SchDoc) yazısına tık⟫</td><td>⟪O sayfaya navigate et⟫</td></tr>
+      <tr><td>⟪Toolbar: Not / Kutu⟫</td><td>⟪Tıklanan yere doğrudan yazı yaz / alanı kutu içine al (Esc iptal)⟫</td></tr>
+      <tr><td>⟪Not/kutuya tık + sürükle⟫</td><td>⟪Seç ve taşı · kutuda köşe tutamacı: boyutlandır⟫</td></tr>
+      <tr><td>⟪Seçiliyken Del · mini bar −/+⟫</td><td>⟪Sil · yazı boyutu / kenar kalınlığı⟫</td></tr>
+      <tr><td>⟪Nota çift tık⟫</td><td>⟪Yerinde düzenle (boş bırak = sil)⟫</td></tr>
     </table>
-    <h3>Dokunmatik (telefon / tablet)</h3>
+    <h3>⟪Dokunmatik (telefon / tablet)⟫</h3>
     <table>
-      <tr><td>Tek parmak sürükle</td><td>Kanvası kaydır (pan)</td></tr>
-      <tr><td>İki parmak (pinch)</td><td>Parmakların ortasına zoom + aynı anda kaydır</td></tr>
-      <tr><td>Tek dokunuş</td><td>Fare tıklaması ile aynı (net / designator / block)</td></tr>
-      <tr><td>Çift dokunuş</td><td>Çift tıklama ile aynı (sayfayı sığdır, notu düzenle)</td></tr>
-      <tr><td>Not / kutu araçları</td><td>Parmakla da çalışır (yaz, çiz, taşı, boyutlandır)</td></tr>
+      <tr><td>⟪Tek parmak sürükle⟫</td><td>⟪Kanvası kaydır (pan)⟫</td></tr>
+      <tr><td>⟪İki parmak (pinch)⟫</td><td>⟪Parmakların ortasına zoom + aynı anda kaydır⟫</td></tr>
+      <tr><td>⟪Tek dokunuş⟫</td><td>⟪Fare tıklaması ile aynı (net / designator / block)⟫</td></tr>
+      <tr><td>⟪Çift dokunuş⟫</td><td>⟪Çift tıklama ile aynı (sayfayı sığdır, notu düzenle)⟫</td></tr>
+      <tr><td>⟪Not / kutu araçları⟫</td><td>⟪Parmakla da çalışır (yaz, çiz, taşı, boyutlandır)⟫</td></tr>
     </table>
-    <h3>Renk Pickers</h3>
+    <h3>⟪Renk Pickers⟫</h3>
     <table>
-      <tr><td>Toolbar'daki renkli kareler</td><td>Yay renklerini anlık değiştir</td></tr>
+      <tr><td>⟪Toolbar'daki renkli kareler⟫</td><td>⟪Yay renklerini anlık değiştir⟫</td></tr>
     </table>
-    <button class="modal-close" id="close-modal-btn">Kapat</button>
+    <button class="modal-close" id="close-modal-btn">⟪Kapat⟫</button>
   </div>
 </div>
 
@@ -9177,7 +9185,7 @@ document.querySelectorAll('.tab').forEach(b => {{
     document.getElementById('comps-list').classList.toggle('hidden', tab !== 'components');
     document.getElementById('type-chips').classList.toggle('hidden', tab !== 'nets');
     document.getElementById('search').placeholder =
-      tab === 'nets' ? 'net ara... ( / )' : 'komponent ara... ( / )';
+      tab === 'nets' ? '⟪net ara... ( / )⟫' : '⟪komponent ara... ( / )⟫';
     document.getElementById('search').value = '';
     renderActive('');
   }};
@@ -9204,7 +9212,7 @@ function renderNets(filter='') {{
   }});
   if (!matched.length) {{
     const m = document.createElement('div');
-    m.className = 'empty-msg'; m.textContent = 'eşleşen net yok';
+    m.className = 'empty-msg'; m.textContent = '⟪eşleşen net yok⟫';
     list.appendChild(m);
   }}
 }}
@@ -9233,13 +9241,13 @@ function renderComps(filter='') {{
   }});
   if (!matched.length) {{
     const m = document.createElement('div');
-    m.className = 'empty-msg'; m.textContent = 'eşleşen komponent yok';
+    m.className = 'empty-msg'; m.textContent = '⟪eşleşen komponent yok⟫';
     list.appendChild(m);
   }} else if (matched.length > LIST_CAP) {{
     const m = document.createElement('div');
     m.className = 'empty-msg';
-    m.textContent = '… ' + (matched.length - LIST_CAP) + ' komponent daha '
-                  + '(aramayla daralt)';
+    m.textContent = '… ' + (matched.length - LIST_CAP) + ' ⟪komponent daha⟫ '
+                  + '(⟪aramayla daralt⟫)';
     list.appendChild(m);
   }}
 }}
@@ -9256,7 +9264,7 @@ function renderPopupRow(k, v) {{
   return `<div class="popup-row">`
     + `<span class="popup-key">${{escHtml(k)}}</span>`
     + `<span class="popup-val" data-raw="${{escHtml(sv)}}">${{linkify(sv)}}</span>`
-    + `<button class="popup-copy" title="Kopyala">⎘</button>`
+    + `<button class="popup-copy" title="⟪Kopyala⟫">⎘</button>`
     + `</div>`;
 }}
 
@@ -9269,7 +9277,7 @@ function showCompPopup(comp) {{
   const places = comp.placements || [];
   if (places.length > 1) {{
     document.getElementById('popup-sheet').textContent =
-      ` · ${{places.length}} parça (multi-part)`;
+      ` · ${{places.length}} ⟪parça (multi-part)⟫`;
   }} else {{
     document.getElementById('popup-sheet').textContent = ' · ' + comp.sheet_name;
   }}
@@ -9284,7 +9292,7 @@ function showCompPopup(comp) {{
   // Multi-part: hangi sayfalarda göründüğü
   if (places.length > 1) {{
     const sheetNames = places.map(p => p.sheet_name).filter((v, i, a) => a.indexOf(v) === i);
-    rows.push(['Parçalar', sheetNames.join(', ')]);
+    rows.push(['⟪Parçalar⟫', sheetNames.join(', ')]);
   }}
 
   let html = '';
@@ -9300,17 +9308,17 @@ function showCompPopup(comp) {{
   // === PCB cross-probe ===
   if (PCB.available && PCB.components[comp.designator]) {{
     const pc = PCB.components[comp.designator];
-    html += '<div class="popup-section-title">PCB Konumu</div>';
+    html += '<div class="popup-section-title">⟪PCB Konumu⟫</div>';
     const ax = (pc.abs_x_mm !== undefined) ? pc.abs_x_mm : pc.x_mm;
     const ay = (pc.abs_y_mm !== undefined) ? pc.abs_y_mm : pc.y_mm;
     html += renderPopupRow('Konum (mm)', `X=${{ax}}  Y=${{ay}}`);
-    html += renderPopupRow('Katman', pc.layer);
-    if (pc.rotation) html += renderPopupRow('Dönüş', pc.rotation + '°');
+    html += renderPopupRow('⟪Katman⟫', pc.layer);
+    if (pc.rotation) html += renderPopupRow('⟪Dönüş⟫', pc.rotation + '°');
     if (pc.footprint) html += renderPopupRow('Footprint (PCB)', pc.footprint);
     html += '<div id="pcb-map-container"></div>';
   }} else if (PCB.available) {{
-    html += '<div class="popup-section-title">PCB Konumu</div>';
-    html += '<div style="color:#888;padding:6px;font-size:11px">Bu komponent PCB\\'de bulunamadı.</div>';
+    html += '<div class="popup-section-title">⟪PCB Konumu⟫</div>';
+    html += '<div style="color:#888;padding:6px;font-size:11px">⟪Bu komponent PCB\\'de bulunamadı.⟫</div>';
   }}
 
   if (!html) html = '<div style="color:#666;padding:10px">Ek bilgi yok</div>';
@@ -9372,8 +9380,8 @@ function drawPcbMap(designator) {{
                 stroke="#fff" stroke-width="0.35"/>
       </svg>
       <div style="font-size:10px;color:#888;margin-top:3px">
-        ${{onTop ? '● TOP katmanı' : '● BOTTOM katmanı'}} ·
-        ${{Object.keys(PCB.components).length}} komponent ·
+        ${{onTop ? '⟪● TOP katmanı⟫' : '⟪● BOTTOM katmanı⟫'}} ·
+        ${{Object.keys(PCB.components).length}} ⟪komponent⟫ ·
         board ${{W.toFixed(0)}}×${{H.toFixed(0)}}mm
       </div>
     </div>`;
@@ -9417,7 +9425,7 @@ document.getElementById('popup-body').addEventListener('click', e => {{
     btn.classList.add('copied');
     setTimeout(() => {{ btn.textContent = '⎘'; btn.classList.remove('copied'); }}, 1200);
   }}).catch(err => {{
-    console.warn('Kopyalama hatası:', err);
+    console.warn('⟪Kopyalama hatası:⟫', err);
     btn.textContent = '✗';
     setTimeout(() => {{ btn.textContent = '⎘'; }}, 1200);
   }});
@@ -9436,7 +9444,7 @@ const sidebarToggle = document.getElementById('sidebar-toggle');
 function setSidebarOpen(open) {{
   sidebarEl.classList.toggle('collapsed', !open);
   sidebarToggle.textContent = open ? '◂' : '▸';
-  sidebarToggle.title = (open ? 'Paneli gizle' : 'Paneli göster') + ' ( B )';
+  sidebarToggle.title = (open ? 'Paneli gizle' : '⟪Paneli göster⟫') + ' ( B )';
   if (typeof lsSet === 'function') lsSet({{ sidebar: open }});
 }}
 sidebarToggle.addEventListener('click', () =>
@@ -9479,7 +9487,7 @@ document.querySelectorAll('#type-chips .chip').forEach(ch => {{
 
 // === Toolbar: sayfa seçici + zoom kontrolleri ===
 const sheetJump = document.getElementById('sheet-jump');
-sheetJump.innerHTML = '<option value="">Sayfa…</option>' +
+sheetJump.innerHTML = '<option value="">⟪Sayfa…⟫</option>' +
   Object.entries(sheetPos).map(([id, sp]) =>
     `<option value="${{id}}">${{escHtml(sp.name)}}</option>`).join('');
 sheetJump.addEventListener('change', () => {{
@@ -9510,19 +9518,19 @@ document.addEventListener('mouseover', e => {{
     if (c) html = `<span class="tt-title">${{escHtml(c.designator)}}</span>`
       + (c.value ? ` · ${{escHtml(c.value)}}` : '')
       + (c.description ? `<br>${{escHtml(c.description)}}` : '')
-      + `<br><span class="tt-hint">tıkla: detay + cross-probe</span>`;
+      + `<br><span class="tt-hint">⟪tıkla: detay + cross-probe⟫</span>`;
   }} else if (t.classList.contains('clickable-net')) {{
     const n = t.getAttribute('data-net');
     const net = nets.find(x => x.name === n);
     if (net) {{
       const ty = classifyNet(n);
       html = `<span class="tt-title">${{escHtml(n)}}</span> · ${{net.count}} nokta · `
-        + (ty === 'power' ? 'güç' : ty === 'ground' ? 'toprak' : 'sinyal')
-        + `<br><span class="tt-hint">tıkla: bağlantı yayları · Shift+tık: karşılaştır</span>`;
+        + (ty === 'power' ? '⟪güç⟫' : ty === 'ground' ? '⟪toprak⟫' : '⟪sinyal⟫')
+        + `<br><span class="tt-hint">⟪tıkla: bağlantı yayları · Shift+tık: karşılaştır⟫</span>`;
     }}
   }} else if (t.classList.contains('block-link')) {{
     html = `<span class="tt-title">${{escHtml((t.textContent || '').trim())}}</span>`
-      + `<br><span class="tt-hint">tıkla: sayfaya git</span>`;
+      + `<br><span class="tt-hint">⟪tıkla: sayfaya git⟫</span>`;
   }}
   if (html) {{ svgTip.innerHTML = html; svgTip.style.display = 'block'; moveTip(e); }}
 }});
@@ -9923,7 +9931,7 @@ shortcutModal.addEventListener('click', e => {{
   if (e.target === shortcutModal) toggleShortcutModal();
 }});
 document.getElementById('export-png').onclick = async () => {{
-  if (typeof html2canvas === 'undefined') {{ alert('html2canvas yüklenmedi'); return; }}
+  if (typeof html2canvas === 'undefined') {{ alert('⟪html2canvas yüklenmedi⟫'); return; }}
   const btn = document.getElementById('export-png');
   const orig = btn.textContent;
   btn.textContent = '...'; btn.disabled = true;
@@ -9936,7 +9944,7 @@ document.getElementById('export-png').onclick = async () => {{
     a.download = `schematic_viz_${{BUILD_STAMP.replace(/:/g,'')}}.png`;
     a.click();
   }} catch (err) {{
-    alert('Export hatası: ' + err.message);
+    alert('⟪Export hatası:⟫ ' + err.message);
   }} finally {{
     btn.textContent = orig; btn.disabled = false;
   }}
@@ -9972,10 +9980,10 @@ const annoBar = document.createElement('div');
 annoBar.id = 'anno-bar';
 annoBar.style.display = 'none';
 annoBar.innerHTML =
-    '<button data-act="minus" title="Yazı boyutu / kenar kalınlığı azalt">−</button>'
-  + '<button data-act="plus" title="Yazı boyutu / kenar kalınlığı artır">+</button>'
-  + '<input type="color" title="Renk (not yazısı / kutu kenarı)">'
-  + '<button data-act="del" title="Sil (Del)">×</button>';
+    '<button data-act="minus" title="⟪Yazı boyutu / kenar kalınlığı azalt⟫">−</button>'
+  + '<button data-act="plus" title="⟪Yazı boyutu / kenar kalınlığı artır⟫">+</button>'
+  + '<input type="color" title="⟪Renk (not yazısı / kutu kenarı)⟫">'
+  + '<button data-act="del" title="⟪Sil (Del)⟫">×</button>';
 viewport.appendChild(annoBar);
 const annoColorInp = annoBar.querySelector('input[type=color]');
 
@@ -10025,8 +10033,8 @@ function annoRender() {{
     g.setAttribute('data-id', String(a.id));
     const tip = document.createElementNS(ANNO_NS, 'title');
     tip.textContent = a.k === 'note'
-      ? 'Sürükle: taşı · Çift tık: düzenle · Seç + Del: sil'
-      : 'Kenardan sürükle: taşı · Köşe tutamacı: boyutlandır · Del: sil';
+      ? '⟪Sürükle: taşı · Çift tık: düzenle · Seç + Del: sil⟫'
+      : '⟪Kenardan sürükle: taşı · Köşe tutamacı: boyutlandır · Del: sil⟫';
     g.appendChild(tip);
     if (a.k === 'box') {{
       const r = annoRectEl(a.x, a.y, a.w, a.h);
@@ -10410,12 +10418,12 @@ document.getElementById('anno-save').onclick = async () => {{
   btn.textContent = '...'; btn.disabled = true;
   const done = okTxt => {{
     btn.disabled = false;
-    btn.textContent = okTxt || 'Kaydet';
-    if (okTxt) setTimeout(() => {{ btn.textContent = 'Kaydet'; }}, 1500);
+    btn.textContent = okTxt || '⟪Kaydet⟫';
+    if (okTxt) setTimeout(() => {{ btn.textContent = '⟪Kaydet⟫'; }}, 1500);
   }};
   let html;
   try {{ html = annoBuildHtml(); }}
-  catch (err) {{ alert('Kaydetme hatası: ' + err.message); done(); return; }}
+  catch (err) {{ alert('⟪Kaydetme hatası:⟫ ' + err.message); done(); return; }}
   // 1) Bu oturumda dosya zaten seçildiyse: sessiz üzerine yaz
   if (await annoWriteViaHandle(html)) {{ done('✓'); return; }}
   // 2) Chromium: kayıt diyaloğu — mevcut dosya seçilirse ÜSTÜNE yazılır.
@@ -10449,7 +10457,7 @@ document.getElementById('anno-save').onclick = async () => {{
     a.click();
     setTimeout(() => URL.revokeObjectURL(a.href), 5000);
     done('✓');
-  }} catch (err) {{ alert('Kaydetme hatası: ' + err.message); done(); }}
+  }} catch (err) {{ alert('⟪Kaydetme hatası:⟫ ' + err.message); done(); }}
 }};
 
 annoLoad();
@@ -10536,7 +10544,7 @@ window.addEventListener('message', ev => {{
   try {{ txt = await gunzipB64(SHEET_GZ); }} catch (e) {{ txt = null; }}
   if (txt === null) {{
     document.getElementById('current-net').textContent =
-      'Bu tarayıcı sıkıştırılmış şemayı açamıyor (DecompressionStream gerekli).';
+      '⟪Bu tarayıcı sıkıştırılmış şemayı açamıyor (DecompressionStream gerekli).⟫';
     return;
   }}
   const map = JSON.parse(txt);
@@ -10553,7 +10561,7 @@ window.addEventListener('message', ev => {{
 }})();
 </script>
 </body></html>
-"""
+""")
 
 
 if __name__ == "__main__":

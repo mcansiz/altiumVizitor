@@ -5,14 +5,14 @@ Wavenumber'ın ticari "viz sch 1.0" ürününün açık-kaynak alternatifi.
 [altium_monkey](https://github.com/wavenumber-eng/altium_monkey) kütüphanesi
 (Eli Hughes / Wavenumber) üzerine kurulu.
 
-**Mevcut sürüm**: `APP_VERSION` sabiti **`viewer.py`'de** tutulur (şu an 2.19.3);
+**Mevcut sürüm**: `APP_VERSION` sabiti **`viewer.py`'de** tutulur (şu an 2.21.0);
 `gui.py` oradan import eder (v2.9.29'da taşındı — HTML çıktıları da sürümü
 gösterebilsin diye, tek kaynak). Yeni özellik/düzeltme ekleyince bu sabiti
 güncelle (semver: major.minor.patch). Sürüm pencere başlığında, alt durum
 çubuğunda, üretim log'unun başında, "Hakkında" diyaloğunda ve birleşik HTML'in
 sağ üst rozetinde (`{proje} · v{APP_VERSION}`) görünür.
 
-## Dört Dosya
+## Beş Dosya
 
 - **`viewer.py`** — Tüm üretim mantığı. Ortak `_collect_data()` helper'ı sayfaları,
   netleri, komponentleri, sheet symbol'leri (block'ları), netlist'i (pin→net)
@@ -71,7 +71,7 @@ sağ üst rozetinde (`{proje} · v{APP_VERSION}`) görünür.
     oturduktan sonra çalışır (`requestAnimationFrame` + boyut kontrolü).
   - `generate_combined_viewer(..., fast_pcb=False)` → şematik + PCB tek HTML'de
     yan yana. **`fast_pcb=True`** (GUI'de "Birleşikte hızlı PCB kullan"
-    kutucuğu, varsayılan KAPALI) PCB panelinde geometri/canvas görüntüleyiciyi
+    kutucuğu, varsayılan AÇIK) PCB panelinde geometri/canvas görüntüleyiciyi
     kullanır: `to_layer_svgs()` HİÇ çağrılmaz → **BRK-210: 402 s / 13.28 MB
     yerine 69 s / 7.27 MB** (5.9x hızlı, 1.8x küçük). v2.14.0'dan itibaren 3D board yüzey dokusu
     (bakır izler + pad'ler + silkscreen çizim ve YAZILARI) hızlı modda da var:
@@ -114,7 +114,88 @@ sağ üst rozetinde (`{proje} · v{APP_VERSION}`) görünür.
   = belirsiz/marquee (süresi kestirilemeyen adım, örn. PCB `to_layer_svgs()`).
   Üretici fonksiyonlar `progress=` callback'i alır (combined/pcbview/html).
 - **`gui.ui`** — Qt Designer XML form. `uic.loadUi('gui.ui')` ile yüklenir.
+  **Menü çubuğu burada DEĞİL** — `gui.py`'deki `_build_menu()` içinde kodla
+  kurulur (bkz. "Üst menü + dil desteği").
 - **`deps.py`** — Bağımlılık kataloğu + başlangıç denetimi (bkz. aşağıdaki bölüm).
+- **`i18n.py`** — Arayüz dil desteği (TR kaynak → EN çeviri kataloğu, bkz. aşağı).
+
+## Üst menü + dil desteği (TR/EN) — v2.20.0+
+
+**Menü çubuğu** `gui.py` → `_build_menu()` içinde KODLA kurulur (gui.ui'de yok):
+**Dosya** (Proje Aç `Ctrl+O`, Çıktı Yolu Seç `Ctrl+S`, Son Çıktıyı Tarayıcıda Aç
+`Ctrl+B`, Çıktı Klasörünü Aç, Log'u Temizle, Çıkış `Ctrl+Q`) · **Üret** (dört
+görüntüleyici `Ctrl+1..4` + beş veri çıktısı — hepsi mevcut buton slotlarını
+yeniden kullanır) · **Ayarlar** (Dil alt menüsü, iki renk seçici, "Birleşikte
+hızlı PCB" işaretlenebilir eylemi) · **Yardım** (Hakkında `F1`, Sürümleri
+Kopyala, Bağımlılık Durumu). Menü kodla kuruluyor çünkü işaretlenebilir/
+dışlamalı dil eylemleri ve üretim sırasında toplu kilitleme (`_menu_action_items`)
+Designer XML'inde ifade edilemez. Üretim başlayınca butonlarla BİRLİKTE menü
+eylemleri de devre dışı kalır; "tarayıcıda aç" buton+eylem ikilisi tek noktadan
+(`_set_open_enabled`) yönetilir.
+
+**Dil** (`i18n.py`): kaynak dil **Türkçe**dir — kodda ve gui.ui'de metinler
+Türkçe yazılır, katalog bu Türkçe dizgeyi ANAHTAR olarak kullanır
+(`_EN = {"Altium Projesi": "Altium Project", …}`). `tr(metin)` karşılığı yoksa
+metni AYNEN döndürür → çeviri eksikse arayüz bozulmaz, o satır Türkçe kalır.
+Qt Linguist (.ts/.qm) yerine sözlük seçildi: derleme adımı (pylupdate5/lrelease)
+yok, PyInstaller'a ek veri dosyası girmiyor (`import i18n` statik analizle
+paketlenir), dil anında değişiyor. Seçim `QSettings("language")` ile kalıcı;
+kayıt yoksa **Türkçe** (mevcut davranış korunur).
+
+**İKİ KRİTİK KURAL** (ölçümle bulundu, bkz. Çözülen Sorunlar):
+1. Widget metinleri açılışta HENÜZ TÜRKÇEYKEN yedeklenir
+   (`i18n.snapshot_widgets` → `_ui_snapshot`), dil değişince
+   `apply_snapshot` her metni KAYNAKTAN yeniden çevirir. Yerinde çeviri
+   yapılsaydı İngilizceye geçince metin katalog anahtarı olmaktan çıkar,
+   Türkçeye DÖNÜŞ imkânsız olurdu.
+2. Yedek yalnız ETİKET taşıyan özellikleri alır: `QLineEdit`'ten yalnız
+   `placeholderText` (metni KULLANICI VERİSİ), `QGroupBox`'tan `title`,
+   butonlardan `text`. Metni veri olan widget'lar ada göre dışlanır —
+   renk butonları (`interColorBtn`/`intraColorBtn`) seçili hex kodunu
+   gösterir, yedeğe girseydi dil değişimi kullanıcının seçtiği rengi ezerdi.
+
+**Kapsam**: PyQt arayüzü (menü, butonlar, diyaloglar) · `viewer.py`'nin üretim
+log'u + ilerleme çubuğu etiketleri (v2.20.1) · **üretilen HTML görüntüleyicilerin
+arayüzü** (v2.21.0). Üçü de tek dil ayarını izler; HTML'in dili ÜRETİM ANINDAKİ
+seçime göre sabitlenir (tek dosya çıktı, sonradan değişmez).
+`viewer.py`'deki 151 `log()`/`prog()` çağrısı AST güdümlü bir betikle `tr()`
+içine alındı: `log(f"… {x} …")` → `log(tr("… {a0} …").format(a0=x)`.
+`i18n._EN_LOG` (~145 şablon) bu metinleri taşır; anahtarlar `{a0}`, `{a1:.1f}`
+gibi yer tutucuları ve biçim belirteçlerini AYNEN korur.
+**Hâlâ Türkçe kalan**: `deps.py`'nin başlangıç hata mesajları (dil tercihi
+okunmadan, uygulama açılmadan önce çalışır).
+
+### HTML görüntüleyici arayüzü: ⟪…⟫ işaret yöntemi (v2.21.0+)
+
+Şablonlardaki her arayüz metni kaynakta **⟪metin⟫** ile sarılıdır; her
+`build_*_html()` çıktısını `_tr_html()`'den geçirir — o da `⟪(...)⟫`'yi
+`tr(...)` ile değiştirip işaretleri kaldırır (`i18n._EN_HTML`, 274 anahtar).
+- **Neden işaret, neden `{tr(...)}` değil**: şablonların bir kısmı f-string
+  (`build_html`, `build_pcb_html`, `build_combined_shell`), bir kısmı ham
+  `.replace()` şablonu (`_PCB_CANVAS_TPL`, 3D `tpl`). Tek işaret sözdizimi
+  ikisinde de çalışır ve f-string'lerdeki `{{`/`}}` kaçış kurallarına dokunmaz.
+- **Neden çıktı üzerinde değil kaynakta işaretleniyor**: üretilmiş HTML'de
+  düz metin araması yapılsaydı çalışma-anı verisi (net adı, designator,
+  komponent değeri, kullanıcı notu) yanlışlıkla çevrilebilirdi. İşaretler
+  şablonda durduğu için veriyle çakışma imkânsız (veri asla ⟪⟫ içermez).
+- **İşaret ASLA placeholder kapsamamalı**: f-string'de `{...}`, ham şablonda
+  `__AD__`. Çeviri üretimin SONUNDA çalışır; placeholder o an gerçek veriyle
+  dolmuştur ve anahtar tutmaz. Doğrusu: `⟪Şematik + PCB⟫ · {project_name}`.
+- **Çeviri metni `' " < >` İÇEREMEZ**: bu metinler tek/çift tırnaklı JS
+  dizgelerine ve HTML attribute'larına gömülür; tırnak şablonu bozar.
+- **Denetim**: `py -3.12 tools/check_html_i18n.py` — her işaretin karşılığı
+  var mı, çeviride yasak karakter var mı, katalogda ölü anahtar kalmış mı
+  (çıkış kodu 1 = sorun). Yeni arayüz metni eklerken bunu çalıştır.
+- **JS'te kaçışlı metin**: kaynakta `board\\'da` yazan bir dizge üretilen
+  HTML'de `board\'da` olur → katalog anahtarı ÇALIŞMA-ANI biçimidir (ters
+  bölüyü içerir). Denetim betiği iki biçimi de dener.
+
+**Yeni metin eklerken**: Türkçe yaz, `tr()` ile sar, karşılığını `i18n._EN`
+(arayüz) veya `i18n._EN_LOG` (üretim log'u) sözlüğüne ekle. Placeholder'lı
+metinlerde `tr("… {ad} …").format(ad=x)` kullan (f-string DEĞİL — anahtar sabit
+kalmalı ve çeviri sırayı değiştirebilmeli). `i18n.missing_keys([...])` çevirisi
+eksik metinleri listeler. Yüzde-biçimli (`"%.2f" % x`) log satırlarında önce
+`{a0}` şablonuna geç, sayıyı `f"{x:.2f}"` ile önceden biçimle.
 
 ## SchDoc Bulma Fallback'i — Cross-platform (ÖNEMLİ)
 
@@ -514,6 +595,98 @@ mesajına bak.
 
 ## Çözülen Sorunlar (tarihçe)
 
+- **Üretilen HTML görüntüleyiciler hep Türkçeydi (v2.21.0, kullanıcı isteği:
+  "html de hangi dilde ise ona göre yapılsın")**: v2.20.1'de GUI ve log
+  çevrildi ama üretilen HTML'in kendi arayüzü (şematik / PCB / geometri / 3D /
+  birleşik kabuk) Türkçe kalıyordu. Ölçüm: beş şablon, ~5100 satır HTML/CSS/JS.
+  **Yöntem seçimi**: (a) çıktı HTML'inde metin değiştirmek REDDEDİLDİ — net
+  adı/designator/komponent değeri/kullanıcı notu gibi çalışma-anı verisi
+  yanlışlıkla çevrilebilirdi; (b) her metni `{tr(...)}` ile sarmak da olmazdı,
+  çünkü şablonların ikisi f-string DEĞİL (ham `.replace()` şablonu). Seçilen:
+  **kaynakta ⟪metin⟫ işareti + üretim sonunda `_tr_html()`** — tek sözdizimi
+  her iki şablon türünde çalışır, veriyle çakışma imkânsız.
+  **İşaretleme dört geçişte yapıldı** (her geçiş bir öncekinin kör noktasını
+  kapattı): (1) Türkçe'ye özgü harf (çğışöü) taraması — 237 konum; (2) bu
+  harfleri İÇERMEYEN etiketler (`Katmanlar`, `Netler`, `Hepsi`, `Kaydet`,
+  `Zemin`) için HTML bağlam taraması — 74 konum; (3) JS dizge sabitleri —
+  canvas şablonunun **ASCII'ye indirgenmiş Türkçesi** buradan çıktı
+  (`Tum montaj isaretleri silinsin mi?`, `grup yuklendi`, `Gecersiz dosya`);
+  (4) headless tarayıcıda GÖRÜNEN metni döküp gözle tarama — çok satırlı
+  yardım hücreleri, `▸ Ara`, `Kaydet` ve `88 komponent` sayaç satırı ancak
+  burada yakalandı. Toplam **274 anahtar**.
+  **Üç tuzak**: (i) işaret bir placeholder'ı kapsarsa (`{project_name}`,
+  `__DATA__`) anahtar çalışma anında tutmaz → işaretler placeholder
+  sınırlarında bölündü; (ii) f-string'e `}}` yerine `}` yazmak sözdizimini
+  bozdu (değiştirme metnini f-string ile kurunca `}}` sadeleşti) — literal
+  süslü parantez ÇİFT yazılmalı; (iii) JS'teki `board\\'da` gibi kaçışlı
+  metinlerde kaynak biçimi ile çalışma-anı biçimi FARKLIDIR, katalog anahtarı
+  çalışma-anı biçimidir (denetim betiği ikisini de dener). Çeviri metinlerinde
+  `' " < >` yasak (tırnaklı JS dizgesi / HTML attribute'u içine gömülüyorlar).
+  **Regresyon kanıtı**: Türkçe modda dört görüntüleyicinin çıktısı değişiklik
+  öncesiyle **birebir aynı** (gzip başlığındaki mtime ve build saati
+  normalize edilerek, iç içe gömülü HTML'ler çözülerek karşılaştırıldı) —
+  yani işaretleme Türkçede tam bir no-op. **İngilizce doğrulama**: TR+EN
+  toplam 24 satır-içi script `node --check` ile temiz; dört görüntüleyicide
+  görünen 267 arayüz metni tarandı, Türkçe kalan **0**; BRK-210 (8.5 MB
+  birleşik) sorunsuz üretildi, işaret kalıntısı yok. Kalıcı denetim:
+  `tools/check_html_i18n.py` (274/274 kapsandı).
+
+- **GUI İngilizceyken üretim log'u Türkçe kalıyordu (v2.20.1, kullanıcı
+  bildirimi: "gui ingilizce ama log çıktıları türkçe")**: v2.20.0 yalnız PyQt
+  arayüzünü çeviriyordu; log satırları ve ilerleme çubuğu etiketleri
+  `viewer.py`'den geliyor. Ölçüm: **151 `log()`/`prog()` çağrısı, 136 benzersiz
+  şablon** — çoğu f-string. Elle düzenleme yerine **AST güdümlü tek seferlik
+  betik** (`scratchpad/rewrite_logs.py`; `add_doxygen.py` ile aynı desen)
+  kullanıldı: her çağrının yalnız ARGÜMANI `tr("şablon").format(a0=…)` ile
+  değiştirildi. **İki teknik ayrıntı**: (1) `ast` sütun ofsetleri UTF-8
+  **BAYT** ofsetidir — Türkçe karakterli satırlarda karakter indeksiyle
+  düzenleme kayar, bu yüzden dosya bayt olarak açılıp düzenlemeler SONDAN BAŞA
+  uygulandı; (2) f-string'in sabit parçalarındaki literal `{`/`}` karakterleri
+  `{{`/`}}` olarak kaçırılmalı, yoksa sonradan gelen `.format()` çağrısı
+  patlar. Betiğin atladığı 5 çağrı elle yazıldı: 3'ü BinOp (`%`-biçimli veya
+  koşullu ek içeren), 2'si zaten çevrilmiş etiketi geçiren lambda
+  (`progress=lambda frac,label: prog(…, label)` — dokunulmamalıydı). Ayrıca
+  `ast.Name` filtresine takılmayan `self.log(...)` çağrıları (kütüphane uyarı
+  özetleri) ve 3D STEP bağımlılık `RuntimeError`'ı elle çevrildi.
+  **Regresyon kanıtı**: 9 üretim modu (json/bom/pcbgeo/html/pnp/icmap/mcupin/
+  pcbview/combined) değişiklik öncesi ve sonrası çalıştırıldı → Türkçe log
+  **bit bit aynı** (tek fark build saati); BRK-210'da eski kod ile yeni kodun
+  JSON çıktısı **aynı MD5** ve log birebir. **İngilizce kapsam**: iki projede
+  259 log satırı tarandı, Türkçe karakter kalan satır **0**; ilerleme çubuğu
+  etiketleri de çevriliyor (`5% Reading PCB … 100% Completed`).
+  **Not**: dil `i18n` modül-global'inde tutulduğundan `GeneratorThread`
+  (ayrı thread) ek bir şey yapmadan doğru dili kullanır; `tr()` sözlük okuması
+  olduğu için thread-safe. viewer.py'yi kütüphane olarak import eden
+  script'lerde dil seçilmediğinden metinler Türkçe kalır (davranış değişmedi).
+
+- **Üst menü çubuğu + İngilizce dil desteği (v2.20.0, kullanıcı isteği)**:
+  Arayüzde menü yoktu (her işlev yalnız butondan erişilebiliyordu, klavye
+  kısayolu yoktu) ve tüm metinler Türkçeye gömülüydü. Eklenenler: dört menülü
+  çubuk (Dosya/Üret/Ayarlar/Yardım, `Ctrl+O/S/B/Q`, `Ctrl+1..4`, `F1`) ve
+  `i18n.py` sözlük tabanlı TR→EN çeviri katmanı (Ayarlar → Dil, anında geçiş,
+  `QSettings` ile kalıcı; kayıt yoksa Türkçe → mevcut davranış korunur).
+  **Tasarımda çözülen iki tuzak**: (1) Metinler yerinde çevrilseydi
+  İngilizceye geçtikten sonra widget metni katalog ANAHTARI olmaktan çıkar,
+  Türkçeye dönüş imkânsız olurdu → metinler açılışta Türkçeyken yedeklenip
+  (`snapshot_widgets`) her dil değişiminde KAYNAKTAN yeniden çevriliyor.
+  (2) Genel bir "tüm `text` özelliklerini çevir" taraması `QLineEdit.text`
+  (kullanıcının yazdığı proje yolu) ve renk butonlarının metnini (`#4ec9b0`
+  = seçili hex kodu, bir ETİKET değil VERİ) de yedekleyip dil değişiminde geri
+  yazardı → yedek sınıf bazında kısıtlandı (QLineEdit'ten yalnız
+  `placeholderText`) ve renk butonları ada göre dışlandı; test bu ikinci
+  tuzağı yakaladı (`missing_keys` çıktısında `#4ec9b0`/`#ff9800` belirdi).
+  Yan düzeltmeler: `pcbGeoBtn` üretim sırasında devre dışı kalanlar listesinde
+  YOKTU (üretim sürerken tıklanabiliyordu) → eklendi; `_BTN_LABELS` değerleri
+  gui.ui ile eşleşmiyordu (`generateBtn` bir üretimden sonra "Şematik Viewer
+  üret" yerine "Şematik Viewer" oluyordu) → birebir eşitlendi ve testle
+  bağlandı; renk seçici diyaloğunun başlığı "inter rengi" yerine anlamlı
+  metin. **Doğrulama** (offscreen Qt, 22 kontrol + 5 ek): menü/eylem kurulumu,
+  katalogda eksik çeviri yok, TR→EN→TR gidiş-dönüşü birebir, kullanıcı verisi
+  (proje yolu, spin değeri, seçili renk) korunuyor, menü↔kutucuk senkronu,
+  buton+menü ortak kilitleme, `QSettings` kalıcılığı, menü eylemlerinin
+  gerçekten slotlarını çağırması. **Kapsam dışı**: üretilen HTML
+  görüntüleyiciler ve `viewer.py` log satırları Türkçe kalır.
+
 - **Kütüphane uyarıları GUI log'unda görünmüyordu, ham İngilizce olarak konsola
   düşüyordu (v2.19.3, kullanıcı: "bu uyarıyı MMCUD50A projesi için aldım")**:
   altium_monkey bazı tanılamaları Python `logging` ile veriyor (ör. 2026.8.11'den
@@ -893,7 +1066,7 @@ mesajına bak.
   `generate_combined_viewer` içindeki PCB paneli `collect_pcb_layers()` +
   `build_pcb_html()` yolunda kalmıştı — yani "Şematik + PCB + 3D" düğmesi
   hızlı yoldan yararlanmıyordu. Artık `fast_pcb` bayrağı var (GUI'de onay
-  kutusu, varsayılan kapalı → mevcut davranış korunur). Hızlı yolda PCB
+  kutusu, varsayılan AÇIK). Hızlı yolda PCB
   dosyası bir kez açılır, `extract_pcb_geometry` + `build_pcb_canvas_html`
   kullanılır ve 3D verisi `_extract_3d()` ile DOĞRUDAN alınır; `to_layer_svgs`
   hiç çağrılmadığı için **3D yüzey dokusu üretilemez** (doku o SVG'lerden

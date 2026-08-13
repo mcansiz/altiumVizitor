@@ -3,7 +3,7 @@
 
 > A PyQt5 desktop application that converts Altium schematic and PCB projects into **interactive, single-file HTML viewers** — no server required.
 
-![Version](https://img.shields.io/badge/version-2.9.41-blue.svg)
+![Version](https://img.shields.io/badge/version-2.21.0-blue.svg)
 ![Python](https://img.shields.io/badge/python-3.10%2B-3776AB.svg?logo=python\&logoColor=white)
 ![GUI](https://img.shields.io/badge/GUI-PyQt5-41CD52.svg?logo=qt\&logoColor=white)
 ![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20Linux-lightgrey.svg)
@@ -38,6 +38,17 @@ No web server, no installation, no internet required. Works directly via `file:/
 
 ## ✨ Key Features
 
+* **Bilingual — Turkish / English**
+  Switch language from **Settings → Language**; the choice is remembered. It applies
+  everywhere: the desktop UI, the generation log and progress labels, **and the generated
+  HTML viewers** — a viewer keeps the language it was generated in, so you can hand an
+  English board to a colleague and a Turkish one to another.
+
+* **Menu bar with keyboard shortcuts**
+  File / Generate / Settings / Help — every generator is also reachable from the menu
+  (`Ctrl+1..4` for the viewers), plus `Ctrl+O` open project, `Ctrl+B` open last output,
+  `F1` about.
+
 * **Interactive Schematic Viewer**
   All pages in a single pan/zoom canvas, clickable nets and components, selectable text like PDF.
 
@@ -64,7 +75,7 @@ No web server, no installation, no internet required. Works directly via `file:/
   Embeds raw board geometry (tracks/pads/vias/regions/text) instead of layer SVGs and
   draws it on a `<canvas>`: ~3-15x smaller files, smooth at any zoom, plus rotate/mirror,
   measurement, net & component selection, BOM/assembly panel and touch support.
-  The combined viewer can use it too — tick **"Birleşikte hızlı PCB kullan"** (off by
+  The combined viewer can use it too — tick **"Use fast PCB in combined view"** (on by
   default); the 3D board texture (copper, pads, silkscreen text) is rendered from the same
   geometry, so only solder-mask/paste layers are unavailable.
 
@@ -100,12 +111,13 @@ No web server, no installation, no internet required. Works directly via `file:/
 
 ## 📦 Outputs
 
-The application generates eight types of outputs:
+The application generates nine types of outputs:
 
 | Output                     | Format           | Description                       |
 | -------------------------- | ---------------- | --------------------------------- |
 | **Schematic Viewer**       | HTML (~30 MB)    | Single-file interactive schematic |
 | **PCB Viewer**             | HTML (~30-40 MB) | Layered PCB with net highlighting |
+| **PCB Fast (geometry)**    | HTML (~3-8 MB)   | Canvas viewer from raw geometry   |
 | **Schematic + PCB + 3D ★** | HTML (~45-50 MB) | Combined view with cross-probing  |
 | **MCU Pin List**           | XLSX             | MCU-centric pin mapping           |
 | **IC Connection Map**      | XLSX             | Signal/interface mapping          |
@@ -145,10 +157,23 @@ python3 gui.py
 ```
 
 1. Select your Altium project (`.PrjPcb`)
-2. Click the desired output button
-3. Generated files appear in the project directory
+2. Pick the language from **Settings → Language** (Türkçe / English) — this also decides
+   the language of the HTML viewers you are about to generate
+3. Click the desired output button (or use the **Generate** menu)
+4. Generated files appear in the project directory
 
 > Tip: If updates are not visible, refresh with **Ctrl+F5**
+
+### Desktop shortcuts
+
+| Key        | Action                       |
+| ---------- | ---------------------------- |
+| `Ctrl+O`   | Open project                 |
+| `Ctrl+S`   | Choose output path           |
+| `Ctrl+1-4` | Generate Schematic / PCB / PCB fast / Combined |
+| `Ctrl+B`   | Open last output in browser  |
+| `F1`       | About / versions             |
+| `Ctrl+Q`   | Quit                         |
 
 ---
 
@@ -226,7 +251,7 @@ Give it a star ⭐ on GitHub and consider supporting:
 
 > Altium şematik ve PCB projelerini tek dosyalık, sunucu gerektirmeyen **interaktif HTML görüntüleyicilere** dönüştüren PyQt5 masaüstü uygulaması.
 
-![Version](https://img.shields.io/badge/version-2.9.41-blue.svg)
+![Version](https://img.shields.io/badge/version-2.21.0-blue.svg)
 ![Python](https://img.shields.io/badge/python-3.10%2B-3776AB.svg?logo=python&logoColor=white)
 ![GUI](https://img.shields.io/badge/GUI-PyQt5-41CD52.svg?logo=qt&logoColor=white)
 ![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20Linux-lightgrey.svg)
@@ -253,6 +278,8 @@ Projeyi seçin, bir düğmeye basın — çıktı olarak **çift tıkla açılan
 
 ##  Öne Çıkanlar
 
+- **Türkçe / İngilizce arayüz** — **Ayarlar → Dil** menüsünden anında geçiş, seçim hatırlanır. Dil her yerde geçerlidir: masaüstü arayüzü, üretim log'u ve ilerleme etiketleri, **ve üretilen HTML görüntüleyiciler**. HTML dosyası üretildiği dili taşır; aynı projeden hem Türkçe hem İngilizce görüntüleyici üretip farklı kişilere verebilirsiniz.
+- **Üst menü ve klavye kısayolları** — Dosya / Üret / Ayarlar / Yardım. Her üretim menüden de erişilebilir (`Ctrl+1..4` görüntüleyiciler), ayrıca `Ctrl+O` proje aç, `Ctrl+B` son çıktıyı aç, `F1` hakkında.
 - **İnteraktif Şematik Viewer** — Tüm sayfalar tek pan/zoom kanvasında, tıklanabilir net'ler ve komponentler, PDF gibi seçilip kopyalanabilir metinler.
 - **PCB Görüntüleyici** — Altium benzeri tam ekran katman görüntüleyici; katman aç/kapa, bakır yol/net highlight, komponente tıkla → şematik ↔ PCB cross-probe.
 - **Şematik + PCB + 3D tek HTML'de** — Yan yana, çift yönlü cross-probe; gerçek gömülü **STEP 3D modelleriyle** board önizlemesi.
@@ -260,7 +287,7 @@ Projeyi seçin, bir düğmeye basın — çıktı olarak **çift tıkla açılan
 - **AI/LLM dostu JSON** — Gerçek elektriksel bağlantı (pin → net), BOM ve varyant verisiyle kompakt dışa aktarma.
 - **Not &amp; kutu araçları** — Şematik üzerine PDF editörü tarzı not/işaret ekleme, kaydetme.
 - **Dokunmatik / mobil** — Telefon ve tablette çalışır: tek parmak kaydırma, iki parmak yakınlaştırma, dokunarak seçme (şematik, PCB ve 3D); dar ekranda kayan sol panel.
-- **PCB Hızlı (geometri) görünümü** — Katman SVG'leri yerine board'un ham geometrisi gömülür ve canvas'a çizilir: dosya ~3-15 kat küçük, her zoom'da akıcı; döndürme/ayna, ölçüm, net & komponent seçimi, BOM·Montaj paneli, dokunmatik dahil. Birleşik görünümde de kullanılabilir: **"Birleşikte hızlı PCB kullan"** kutucuğu (varsayılan kapalı); 3D board dokusu (bakır, pad, silkscreen yazıları) da geometriden üretilir, yalnız mask/paste katmanları bulunmaz.
+- **PCB Hızlı (geometri) görünümü** — Katman SVG'leri yerine board'un ham geometrisi gömülür ve canvas'a çizilir: dosya ~3-15 kat küçük, her zoom'da akıcı; döndürme/ayna, ölçüm, net & komponent seçimi, BOM·Montaj paneli, dokunmatik dahil. Birleşik görünümde de kullanılabilir: **"Birleşikte hızlı PCB kullan"** kutucuğu (varsayılan AÇIK); 3D board dokusu (bakır, pad, silkscreen yazıları) da geometriden üretilir, yalnız mask/paste katmanları bulunmaz.
 - **Ölçüm · Net listesi · PNG (PCB)** — İki tıkla mesafe (mm + mil, pad merkezine yapışır), aranabilir net listesi (Güç/GND/Sinyal filtresi, tıkla → vurgula), tek tıkla görünümün PNG'si, `?` ile yardım.
 - **BOM · Montaj paneli (PCB)** — Değer + footprint'e göre gruplanmış liste; satıra dokun → grubun tamamı board'da vurgulanır, ✓ ile montaj takibi (tarayıcıda saklanır), Üst/Alt/Kalan filtreleri, seçili parçada pin-1 işareti.
 - **Cross-platform** — Windows ve Linux; kodun tamamı `pathlib` ile OS-bağımsız.
@@ -285,13 +312,14 @@ Projeyi seçin, bir düğmeye basın — çıktı olarak **çift tıkla açılan
 
 ##  Üretilen Çıktılar
 
-Uygulama sekiz ayrı çıktı üretir:
+Uygulama dokuz ayrı çıktı üretir:
 
 
 | Çıktı                    | Format           | Açıklama                                                     |
 | ------------------------ | ---------------- | ------------------------------------------------------------ |
 | **Şematik Viewer**       | HTML (~30 MB)    | Gömülü SVG'lerle tek dosya interaktif şematik                |
 | **PCB Görüntüleyici**    | HTML (~30-40 MB) | Tam ekran katmanlı PCB, net highlight, cross-probe           |
+| **PCB Hızlı (geometri)** | HTML (~3-8 MB)   | Ham geometriden canvas görüntüleyici, her zoom'da akıcı      |
 | **Şematik + PCB + 3D ★** | HTML (~45-50 MB) | Üçü tek dosyada, çift yönlü cross-probe + 3D                 |
 | **MCU Pin Listesi**      | XLSX             | MCU merkezli pin listesi (fonksiyon/arayüz otomatik tespiti) |
 | **IC Bağlantı Haritası** | XLSX             | IC gruplarına göre sinyal/arayüz tablosu                     |
@@ -322,7 +350,10 @@ python3 -m pip install -r requirements.txt
 `requirements.txt` tüm listeyi içerir: PyQt5, altium-monkey, openpyxl ve 3D görünüm için
 zorunlu `cascadio` / `trimesh` / `numpy`.
 
-> **Not:** Önerilen minimum `altium-monkey` sürümü **2026.6.21**'dir (dikey pin adı render düzeltmesi bu sürümde gelir).
+> **Not:** Gerekli minimum `altium-monkey` sürümü **2026.8.11**'dir. Uygulama açılışta
+> tüm bağımlılıkları denetler (`deps.py`); eksik/eski paket varsa hangi paketin sorunlu
+> olduğunu ve kurulum komutunu söyleyen bir mesajla durur. Listeyi görmek için:
+> `py -3.12 deps.py`
 
 ---
 
@@ -337,8 +368,21 @@ python3 gui.py
 ```
 
 1. Açılan pencereden Altium proje dosyanızı (`.PrjPcb`) seçin.
-2. İstediğiniz çıktı düğmesine basın.
-3. Üretim bittiğinde çıktı proje klasörüne yazılır; HTML'ler tarayıcıda çift tıkla açılır.
+2. **Ayarlar → Dil** menüsünden dili seçin (Türkçe / English) — bu seçim üretilecek
+   HTML görüntüleyicilerin dilini de belirler.
+3. İstediğiniz çıktı düğmesine (ya da **Üret** menüsündeki karşılığına) basın.
+4. Üretim bittiğinde çıktı proje klasörüne yazılır; HTML'ler tarayıcıda çift tıkla açılır.
+
+### Masaüstü Kısayolları
+
+| Tuş        | İşlev                                          |
+| ---------- | ---------------------------------------------- |
+| `Ctrl+O`   | Proje aç                                       |
+| `Ctrl+S`   | Çıktı yolunu seç                               |
+| `Ctrl+1-4` | Şematik / PCB / PCB hızlı / Birleşik üret      |
+| `Ctrl+B`   | Son çıktıyı tarayıcıda aç                      |
+| `F1`       | Hakkında / sürümler                            |
+| `Ctrl+Q`   | Çıkış                                          |
 
 > **İpucu:** HTML'i açtıktan sonra değişikliği görmüyorsanız **Ctrl+F5** ile cache'i temizleyerek yeniden açın.
 
@@ -386,8 +430,12 @@ Linux için `build_linux.sh` betiği mevcuttur.
 
 ```
 ├── viewer.py       # Tüm üretim mantığı (HTML/JSON/CSV/XLSX üreticileri, APP_VERSION burada)
-├── gui.py          # PyQt5 ana pencere, non-blocking üretim thread'i
-├── gui.ui          # Qt Designer XML formu
+├── gui.py          # PyQt5 ana pencere, üst menü, non-blocking üretim thread'i
+├── gui.ui          # Qt Designer XML formu (menü çubuğu gui.py'de kodla kurulur)
+├── i18n.py         # Türkçe → İngilizce çeviri kataloğu (arayüz + log + HTML)
+├── deps.py         # Bağımlılık kataloğu ve başlangıç denetimi
+├── tools/
+│   └── check_html_i18n.py   # HTML çevirisi kapsama denetimi
 ├── requirements.txt
 ├── build_exe.bat   # Windows exe paketleme
 ├── build_linux.sh  # Linux paketleme

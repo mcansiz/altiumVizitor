@@ -3,11 +3,12 @@
 
 > A PyQt5 desktop application that converts Altium schematic and PCB projects into **interactive, single-file HTML viewers** — no server required.
 
-![Version](https://img.shields.io/badge/version-2.21.0-blue.svg)
+![Version](https://img.shields.io/badge/version-2.25.0-blue.svg)
 ![Python](https://img.shields.io/badge/python-3.10%2B-3776AB.svg?logo=python\&logoColor=white)
 ![GUI](https://img.shields.io/badge/GUI-PyQt5-41CD52.svg?logo=qt\&logoColor=white)
 ![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20Linux-lightgrey.svg)
 ![License](https://img.shields.io/badge/license-AGPL--3.0--or--later-orange.svg)
+[![Buy Me A Coffee](https://img.shields.io/badge/Buy%20Me%20A%20Coffee-support-FFDD00.svg?logo=buymeacoffee\&logoColor=black)](https://buymeacoffee.com/cansizmikab)
 
 ---
 
@@ -17,11 +18,11 @@ If this project helps you, consider supporting its development ☕
 
 This tool is developed in my free time and your support helps me maintain and improve it.
 
-👉 https://buymeacoffee.com/cansizmikab
-
 <a href="https://buymeacoffee.com/cansizmikab" target="_blank">
-<img src="https://www.buymeacoffee.com/assets/img/custom_images/orange_img.png" alt="Buy Me A Coffee" style="height: 41px !important;width: 174px !important;">
+  <img src="https://cdn.buymeacoffee.com/buttons/v2/default-yellow.png" alt="Buy Me A Coffee" height="45" width="163">
 </a>
+
+👉 [buymeacoffee.com/cansizmikab](https://buymeacoffee.com/cansizmikab)
 
 ---
 
@@ -51,6 +52,12 @@ No web server, no installation, no internet required. Works directly via `file:/
 
 * **Interactive Schematic Viewer**
   All pages in a single pan/zoom canvas, clickable nets and components, selectable text like PDF.
+
+* **Schematic Hierarchy panel (KiCad-style)**
+  A sheet tree in the sidebar — root schematic → sheet symbols → child sheets, with page
+  numbers and collapsible branches. Repeat channels appear as separate instances, so
+  `Alt+Backspace` ("leave sheet") always returns to the right parent. Plus `Alt+Home`
+  for the root and `Alt+←/→` for sheet history.
 
 * **PCB Viewer (geometry / canvas)**
   Full-screen layered view similar to Altium — layer toggling, copper/net highlighting,
@@ -174,16 +181,20 @@ python3 gui.py
 
 ## ⌨️ Shortcuts (HTML Viewer)
 
-| Key     | Function            |
-| ------- | ------------------- |
-| `/`     | Open search         |
-| `Enter` | Select first result |
-| `B`     | Toggle sidebar      |
-| `0`     | Reset view          |
-| `F`     | Fit view            |
-| `Esc`   | Clear selection     |
-| `?`     | Show help           |
-| `1-4`   | Switch views        |
+| Key              | Function                        |
+| ---------------- | ------------------------------- |
+| `/`              | Open search                     |
+| `Enter`          | Select first result             |
+| `B`              | Toggle sidebar                  |
+| `H`              | Schematic hierarchy tab         |
+| `Alt+Backspace`  | Leave sheet (go to parent)      |
+| `Alt+Home`       | Go to root sheet                |
+| `Alt+←` / `Alt+→`| Sheet history back / forward    |
+| `0`              | Reset view                      |
+| `F`              | Fit view                        |
+| `Esc`            | Clear selection                 |
+| `?`              | Show help                       |
+| `1-4`            | Switch views                    |
 
 In the combined view the top bar also has a full-screen button (same effect as the
 browser's `F11`).
@@ -240,7 +251,9 @@ The combined work must be distributed under AGPL.
 
 Give it a star ⭐ on GitHub and consider supporting:
 
-👉 https://buymeacoffee.com/cansizmikab
+<a href="https://buymeacoffee.com/cansizmikab" target="_blank">
+  <img src="https://cdn.buymeacoffee.com/buttons/v2/default-yellow.png" alt="Buy Me A Coffee" height="45" width="163">
+</a>
 
 
 -----------------------
@@ -249,19 +262,25 @@ Give it a star ⭐ on GitHub and consider supporting:
 
 > Altium şematik ve PCB projelerini tek dosyalık, sunucu gerektirmeyen **interaktif HTML görüntüleyicilere** dönüştüren PyQt5 masaüstü uygulaması.
 
-![Version](https://img.shields.io/badge/version-2.21.0-blue.svg)
+![Version](https://img.shields.io/badge/version-2.25.0-blue.svg)
 ![Python](https://img.shields.io/badge/python-3.10%2B-3776AB.svg?logo=python&logoColor=white)
 ![GUI](https://img.shields.io/badge/GUI-PyQt5-41CD52.svg?logo=qt&logoColor=white)
 ![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20Linux-lightgrey.svg)
 ![License](https://img.shields.io/badge/license-AGPL--3.0--or--later-orange.svg)
+[![Buy Me A Coffee](https://img.shields.io/badge/Buy%20Me%20A%20Coffee-destek-FFDD00.svg?logo=buymeacoffee&logoColor=black)](https://buymeacoffee.com/cansizmikab)
 
 
-## ❤️ Support
+## ❤️ Destek
 
-If this project helped you, consider buying me a coffee ☕
+Bu proje işinize yaradıysa bir kahve ısmarlayabilirsiniz ☕
+Boş zamanımda geliştiriyorum; desteğiniz projenin bakımını ve yeni özellikleri
+sürdürmemi sağlıyor.
 
+<a href="https://buymeacoffee.com/cansizmikab" target="_blank">
+  <img src="https://cdn.buymeacoffee.com/buttons/v2/default-yellow.png" alt="Buy Me A Coffee" height="45" width="163">
+</a>
 
-<a href="https://buymeacoffee.com/cansizmikab" target="_blank"><img src="https://www.buymeacoffee.com/assets/img/custom_images/orange_img.png" alt="Buy Me A Coffee" style="height: 41px !important;width: 174px !important;box-shadow: 0px 3px 2px 0px rgba(190, 190, 190, 0.5) !important;-webkit-box-shadow: 0px 3px 2px 0px rgba(190, 190, 190, 0.5) !important;" ></a>
+👉 [buymeacoffee.com/cansizmikab](https://buymeacoffee.com/cansizmikab)
 
 
 
@@ -279,6 +298,7 @@ Projeyi seçin, bir düğmeye basın — çıktı olarak **çift tıkla açılan
 - **Türkçe / İngilizce arayüz** — **Ayarlar → Dil** menüsünden anında geçiş, seçim hatırlanır. Dil her yerde geçerlidir: masaüstü arayüzü, üretim log'u ve ilerleme etiketleri, **ve üretilen HTML görüntüleyiciler**. HTML dosyası üretildiği dili taşır; aynı projeden hem Türkçe hem İngilizce görüntüleyici üretip farklı kişilere verebilirsiniz.
 - **Üst menü ve klavye kısayolları** — Dosya / Üret / Görünüm / Ayarlar / Yardım. Her üretim menüden de erişilebilir (`Ctrl+1..3` görüntüleyiciler), ayrıca `Ctrl+O` proje aç, `Ctrl+B` son çıktıyı aç, `F11` tam ekran, `F1` hakkında.
 - **İnteraktif Şematik Viewer** — Tüm sayfalar tek pan/zoom kanvasında, tıklanabilir net'ler ve komponentler, PDF gibi seçilip kopyalanabilir metinler.
+- **Şematik Hiyerarşi paneli (KiCad tarzı)** — Sol panelde sayfa ağacı: kök şema → sheet symbol'ler → alt sayfalar, sayfa numaralarıyla ve açılır/kapanır dallarla. Tekrar (Repeat) kanalları ayrı örnek olarak görünür; `Alt+Backspace` ("üst sayfaya dön") her zaman doğru üst sayfaya döner. Ayrıca `Alt+Home` kök sayfa, `Alt+←/→` sayfa geçmişi.
 - **PCB Görüntüleyici (geometri / canvas)** — Altium benzeri tam ekran katman görüntüleyici; katman aç/kapa, bakır yol/net highlight, komponente tıkla → şematik ↔ PCB cross-probe. Katman SVG'leri yerine board'un ham geometrisi gömülüp canvas'a çizilir: dosya çok daha küçük, her zoom'da akıcı; döndürme/ayna ve dokunmatik dahil.
 - **Şematik + PCB + 3D tek HTML'de** — Yan yana, çift yönlü cross-probe; gerçek gömülü **STEP 3D modelleriyle** board önizlemesi.
 - **Excel &amp; CSV çıktıları** — MCU pin listesi, IC bağlantı haritası, BOM, Pick &amp; Place.
@@ -386,16 +406,20 @@ python3 gui.py
 ### Klavye Kısayolları (HTML Viewer)
 
 
-| Tuş             | İşlev                                       |
-| --------------- | ------------------------------------------- |
-| `/`             | Aramayı aç + odaklan                        |
-| `Enter`         | Aramada ilk sonucu seç                      |
-| `B`             | Sol paneli gizle/göster                     |
-| `0`             | Görünümü sıfırla                            |
-| `F`             | Son öğeye sığdır                            |
-| `Esc`           | Seçimi/aracı temizle                        |
-| `?`             | Kısayol yardımını aç                        |
-| `1 / 2 / 3 / 4` | Birleşik görünümde Şematik / Böl / PCB / 3D |
+| Tuş               | İşlev                                       |
+| ----------------- | ------------------------------------------- |
+| `/`               | Aramayı aç + odaklan                        |
+| `Enter`           | Aramada ilk sonucu seç                      |
+| `B`               | Sol paneli gizle/göster                     |
+| `H`               | Şematik hiyerarşi sekmesi                   |
+| `Alt+Backspace`   | Üst sayfaya dön (hiyerarşide bir üst)       |
+| `Alt+Home`        | Ana (kök) sayfaya git                       |
+| `Alt+←` / `Alt+→` | Sayfa geçmişinde geri / ileri               |
+| `0`               | Görünümü sıfırla                            |
+| `F`               | Son öğeye sığdır                            |
+| `Esc`             | Seçimi/aracı temizle                        |
+| `?`               | Kısayol yardımını aç                        |
+| `1 / 2 / 3 / 4`   | Birleşik görünümde Şematik / Böl / PCB / 3D |
 
 Birleşik görünümün üst çubuğunda ayrıca **tam ekran düğmesi** vardır (tarayıcının
 `F11`'i ile aynı işi yapar).

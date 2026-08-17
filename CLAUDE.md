@@ -5,7 +5,7 @@ Wavenumber'ın ticari "viz sch 1.0" ürününün açık-kaynak alternatifi.
 [altium_monkey](https://github.com/wavenumber-eng/altium_monkey) kütüphanesi
 (Eli Hughes / Wavenumber) üzerine kurulu.
 
-**Mevcut sürüm**: `APP_VERSION` sabiti **`viewer.py`'de** tutulur (şu an 2.21.0);
+**Mevcut sürüm**: `APP_VERSION` sabiti **`viewer.py`'de** tutulur (şu an 2.25.0);
 `gui.py` oradan import eder (v2.9.29'da taşındı — HTML çıktıları da sürümü
 gösterebilsin diye, tek kaynak). Yeni özellik/düzeltme ekleyince bu sabiti
 güncelle (semver: major.minor.patch). Sürüm pencere başlığında, alt durum
@@ -43,48 +43,28 @@ sağ üst rozetinde (`{proje} · v{APP_VERSION}`) görünür.
     ATLANIR (v2.9.30+): direnç yerine `IC6.9 (P0_0) [R12 üzerinden]`;
     pasif→güç bağlantıları `R5→+3V3 (pull-up)` / `C14→GND (filtre C)` diye
     raporlanır. Üstte fonksiyon dağılımı özeti. `mcu_designator` ZORUNLU.
-  - `generate_pcb_canvas_viewer(...)` → **geometri tabanlı** PCB görüntüleyici
-    (v2.12.0+; v2.13.0'da BOM · Montaj paneli eklendi — SVG sürümüyle AYNI
-    localStorage anahtarı ve dışa-aktarma biçimi, yani montaj durumu iki
-    görüntüleyici arasında ortak). SVG katmanı gömmek yerine `extract_pcb_geometry()` ile ham
-    primitive'ler (iz/yay/pad/via/region/metin) çıkarılıp gzip'lenerek gömülür,
-    tarayıcıda `<canvas>`'a çizilir → **BRK-210: 8 MB yerine 3.3 MB, üretim
-    135 s yerine 48 s**; her zoom seviyesinde akıcı (LOD gerekmez). Katman
-    aç/kapa, komponent seç (popup + cross-probe), ize çift tık = net vurgusu,
-    ölçüm (pad merkezine yapışma), döndür/çevir, pad etiketleri, PNG, dokunmatik.
-    GUI'de **"PCB Hızlı (geometri)"** butonu (`mode='pcbgeo'`).
-  - `generate_pcb_viewer(...)` → tam ekran PCB görüntüleyici HTML (Altium benzeri).
-    `collect_pcb_layers()` ile tüm katmanlar SVG render edilir (TOP/BOTTOM bakır,
-    iç katmanlar MID1-8, silkscreen, pasta, lehim, mekanik, drill). Sidebar'dan
-    katman aç/kapa, pan/zoom, komponente tıkla → cross-probe popup (şematik
-    değer/açıklama + PCB konum/footprint). **Bakır yol/net highlight**: render
-    SVG'sindeki bakır elemanlarda `data-net` (net adı) bulunur; bir iz/pad'e ÇİFT
-    tıklayınca o net'in tüm elemanları (tüm katmanlarda) KENDİ KATMAN RENKLERİNDE
-    (Top kırmızı, Bottom mavi, plane'ler yeşil — Altium gibi; her klonun rengi
-    computed style'dan alınıp hafif parlatılır) klonlanıp en üste çizilir; board'un
-    kalanı `grayscale(1) brightness(0.4)` CSS filtresiyle grileşip kararır
-    (klonlar `getCTM()` ile kök uzaya taşınır). Hover'da net adı, Esc ile temizleme.
-    `data-component` metadata'sı designator verir. Büyük katmanlar (>8MB) atlanır. ~30-40MB çıktı.
-    `#pcb-svg`'ye açık `width`/`height` (=viewBox mm) verilir; yoksa SVG containing
-    block genişliğini doğal boyut sanar, `fitView()` matematiği bozulur, board ilk
-    açılışta ekran dışına kayar (bkz. Çözülen Sorunlar). İlk sığdırma iframe layout'u
-    oturduktan sonra çalışır (`requestAnimationFrame` + boyut kontrolü).
-  - `generate_combined_viewer(..., fast_pcb=False)` → şematik + PCB tek HTML'de
-    yan yana. **`fast_pcb=True`** (GUI'de "Birleşikte hızlı PCB kullan"
-    kutucuğu, varsayılan AÇIK) PCB panelinde geometri/canvas görüntüleyiciyi
-    kullanır: `to_layer_svgs()` HİÇ çağrılmaz → **BRK-210: 402 s / 13.28 MB
-    yerine 69 s / 7.27 MB** (5.9x hızlı, 1.8x küçük). v2.14.0'dan itibaren 3D board yüzey dokusu
-    (bakır izler + pad'ler + silkscreen çizim ve YAZILARI) hızlı modda da var:
-    `_build_surface_from_geometry()` aynı dokuyu geometriden çizer. Kalan tek
-    fark: solder mask / paste katmanları listelenmez (Altium onları pad'lerden
-    türetiyor, dosyada primitive yok). Cross-probe üç yönlü çalışmaya
-    devam eder (canvas viewer aynı postMessage sözleşmesini kullanır).
+  - `generate_pcb_canvas_viewer(...)` → **geometri tabanlı** PCB görüntüleyici —
+    projedeki TEK PCB üreticisi (v2.12.0'da eklendi, v2.22.0'da katman-SVG'li
+    klasik yol kaldırıldı). `extract_pcb_geometry()` ile ham primitive'ler
+    (iz/yay/pad/via/region/metin) çıkarılıp gzip'lenerek gömülür, tarayıcıda
+    `<canvas>`'a çizilir → **BRK-210: 8 MB yerine 3.3 MB, üretim 135 s yerine
+    48 s**; her zoom seviyesinde akıcı (LOD gerekmez). Katman aç/kapa, komponent
+    seç (popup + cross-probe), ize çift tık = net vurgusu, ölçüm (pad merkezine
+    yapışma), döndür/çevir, pad etiketleri, PNG, BOM · Montaj paneli, dokunmatik.
+    GUI'de **"PCB Görüntüleyici"** butonu (`mode='pcbgeo'`).
+    **Bilinen kısıt**: solder mask / paste katmanları listelenmez — Altium onları
+    pad'lerden türetiyor, dosyada primitive olarak yok.
   - `generate_combined_viewer(...)` → şematik + PCB tek HTML'de yan yana,
     çift yönlü cross-probe. İki viewer iframe içinde izole (her iframe'in HTML'i
     kabuğa JSON string olarak gömülür, runtime'da `iframe.srcdoc` ile yüklenir),
     `postMessage` ile haberleşir: birinde komponente tıkla → diğeri o komponenti
     gösterir. Ortada sürüklenebilir ayraç. Topbar'da görünüm modu düğmeleri
-    **Şematik / Böl / PCB / 3D** (klavye: 1/2/3/4, odak kabuktayken).
+    **Şematik / Böl / PCB / 3D** (klavye: 1/2/3/4, odak kabuktayken) ve
+    **tam ekran düğmesi** (`#vm-fs`, v2.24.0 — tarayıcının F11'iyle aynı).
+    **Gizli panele gelen seçim BEKLETİLİR** (v2.24.0): `display:none` iframe'de
+    her ölçüm 0 döndüğünden vurgu/odak çöp çıkıyordu; kabuk `setViewMode()`
+    içinde görünür panele `pane-shown` yollar, iç viewer `pendingXpComp`'ı o an
+    uygular (bkz. Çözülen Sorunlar).
     **Açılış modu SADECE Şematik** (v2.9.22+): PCB ve 3D iframe'leri tembel
     yüklenir — ilk o moda geçişte gzip'ten çözülür, o sırada "PCB/3D
     hazırlanıyor…" spinner'ı görünür (`.pane-loading`). Şematikte komponent
@@ -92,7 +72,11 @@ sağ üst rozetinde (`{proje} · v{APP_VERSION}`) görünür.
     `lastSel`'de saklanır, moda geçince `repostSel` ile iletilir → açılışta
     ekstra yük yok, cross-probe kaybolmaz. Pane etiketleri (ŞEMATİK/PCB
     yazıları) v2.9.27'de tamamen kaldırıldı. Komponent seçilince mod
-    DEĞİŞMEZ (cross-probe arka planda çalışır). ~45-50MB çıktı.
+    DEĞİŞMEZ (cross-probe arka planda çalışır). PCB paneli her zaman geometri/
+    canvas görüntüleyicidir (`to_layer_svgs()` HİÇ çağrılmaz — üretimin en pahalı
+    adımı buydu: **BRK-210'da 402 s / 13.28 MB yerine 69 s / 7.27 MB**); 3D board
+    yüzey dokusu (bakır izler + pad'ler + silkscreen çizim ve YAZILARI) aynı
+    geometriden `_build_surface_from_geometry()` ile çizilir.
     `build_combined_shell()` kabuk sayfayı, köprü için her iki builder'a eklenen
     `crossProbeOut()` + message listener'ı kullanır.
     **Net cross-probe** (v2.18.0): komponentin yanında NET seçimi de paylaşılır —
@@ -108,11 +92,11 @@ sağ üst rozetinde (`{proje} · v{APP_VERSION}`) görünür.
     script'ini erken kapatır → paneller boş. (2) `srcdoc` kullanılır, Blob URL
     DEĞİL — `file://` altında origin "null" olur, `blob:null/...` engellenir.
 - **`gui.py`** — PyQt5 ana pencere. `GeneratorThread` ile non-blocking üretim,
-  `mode='html'|'json'|'bom'|'pnp'|'icmap'|'mcupin'|'pcbview'|'combined'` ile
-  sekiz ayrı buton. `GeneratorThread.progress_signal(int percent, str label)`
+  `mode='html'|'json'|'bom'|'pnp'|'icmap'|'mcupin'|'pcbgeo'|'combined'` ile
+  yedi ayrı buton. `GeneratorThread.progress_signal(int percent, str label)`
   üretim ilerlemesini taşır → `logGroup`'taki `progressBar`'a yansır. `percent < 0`
-  = belirsiz/marquee (süresi kestirilemeyen adım, örn. PCB `to_layer_svgs()`).
-  Üretici fonksiyonlar `progress=` callback'i alır (combined/pcbview/html).
+  = belirsiz/marquee (süresi kestirilemeyen adım). Üretici fonksiyonlar
+  `progress=` callback'i alır (combined/pcbgeo/html).
 - **`gui.ui`** — Qt Designer XML form. `uic.loadUi('gui.ui')` ile yüklenir.
   **Menü çubuğu burada DEĞİL** — `gui.py`'deki `_build_menu()` içinde kodla
   kurulur (bkz. "Üst menü + dil desteği").
@@ -123,15 +107,23 @@ sağ üst rozetinde (`{proje} · v{APP_VERSION}`) görünür.
 
 **Menü çubuğu** `gui.py` → `_build_menu()` içinde KODLA kurulur (gui.ui'de yok):
 **Dosya** (Proje Aç `Ctrl+O`, Çıktı Yolu Seç `Ctrl+S`, Son Çıktıyı Tarayıcıda Aç
-`Ctrl+B`, Çıktı Klasörünü Aç, Log'u Temizle, Çıkış `Ctrl+Q`) · **Üret** (dört
-görüntüleyici `Ctrl+1..4` + beş veri çıktısı — hepsi mevcut buton slotlarını
-yeniden kullanır) · **Ayarlar** (Dil alt menüsü, iki renk seçici, "Birleşikte
-hızlı PCB" işaretlenebilir eylemi) · **Yardım** (Hakkında `F1`, Sürümleri
-Kopyala, Bağımlılık Durumu). Menü kodla kuruluyor çünkü işaretlenebilir/
-dışlamalı dil eylemleri ve üretim sırasında toplu kilitleme (`_menu_action_items`)
-Designer XML'inde ifade edilemez. Üretim başlayınca butonlarla BİRLİKTE menü
-eylemleri de devre dışı kalır; "tarayıcıda aç" buton+eylem ikilisi tek noktadan
-(`_set_open_enabled`) yönetilir.
+`Ctrl+B`, Çıktı Klasörünü Aç, Log'u Temizle, Çıkış `Ctrl+Q`) · **Üret** (üç
+görüntüleyici `Ctrl+1..3` + beş veri çıktısı — hepsi mevcut buton slotlarını
+yeniden kullanır) · **Görünüm** (Tam Ekran `F11`, işaretlenebilir) ·
+**Ayarlar** (Dil alt menüsü, iki renk seçici) · **Yardım** (Hakkında `F1`,
+Sürümleri Kopyala, Bağımlılık Durumu). Menü kodla kuruluyor çünkü
+işaretlenebilir/dışlamalı dil eylemleri ve üretim sırasında toplu kilitleme
+(`_menu_action_items`) Designer XML'inde ifade edilemez. Üretim başlayınca
+butonlarla BİRLİKTE menü eylemleri de devre dışı kalır; "tarayıcıda aç"
+buton+eylem ikilisi tek noktadan (`_set_open_enabled`) yönetilir.
+
+**Tam Ekran (v2.23.0)**: `toggle_fullscreen()` + `changeEvent()`. İki ayrıntı:
+(1) `showNormal()` maximize'i de kaldırdığından tam ekrana geçmeden önceki
+durum `_was_maximized`'e alınır, çıkışta gerekiyorsa `showMaximized()`
+kullanılır; (2) pencere durumu menü dışından da değişebilir (pencere yöneticisi)
+→ `changeEvent`'te `WindowStateChange` yakalanıp eylem işareti `isFullScreen()`
+ile eşitlenir (tek doğruluk kaynağı pencerenin kendisi). Görünüm eylemi
+`_menu_action_items`'a GİRMEZ: üretim sürerken de tam ekrana geçilebilir.
 
 **Dil** (`i18n.py`): kaynak dil **Türkçe**dir — kodda ve gui.ui'de metinler
 Türkçe yazılır, katalog bu Türkçe dizgeyi ANAHTAR olarak kullanır
@@ -169,9 +161,10 @@ okunmadan, uygulama açılmadan önce çalışır).
 
 Şablonlardaki her arayüz metni kaynakta **⟪metin⟫** ile sarılıdır; her
 `build_*_html()` çıktısını `_tr_html()`'den geçirir — o da `⟪(...)⟫`'yi
-`tr(...)` ile değiştirip işaretleri kaldırır (`i18n._EN_HTML`, 274 anahtar).
+`tr(...)` ile değiştirip işaretleri kaldırır (`i18n._EN_HTML`, 205 anahtar —
+v2.22.0'da klasik PCB şablonuyla birlikte 69 anahtar düştü).
 - **Neden işaret, neden `{tr(...)}` değil**: şablonların bir kısmı f-string
-  (`build_html`, `build_pcb_html`, `build_combined_shell`), bir kısmı ham
+  (`build_html`, `build_combined_shell`), bir kısmı ham
   `.replace()` şablonu (`_PCB_CANVAS_TPL`, 3D `tpl`). Tek işaret sözdizimi
   ikisinde de çalışır ve f-string'lerdeki `{{`/`}}` kaçış kurallarına dokunmaz.
 - **Neden çıktı üzerinde değil kaynakta işaretleniyor**: üretilmiş HTML'de
@@ -358,7 +351,8 @@ Bir değişiklik yaptıktan sonra:
   dock'lu) açılırsa veya `/` ile arama açılırsa panel otomatik açılır. Durum
   `localStorage`'da (`schviz-ui` anahtarı) hatırlanır; file:// altında storage
   kısıtlıysa try/catch ile sessizce atlanır.
-- Sol panel sekmeleri: **Nets** (power=orange, ground=green, signal=gray) ve **Comps**
+- Sol panel sekmeleri: **Nets** (power=orange, ground=green, signal=gray), **Comps**
+  ve **Hiyerarşi** (aşağıdaki bölüm)
 - **Net tipi filtre çipleri** (v2.9.25+): Nets sekmesinde Tümü/Güç/GND/Sinyal;
   aramayla birlikte çalışır, Comps sekmesinde gizlenir.
 - **Arama katlanabilir** (v2.9.22+): "▸ Ara" başlığı altında, varsayılan KAPALI;
@@ -379,9 +373,10 @@ Bir değişiklik yaptıktan sonra:
   (`panMoved`, >3px eşiği), metin seçimi ve tıklanabilir öğeler hariç.
 - **Hover bilgi balonu** (v2.9.25+): `#svg-tip` — komponentte değer+açıklama,
   net'te bağlantı sayısı+tipi, block'ta hedef; altında eylem ipucu.
-- **Toolbar** (v2.9.25+): **Sayfa… açılır menüsü** (sayfaya git), **+/−** zoom,
-  **Tümü** (tüm sayfaları sığdır, `fitAll`), anlık renk picker'lar (sayfa-arası
-  ve sayfa-içi; seçim `localStorage`'a kaydedilir), PNG export, Reset, Clear
+- **Toolbar** (v2.9.25+): **Sayfa… açılır menüsü** (sayfaya git), **↰** üst sayfa
+  (v2.25.0), **+/−** zoom, **Tümü** (tüm sayfaları sığdır, `fitAll`), anlık renk
+  picker'lar (sayfa-arası ve sayfa-içi; seçim `localStorage`'a kaydedilir),
+  PNG export, Reset, Clear
 - **Yumuşak geçişler** (v2.9.25+): `smoothT()` — fit/reset/zoom butonları 0.35s
   ease; tekerlek/pan anlık kalır (gecikme hissi olmasın). Sidebar katlanması
   0.18s width transition.
@@ -396,17 +391,60 @@ Bir değişiklik yaptıktan sonra:
   otomatik bulunur (Panel olmayan .PcbDoc tercih edilir).
 - Çoklu net karşılaştırma: Shift+click (max 4, farklı renk)
 - Klavye: `?` modal aç, `/` arama aç+focus, `Enter` (aramada) ilk sonucu seç,
-  `B` sol paneli gizle/göster, `0` reset view, `F` fit last, `Esc` clear
+  `B` sol paneli gizle/göster, `H` hiyerarşi sekmesi, `Alt+Backspace` üst sayfa,
+  `Alt+Home` kök sayfa, `Alt+←/→` sayfa geçmişi, `0` reset view, `F` fit last,
+  `Esc` clear
 - PyInstaller paketi için gui.ui dosyası `sys._MEIPASS` üzerinden bulunur
   (gui.py'de fonksiyonla)
+
+### Şematik Hiyerarşi paneli + KiCad tarzı sayfa gezinme (v2.25.0+)
+
+Sol panelde üçüncü sekme: **Hiyerarşi** — KiCad'in "Schematic Hierarchy"
+gezgininin karşılığı. Ağaç `build_sheet_hierarchy()` ile **Python'da** kurulur
+(`build_html` çağırır, `SHEET_TREE` olarak gömülür); kaynak veri sayfalardaki
+sheet symbol (block) referanslarıdır.
+
+- **Ağaç kuralları**: hiçbir block'un hedefi OLMAYAN sayfalar KÖK; her block bir
+  alt düğüm. Çocuklar sayfa numarasına göre sıralanır (KiCad da böyle), aynı
+  numaralılar kayıt sırasını korur. Düğüm alanları kısa: `id · p` (ebeveyn,
+  −1=kök) `· s` (sayfa id, ""=proje dışı) `· t` (etiket) `· n` (sayfa no)
+  `· k` (çocuklar) `· miss` (hedef SchDoc projede yok) `· cyc` (döngü kesildi).
+- **Aynı SchDoc birden çok kez örneklenebilir** (Altium Repeat kanalları:
+  diffI2C_1/2/3 → aynı dosya): her ÖRNEK ayrı düğümdür, hepsi aynı sayfaya
+  gider, hiyerarşi YOLU farklıdır. Bu yüzden gezinme sayfa id'siyle değil
+  **aktif düğümle** (`curNodeId`) çalışır — yoksa kanaldan çıkarken yanlış üst
+  sayfaya dönülürdü. `enterSheet()` hedefin AKTİF düğüm altındaki örneğini seçer.
+- **Döngü koruması**: A→B→A referansında düğüm `cyc` ile işaretlenip alt ağaç
+  tekrar açılmaz (sonsuz özyineleme olurdu). Yalnız döngü içinde kalan sayfalar
+  hiçbir kökten görünmeyeceği için ayrıca kök olarak eklenir — hiçbir sayfa
+  ağaçtan düşmez. Hiyerarşisiz (düz) projede her sayfa köktür → düz liste.
+- **Sayfa numarası** = sayfanın viewer'daki grid sırası (1 tabanlı); aynı
+  dosyanın tüm örnekleri aynı numarayı gösterir (dosya bir kez render ediliyor).
+  Satır ipucunda hedef SchDoc adı da yazar (etiket designator olduğundan
+  `diffI2C_2` ↔ `[07] - diffI2C` ayrımı görünsün diye).
+- **Etkileşim**: satıra tık = o sayfaya git · ok = alt ağacı aç/kapat (durum
+  `localStorage`'da `schviz-ui.hierClosed`) · `↰ Üst sayfa` / `⌂ Kök` / `+` / `−`
+  düğmeleri · arama kutusu ağacı da filtreler (eşleşenler + ATALARI görünür).
+  Aktif satır kalın+vurgulu, aynı sayfayı gösteren diğer örnekler halkalı nokta.
+- **Klavye**: `H` sekmeyi aç · `Alt+Backspace` üst sayfa (KiCad "Leave Sheet") ·
+  `Alt+Home` kök · `Alt+←/→` sayfa geçmişi (`navHist`, 80 kayıt). Üst sayfa yoksa
+  / geçmiş bittiyse `#hier-toast` balonu uyarır. Alt dalı `Backspace` (not silme)
+  dalından ÖNCE gelir; `Alt+←/→` tarayıcının geri/ileri gezinmesini bastırır.
+- **İmleç her yoldan izler**: takip `fitToSheet()` sonundaki `noteSheetVisit()`
+  ile yapılır → sayfa açılır menüsü, arama, kart çift tıklaması ve cross-probe
+  da hiyerarşi imlecini taşır (tek nokta, her çağrı yerine yama gerekmez).
+- **İKİ TUZAK** (bkz. Çözülen Sorunlar): (1) `#hier-list` `display:flex` aldığı
+  için gizleme kuralı ID özgüllüğünde tekrar yazılmalı (`#hier-list.hidden`) —
+  `.list-container.hidden` (0,2,0) ID seçicisine (1,0,0) yenilir. (2) `hierReady`
+  **`var`** ile bildirilir: `fitToSheet` modül kurulmadan önce çağrılabiliyor,
+  `let` olsaydı TDZ hatası verirdi (`__annoUi` deseninin aynısı).
 
 ### PCB Viewer: döndürme / ayna + montaj dışa-içe aktarma (v2.12.0+)
 
 - **⟳ (R)** board'u 90° döndürür, **Çevir (X)** aynalar (alt yüzden bakış).
-  Görüş merkezindeki nokta yerinde kalır. Ekran↔kök dönüşümü tek noktada
-  (`rootToScreen`/`screenToRoot`/`centerOnRoot`); 90° katları olduğu için
-  AABB matematiği bozulmaz (bkz. Çözülen Sorunlar). Overlay yazıları
-  `.upright` sınıfıyla düz kalır.
+  Görüş merkezindeki nokta yerinde kalır. Dünya↔ekran dönüşümü tek noktada
+  (`w2s`/`s2w`/`centerOn`, yönelim `setOrient(rot, mir)`); döndürme 90°'nin
+  katlarıyla sınırlı olduğundan kutu (AABB) matematiği bozulmaz.
 - **BOM · Montaj → Dışa / İçe**: işaretler `{proje}_montaj.json` olarak
   kaydedilir (grup anahtarı + değer/footprint/designator listesi) ve başka
   makinede/kişide geri yüklenir; bilinmeyen gruplar sayılıp bildirilir.
@@ -434,85 +472,40 @@ bağlı (delegasyon) olduğundan yeniden kurulmaz; yalnız SVG'ye bağlı kurulu
 (block link + designator sınıfları) → `buildLods()`. Bu sıra bozulursa
 tıklanabilirlik veya LOD sessizce kaybolur.
 
-### PCB Viewer: boyut, Netler paneli, ölçüm, PNG (v2.11.0+)
+### PCB Viewer: paneller, ölçüm, PNG (canvas)
 
-- **Çıktı boyutu**: katman SVG'leri artık HTML'e ham gömülmüyor; hepsi tek
-  **gzip+base64** blob'unda (`LAYER_GZ`) taşınıp açılışta `DecompressionStream`
-  ile çözülüyor (`initLayers`). Çözülünce varsayılan AÇIK katmanlar hemen,
-  diğerleri ilk gösterimde (`ensureLayerLoaded`) DOM'a enjekte edilir.
-  **BRK-210: 65.1 MB → 8.0 MB (8×)**. `layerDataReady` çözülmeden
-  `loadAllLazyLayers()` no-op'tur (birkaç yüz ms). Çok eski tarayıcıda
-  (DecompressionStream yok) info-bar'da uyarı gösterilir.
-- **Netler paneli** (sidebar 2. sekme): net adı + pad/iz sayısı
-  (`collect_pcb_layers` artık `nets` listesi de döndürür — SVG taramak yerine
-  PCB'den bir kez çıkarılır). Ara, Güç/GND/Sinyal filtrele, tıkla → net tüm
-  katmanlarda vurgulanır (bakır ize çift tıklamakla aynı sonuç).
+Sol panelde dört sekme: **Katmanlar · Netler · Komponentler · BOM · Montaj**.
+
+- **Katmanlar**: aç/kapa, ↑ ile katmanı en üste getir (`topLayer` en sona
+  çizilir — canvas'ta sonra çizilen üstte; tekrar basınca normal sıraya döner),
+  Üst/Alt (`T`), Hepsi, Temizle.
+- **Netler**: net adı + pad/iz sayısı, ara, Güç/GND/Sinyal filtrele, tıkla →
+  net tüm katmanlarda vurgulanır (bakır ize çift tıklamakla aynı sonuç).
+  Çoklu net vurgusu `selNets` + Set tabanlı filtreyle (`drawLayer(li, netSet)`)
+  yapılır.
+- **BOM · Montaj** (InteractiveHtmlBom / KiCad iBOM tarzı montaj akışı):
+  komponentler değer + footprint ikilisine göre gruplanır (anahtar
+  `değer\u0000footprint`), satıra tıkla → grubun TÜM komponentleri vurgulanır
+  (`selComps`; tek seçimde ayrıca **pin-1 sarı halkası**), ✓ ile montaj takibi
+  (`schviz-bom:<proje>` anahtarıyla localStorage'da, `N/M yerleştirildi` sayacı
+  + Sıfırla), Tümü/Üst/Alt/Kalan filtreleri, arama, **Dışa / İçe** aktarma.
+  Board'da komponent seçilince `bomMark()` ilgili satırı işaretleyip görünür
+  kılar.
 - **Ölçüm aracı** (`Ölç` / `M`): iki noktaya tıkla → mesafe mm + mil, Δx/Δy;
-  imleç bir **pad/via üzerindeyse MERKEZİNE yapışır** (`snapXY`) — pad-pad
-  ölçümü göz kararı olmaz. Çizgi/yazı `1/scale` ile ekran-sabit
-  (`updateMeasureMetrics`, `applyTransform`dan ÇAĞRILIR — `updateMarkerMetrics`
-  içinden değil: o, highlight yoksa erken çıkıyor). Esc iptal.
+  imleç bir **pad/via üzerindeyse MERKEZİNE yapışır** — pad-pad ölçümü göz
+  kararı olmaz. Esc iptal.
 - **PNG dışa aktarma** (`Görüntü`): o anki görünüm (görünür katmanlar + vurgu +
-  ölçüm) uzun kenarı 4000px olan PNG olarak indirilir (LOD bitmap'iyle aynı
-  serileştirme deseni; blob → data: URI fallback'li).
+  ölçüm) PNG olarak indirilir.
 - **Yardım modalı** (`?`): fare/klavye, dokunmatik ve panel özeti.
-- **Kısayollar**: `M` ölçüm, `F` sığdır, `?` yardım (mevcut `/`, `B`, `Esc`).
-- **Bakır dolgu yarı-saydam** (`_recolor_pcb_layer`, copper/inner):
-  `shapebased-region` (pour) `fill-opacity=0.55` alır — pour izlerle AYNI
-  renkte olduğundan board tek düze renk bloğu gibi görünüyordu; artık üstteki
-  izler/pad'ler (tam parlaklık) belirgin.
-
-### Geometri (canvas) viewer: BOM · Montaj paneli (v2.13.0+)
-
-SVG sürümündeki panelin aynısı canvas sürümünde de var (4. sekme):
-değer+footprint gruplaması, satıra tıkla → grubun TÜM komponentleri vurgulanır
-(`selComps` dizisi; tek seçimde ayrıca **pin-1 sarı halkası**), ✓ ile montaj
-takibi, Tümü/Üst/Alt/Kalan filtreleri, arama, Dışa/İçe aktarma.
-**Anahtar biçimi SVG sürümüyle birebir aynı** (`değer\u0000footprint`) ve
-localStorage anahtarı da (`schviz-bom:<proje>`) ortak → aynı board'u iki
-görüntüleyiciyle açan kullanıcı aynı montaj durumunu görür, dışa aktarılan
-JSON ikisi arasında taşınabilir.
-
-### PCB Viewer: BOM · Montaj paneli (v2.10.0+)
-
-InteractiveHtmlBom (KiCad iBOM) tarzı montaj akışı. Sol panelde iki sekme:
-**Katmanlar** | **BOM · Montaj**.
-
-- **Gruplama**: komponentler `COMP_INFO[d].value` + `COMPONENTS[d].footprint`
-  ikilisine göre gruplanır (`BOM_GROUPS`), adede göre sıralanır. Satırda
-  ✓ kutusu, adet, değer, footprint ve designator listesi var.
-- **Grup vurgulama**: satıra tıkla → grubun TÜM komponentleri aynı anda
-  vurgulanır (`highlightComps(desigs)` — her komponente bir kutu + etiket,
-  hepsini kapsayan odak). Tek komponentli grupta popup açılır + cross-probe.
-- **Pin 1 işareti**: tek komponent vurgusunda `data-pad-number="1"` (veya A1)
-  pad'inin merkezine sarı halka (iBOM "highlight first pin"). Aynı pad birden
-  çok katmanda çizili olduğundan GÖRÜNÜR ilk kopya seçilir (gizli katmandaki
-  kopya 0-boyut döner).
-- **Montaj checklist'i**: ✓ kutusu "yerleştirildi" işaretidir; durum
-  `schviz-bom:<proje>` anahtarıyla localStorage'da saklanır (sayfa yenilense de
-  kalır), üstte `N/M yerleştirildi` sayacı ve Sıfırla düğmesi vardır.
-- **Filtreler**: Tümü / Üst / Alt / **Kalan** (işaretlenmemişler) çipleri +
-  arama kutusu (BOM sekmesinde grup filtresi olarak da çalışır: değer,
-  footprint veya designator alt-dizesi).
-- **Çift yönlü senkron**: board'da komponent seçilince `bomMark()` ilgili
-  satırı işaretleyip görünür kılar.
-- **Bilinen kısıt**: GİZLİ katmandaki komponentin ekran kutusu 0 olduğundan
-  vurgulanamaz (ör. alt yüz kapalıyken 35'lik grubun 17'si çizilir). Sessiz
-  kalmamak için `pcbHint()` info-bar'da "N komponent gizli katmanda — Üst/Alt
-  ile karşı yüzü aç" uyarısını gösterir.
-
-### PCB Viewer'a taşınan UX özellikleri (v2.9.26+)
-
-Şematik tarafındaki desenler `build_pcb_html`'e de uygulandı:
-- Katlanabilir sol panel: `#sb-toggle` ok butonu (h2'nin sağında), `B` kısayolu,
-  `localStorage` alanı `pcbSidebar` (şematikten bağımsız). `showComp()` popup
-  açarken paneli otomatik açar.
-- Katlanabilir arama (`#search-box.collapsed`, varsayılan kapalı, `/` açar,
-  `Esc` kapatır).
-- Toolbar +/− zoom butonları (`zoomBy`, autoFit=false yapar).
-- **Boş alana tek tıklama net highlight'ını temizler**: SVG içinde
-  data-component/data-net taşımayan hedef VEYA SVG dışındaki `#canvas-wrap`
-  zemini; `moved` bayrağı pan'i ayırt eder. Esc de çalışmaya devam eder.
+- **Katlanabilir sol panel** (`#sb-toggle`, `B`) ve katlanabilir arama
+  (`#search-box`, `/` açar, `Esc` kapatır) — şematik viewer'daki desenin aynısı.
+- **Kısayollar**: `F` sığdır, `B` panel, `M` ölçüm, `R` döndür, `X` çevir,
+  `P` pad etiketleri, `T` Üst/Alt, `/` arama, `?` yardım, `Esc` temizle.
+- **Katman verisi** gzip+base64 gömülüdür, açılışta `DecompressionStream` ile
+  çözülür; çok eski tarayıcıda (API yok) info-bar'da uyarı gösterilir.
+- **CSS tuzağı** (bkz. Çözülen Sorunlar): gizleme kuralı `.panel.hidden,
+  #chips.hidden { display:none !important; }` — `#chips` bir `.panel` DEĞİL,
+  yalnız `.panel.hidden` yazılırsa net filtre çipleri her sekmede görünür.
 
 ### 3D Viewer: Parçalar butonu (v2.9.26+)
 
@@ -594,6 +587,150 @@ mesajına bak.
   bu API olmayabilir (graceful fallback var, "veri yok" der).
 
 ## Çözülen Sorunlar (tarihçe)
+
+- **Şematik hiyerarşi paneli + KiCad tarzı sayfa gezinme (v2.25.0, kullanıcı
+  isteği: KiCad 10'un "Şematik Hiyerarşi" panelinin ekran görüntüsü + "Alt+
+  Backspace ile ana hiyerarşi şemasına dönme vb.")**: Viewer sayfa hiyerarşisini
+  HİÇ göstermiyordu — block yazısına tıklayınca alt sayfaya gidiliyor ama geri
+  dönmenin yolu yoktu ve tasarımın ağaç yapısı hiçbir yerde görünmüyordu.
+  Ağaç zaten elimizdeki veriden (`sheets[].blocks` = sheet symbol referansları)
+  türetilebiliyordu; yeni `build_sheet_hierarchy()` bunu düğüm listesine çevirip
+  `SHEET_TREE` olarak gömüyor (ayrıntı: "Şematik Hiyerarşi paneli" bölümü).
+  **Veri tarafında üç karar**: (1) hedefi projede OLMAYAN block'lar artık
+  atılmıyor, "(bu projede yok)" düğümü olarak çiziliyor (ağaç eksiksiz görünsün;
+  tıklanabilir link yine üretilmiyor); (2) çocuklar sayfa numarasına göre
+  sıralanıyor — KiCad gezgininin sırası bu ve BRK-210'da kayıt sırasıyla da
+  örtüşüyor; (3) döngü (A→B→A) `cyc` ile kesiliyor, yalnız döngüde kalan
+  sayfalar ayrıca kök yapılıyor → hiçbir sayfa ağaçtan düşmüyor (düz projede
+  her sayfa kök = düz liste).
+  **Gezinme neden sayfa id'siyle DEĞİL düğümle**: BRK-210'da `[07] - diffI2C`
+  üç kez örneklenmiş (diffI2C_1/2/3); sayfa id'siyle çalışan bir "üst sayfaya
+  dön" her kanaldan aynı yere döner ve hangi kanalda olduğumuz kaybolurdu.
+  Aktif düğüm (`curNodeId`) tutulunca `enterSheet()` hedefin AKTİF düğüm
+  altındaki örneğini seçiyor, `leaveSheet()` o örneğin ebeveynine dönüyor
+  (test: diffI2C_2'den Alt+Backspace → köke değil `U_[06] - MCU`'ya).
+  İmleç `fitToSheet()` sonundaki `noteSheetVisit()` ile taşınıyor → sayfa
+  menüsü / arama / kart çift tıklaması / cross-probe da hiyerarşiyi izliyor.
+  **Üç tuzak**: (i) `#hier-list` `display:flex` aldığından `.list-container.hidden`
+  (0,2,0) ID seçicisine (1,0,0) yeniliyordu → panel hiç gizlenmezdi; gizleme
+  `#hier-list.hidden` olarak yeniden yazıldı (v2.14.0'daki `#chips.hidden`
+  hatasının aynısı). (ii) `hierReady` **`var`** olmalı: `fitToSheet` modül
+  kurulmadan çağrılabiliyor, `let` ile TDZ hatası verirdi. (iii) **Şablonlarda
+  `<html lang="tr">` sabit yazılıydı** → İngilizce çıktıda CSS
+  `text-transform:uppercase` TÜRKÇE büyütme kuralını uygulayıp "Hierarchy"yi
+  **"HİERARCHY"** (noktalı İ) yapıyordu; `_tr_html()` artık dil etiketini etkin
+  dile çekiyor (aynı hata mevcut "COLOR PİCKERS" başlığında da vardı — o da
+  düzeldi).
+  **Doğrulama** (headless Edge + CDP): TR şematikte **35/35** (ağaç yapısı,
+  kanal düğümleri, panel/sekme görünürlüğü, ağaçtan gezinme, Alt+Backspace
+  (kanaldan doğru üst sayfa dahil), kökte uyarı balonu, block yazısıyla dala
+  girme, Alt+Home, Alt+←/→ geçmişi ve geçmişe kayıt eklememesi, aç/kapat +
+  localStorage kalıcılığı, ağaç araması, `H` kısayolu, toolbar ↰, net/komponent
+  seçimi regresyonu, 0 JS hatası) · EN + birleşik görünüm **15/15** (EN'de
+  Türkçe karakter 0, dil etiketi `en`, birleşik görünümün şematik iframe'inde
+  ağaç dolu, iframe içinde Alt+Backspace, Böl moduna geçiş, cross-probe
+  regresyonu) · `node --check` temiz · `tools/check_html_i18n.py` 234/234,
+  ölü anahtar 0.
+  **Test notu**: birleşik görünümde `#hier-tree` srcdoc ayrıştırılır
+  ayrıştırılmaz DOM'a giriyor ama SATIRLAR iframe script'i çalışınca doluyor —
+  beklerken satır sayısına bakılmalı (ilk testte elemanın varlığına bakıldığı
+  için "ağaç boş" sanıldı). `srcdoc` iframe üst sayfanın origin'ini miras
+  aldığından DOM testleri `contentDocument` ile doğrudan yapılabiliyor
+  (izole dünya gerekmiyor); `contentWindow` üzerinden yalnız `var` değişkenler
+  görünür (`hierReady` görünür, `let/const` SHEET_TREE görünmez).
+
+- **Gizli panele gelen cross-probe seçimi ŞEMATİKTE alakasız yeri gösteriyordu
+  (v2.24.0, kullanıcı bildirimi: "PCB'de komponent seç → 3D doğru → Şematiğe
+  geçince alakasız bir bölüm; Böl sayfasında her şey doğru")**: Tek-panel
+  modlarında (Şematik / PCB / 3D) diğer paneller `display:none`'dır → o
+  iframe'in İÇİNDEKİ her `getBoundingClientRect()`/`getBBox()` **SIFIR** döner.
+  `highlightComponent` kutuyu `svgBoxToCanvas()` ile designator yazısının
+  bbox↔ekran eşlemesinden türetiyor; ölçüler sıfır olunca ölçek 0 çıkıp kutu
+  `(-tx/scale, -ty/scale)` gibi ALAKASIZ bir koordinata düşüyordu. Ölçüldü
+  (headless Edge + CDP, Smart_MCU): gizliyken `schMarkerBox = {x:-138.3,
+  y:-138.3, w:10, h:10}`; Şematiğe geçince kutu ekranda (318,−1) 3×3 px,
+  U1'in gerçek yazısı ise (886,57) → kullanıcının gördüğü tam olarak bu.
+  **Böl modunda iki panel de görünür olduğu için sorun YOKTU** (ölçüm doğru) —
+  kullanıcının gözlemiyle birebir uyuşuyor. Aynı sınıf hata TERS yönde de
+  vardı: şematikten seçim yapılıp PCB paneli gizliyken `showComp()`'un
+  `centerOn()`'u 0×0 alana göre hesaplayıp komponenti sol-üst KÖŞEYE atıyordu
+  (ölçüm: ekran (0,0), merkezden 785 px).
+  **Çözüm** — iki viewer'da da PCB tarafındaki eski `pendingComp` deseninin
+  aynısı: ölçüm yapılamıyorsa (`schMeasurable()` / `pcbMeasurable()`) seçim
+  `pendingXpComp`'ta BEKLETİLİR, panel görünür olunca uygulanır. **Tetikleyici
+  ResizeObserver DEĞİL** (yalnız yedek): ölçümle görüldü ki gizli iframe hiç
+  render edilmediğinden gözlemci teslimatı gecikebiliyor/hiç olmuyor — kabuk
+  `setViewMode()` içinde görünür olan panele açıkça **`pane-shown`** mesajı
+  yollar, iç viewer bekleyen seçimi o an uygular (ölçü henüz gelmediyse 5×60 ms
+  yeniden dener). Seçim temizleme mesajı bekleyen seçimi de düşürür (panel
+  açılınca bayat seçim canlanmasın). Ayrıca `fitToSheet`/`fitAll`'a sıfır-ölçü
+  koruması eklendi — sıfır alanla `scale = 0` hesaplanıyordu.
+  **Doğrulama** (headless Edge + CDP): düzeltme ÖNCESİ derlemede hata birebir
+  üretildi, sonrasında 8/8 regresyon geçti — Böl modunda sch→pcb/sch→3D,
+  pcb→sch kutusu, seçim temizleme yayılımı, net cross-probe (gidiş + bırakma),
+  gizliyken seçilip 3D'ye geçiş ve **3D → Şematik** (bildirilen senaryo).
+
+- **Birleşik görünümün üst çubuğuna tam ekran düğmesi (v2.24.0, kullanıcı
+  isteği)**: Mod düğmeleri ile sürüm rozeti arasında, dört köşe ikonlu
+  `#vm-fs`. Tarayıcının F11'i ile aynı işi yapar (`requestFullscreen` /
+  `exitFullscreen`); işaret durumu `fullscreenchange`'den, yani pencerenin
+  GERÇEK durumundan okunur (kullanıcı Esc/F11 ile de çıkabilir). API yoksa
+  düğme hiç gösterilmez, izin reddedilirse promise sessizce yutulur.
+  **CSS ayrıntısı**: düğme mod grubunun DIŞINDA olduğundan `.vm-btn:first/
+  last-child` köşe kuralları ona uymaz → `.vm-btn.fs-btn` ile kendi yuvarlaması
+  verildi (eşit özgüllük, sonra geldiği için kazanır).
+  **Doğrulama** (headless Edge + CDP, 6 kontrol): sayfa yüklenmeden önce
+  `requestFullscreen`/`exitFullscreen` sahtelenip GERÇEK tıklama gönderildi —
+  giriş 1 çağrı, tam ekrandayken tıklama 1 çıkış çağrısı, işaret her iki yönde
+  senkron, konum (mod grubu ile rozet arası) ve mod düğmelerinin
+  `.active` mantığı bozulmadı.
+
+- **Menü çubuğuna Tam Ekran eklendi (v2.23.0, kullanıcı isteği)**: Yeni
+  **Görünüm** menüsü (Üret ile Ayarlar arasında) + işaretlenebilir "Tam Ekran"
+  eylemi, `F11`. **İki tuzak**: (1) `showNormal()` maximize durumunu da
+  kaldırır → büyütülmüş pencereden tam ekrana geçip dönünce pencere küçülüyordu;
+  geçişten önce `_was_maximized` saklanıp çıkışta `showMaximized()` çağrılıyor.
+  (2) Pencere durumu menü dışından da değişebilir (pencere yöneticisi, OS
+  kısayolu) → `changeEvent`/`WindowStateChange` ile eylem işareti
+  `isFullScreen()`e eşitlenir; yoksa menüdeki ✓ gerçeği yansıtmaz. Eylem
+  `_menu_action_items`'a KONMADI (üretim sürerken de tam ekran yapılabilsin).
+  Menü çubuğu tam ekranda da görünür kaldığından çıkış yolu hep elde.
+  **Doğrulama** (offscreen Qt, 7 kontrol): menü sırası, kısayol/işaretlenebilirlik,
+  tetikle→tam ekran→geri, maximize korunumu, dışarıdan değişimde işaret senkronu,
+  üretim kilidine dahil olmaması, TR→EN→TR gidiş-dönüşü.
+
+- **Klasik (katman-SVG'li) PCB görüntüleyici kaldırıldı (v2.22.0, kullanıcı
+  isteği: "hızlı pcb oluşturma daha yetenekli ve performanslı çalışıyor,
+  eskisine gerek yok")**: İki PCB yolu paralel duruyordu — `to_layer_svgs()`
+  çıktısını gömen klasik yol ve `extract_pcb_geometry()` + canvas kullanan
+  geometri yolu. Geometri yolu her ölçüde önde (BRK-210: **51.9 s / 4.45 MB**
+  ile klasik yolun 135 s / 8.0 MB'ı; birleşik görünüm **62.7 s / 8.88 MB** ile
+  402 s / 13.28 MB'ı) ve özellik olarak da eksiği yok — üstüne ölçüm/döndürme/
+  çevirme, her zoom'da akıcılık ve LOD gerektirmemek gibi fazlası var.
+  **Silinenler** (viewer.py ~2 300 satır): `generate_pcb_viewer`,
+  `build_pcb_html`, `collect_pcb_layers`, `_recolor_pcb_layer`,
+  `_extract_svg_inner` ve yalnız klasik yolun kullandığı doku üreticileri
+  `_build_board_surface` + `_svg_path_bbox`. `generate_combined_viewer`'ın
+  `fast_pcb` parametresi ve iki dallı yapısı kalktı (PCB paneli HER ZAMAN
+  canvas); GUI'de klasik buton (`pcbViewerBtn`) ve "Birleşikte hızlı PCB
+  kullan" kutucuğu + eş menü eylemi kaldırıldı, kalan buton **"PCB
+  Görüntüleyici"** adını ve `Ctrl+2` kısayolunu devraldı (birleşik `Ctrl+4`
+  → `Ctrl+3`), çıktı adı `_PCB_hizli.html` → `_PCB.html`.
+  **3D dokusu KAYBOLMADI**: `_build_surface_from_geometry()` (v2.14.0) aynı
+  bakır/pad/silkscreen dokusunu geometriden çiziyor — BRK-210 ve Smart_MCU'da
+  `surf.ok = 1` doğrulandı. **Tek gerçek kayıp**: solder mask / paste
+  katmanları listelenmez (Altium onları pad'lerden türetiyor, dosyada
+  primitive olarak yok) — zaten hızlı modun bilinen kısıtıydı.
+  **i18n temizliği**: klasik şablonla birlikte ölü kalan **69 `_EN_HTML`**
+  anahtarı, 21 `_EN_LOG` ve 7 GUI anahtarı silindi; `PCB geometrisi
+  çıkarılıyor (hızlı mod)` → `PCB geometrisi çıkarılıyor` (artık tek mod).
+  `tools/check_html_i18n.py`: **205/205 kapsandı, ölü anahtar 0**.
+  **Doğrulama**: offscreen Qt ile 12 kontrol (kaldırılan widget'lar yok, menü/
+  kısayol düzeni, `_BTN_LABELS` ↔ gui.ui birebir, TR→EN→TR gidiş-dönüşü,
+  eksik çeviri yok, `fast_pcb` imzalardan düştü, viewer'da klasik semboller
+  kalmadı) · Smart_MCU + BRK-210 için PCB / birleşik / şematik üretimi sorunsuz
+  · birleşik çıktının PCB paneli canvas (`LAYER_GZ` yok), 3D `surf` dolu,
+  8 satır-içi script `node --check` ile temiz, çıktıda ⟪⟫ kalıntısı 0.
 
 - **Üretilen HTML görüntüleyiciler hep Türkçeydi (v2.21.0, kullanıcı isteği:
   "html de hangi dilde ise ona göre yapılsın")**: v2.20.1'de GUI ve log

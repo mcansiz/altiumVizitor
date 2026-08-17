@@ -52,8 +52,7 @@ from i18n import tr
 from viewer import (generate_viewer, generate_json,
                     generate_bom_csv, generate_pnp_csv,
                     generate_ic_map_xlsx, generate_mcu_pinout_xlsx,
-                    generate_pcb_viewer,
-    generate_pcb_canvas_viewer, generate_combined_viewer,
+                    generate_pcb_canvas_viewer, generate_combined_viewer,
                     APP_VERSION)
 
 
@@ -108,10 +107,10 @@ class GeneratorThread(QtCore.QThread):
     def __init__(self, mode, project_path, output_path,
                  inter_color="#4ec9b0", intra_color="#ff9800",
                  main_designators=None, min_pins=4, exclude_prefixes=None,
-                 fast_pcb=False, parent=None):
+                 parent=None):
         """@brief __init__()
 
-        @param mode Üretim modu (html/json/bom/pnp/icmap/mcupin/pcbview/combined)
+        @param mode Üretim modu (html/json/bom/pnp/icmap/mcupin/pcbgeo/combined)
         @param project_path Altium proje dosyası (.PrjPcb) yolu
         @param output_path Çıktı dosyası yolu
         @param inter_color Sayfalar arası bağlantı rengi (hex)
@@ -119,7 +118,6 @@ class GeneratorThread(QtCore.QThread):
         @param main_designators Ana işlemci designator listesi
         @param min_pins Minimum pin sayısı eşiği
         @param exclude_prefixes IC haritasından hariç tutulacak designator önekleri ("J,P,TP")
-        @param fast_pcb Birleşik görünümde PCB paneli geometri (canvas) olsun mu
         @param parent
         """
         super().__init__(parent)
@@ -131,7 +129,6 @@ class GeneratorThread(QtCore.QThread):
         self.main_designators = main_designators
         self.min_pins = min_pins
         self.exclude_prefixes = exclude_prefixes
-        self.fast_pcb = fast_pcb
 
     def run(self):
         # İlerleme callback'i: üretici fonksiyonlara verilir, sinyale çevirir.
@@ -196,8 +193,8 @@ class GeneratorThread(QtCore.QThread):
                         tr("MCU pin listesi üretilemedi "
                            "(MCU designator gir / netlist yok)"))
                     return
-            elif self.mode == "pcbview":
-                ok = generate_pcb_viewer(
+            elif self.mode == "pcbgeo":
+                ok = generate_pcb_canvas_viewer(
                     project_path=self.project_path,
                     output_path=self.output_path,
                     log=lambda msg: self.log_signal.emit(msg),
@@ -209,19 +206,6 @@ class GeneratorThread(QtCore.QThread):
                         tr("PCB görüntüleyici üretilemedi "
                            "(PCB dosyası yok/okunamadı)"))
                     return
-            elif self.mode == "pcbgeo":
-                ok = generate_pcb_canvas_viewer(
-                    project_path=self.project_path,
-                    output_path=self.output_path,
-                    log=lambda msg: self.log_signal.emit(msg),
-                    progress=emit_progress,
-                )
-                if not ok:
-                    self.done_signal.emit(
-                        False,
-                        tr("PCB (geometri) görüntüleyici üretilemedi "
-                           "(PCB dosyası yok/okunamadı)"))
-                    return
             elif self.mode == "combined":
                 ok = generate_combined_viewer(
                     project_path=self.project_path,
@@ -230,7 +214,6 @@ class GeneratorThread(QtCore.QThread):
                     intra_sheet_color=self.intra_color,
                     log=lambda msg: self.log_signal.emit(msg),
                     progress=emit_progress,
-                    fast_pcb=self.fast_pcb,
                 )
                 if not ok:
                     self.done_signal.emit(
@@ -255,7 +238,7 @@ class GeneratorThread(QtCore.QThread):
                 final_out = str(Path(self.output_path).with_suffix(".xlsx"))
             elif self.mode == "mcupin":
                 final_out = str(Path(self.output_path).with_suffix(".xlsx"))
-            elif self.mode in ("pcbview", "pcbgeo"):
+            elif self.mode == "pcbgeo":
                 final_out = str(Path(self.output_path).with_suffix(".html"))
             elif self.mode == "combined":
                 final_out = str(Path(self.output_path).with_suffix(".html"))
@@ -403,9 +386,6 @@ class MainWindow(QtWidgets.QMainWindow):
         mcupin_btn = getattr(self, "mcuPinBtn", None)
         if mcupin_btn is not None:
             mcupin_btn.clicked.connect(self.generate_mcupin_action)
-        pcbview_btn = getattr(self, "pcbViewerBtn", None)
-        if pcbview_btn is not None:
-            pcbview_btn.clicked.connect(self.generate_pcbview_action)
         pcbgeo_btn = getattr(self, "pcbGeoBtn", None)
         if pcbgeo_btn is not None:
             pcbgeo_btn.clicked.connect(self.generate_pcbgeo_action)
@@ -495,11 +475,9 @@ class MainWindow(QtWidgets.QMainWindow):
         self._menu_action_items = [
             self._add_action(gen_menu, "Şematik Viewer", self.generate, "Ctrl+1"),
             self._add_action(gen_menu, "PCB Görüntüleyici",
-                             self.generate_pcbview_action, "Ctrl+2"),
-            self._add_action(gen_menu, "PCB Hızlı (geometri)",
-                             self.generate_pcbgeo_action, "Ctrl+3"),
+                             self.generate_pcbgeo_action, "Ctrl+2"),
             self._add_action(gen_menu, "Şematik + PCB + 3D  ★",
-                             self.generate_combined_action, "Ctrl+4"),
+                             self.generate_combined_action, "Ctrl+3"),
         ]
         gen_menu.addSeparator()
         self._menu_action_items += [
@@ -512,6 +490,13 @@ class MainWindow(QtWidgets.QMainWindow):
             self._add_action(gen_menu, "JSON (AI / LLM için)",
                              self.generate_json_action),
         ]
+
+        # --- Görünüm ---
+        view_menu = self._add_menu(bar, "&Görünüm")
+        self.fullScreenAct = self._add_action(
+            view_menu, "Tam Ekran", self.toggle_fullscreen, "F11",
+            tip="Pencereyi tam ekran yap / geri al (F11)",
+            checkable=True, checked=self.isFullScreen())
 
         # --- Ayarlar ---
         set_menu = self._add_menu(bar, "&Ayarlar")
@@ -534,24 +519,49 @@ class MainWindow(QtWidgets.QMainWindow):
                          lambda: self.pick_color("inter"))
         self._add_action(set_menu, "Sayfa İçi Renk…",
                          lambda: self.pick_color("intra"))
-        set_menu.addSeparator()
-        fast_chk = getattr(self, "fastPcbCheck", None)
-        self.fastPcbAct = self._add_action(
-            set_menu, "Birleşikte Hızlı PCB Kullan (geometri)", None,
-            checkable=True,
-            checked=bool(fast_chk is not None and fast_chk.isChecked()))
-        # Menü ↔ kutucuk çift yönlü senkron (tek durum, iki giriş noktası)
-        if fast_chk is not None:
-            self.fastPcbAct.toggled.connect(fast_chk.setChecked)
-            fast_chk.toggled.connect(self.fastPcbAct.setChecked)
-        else:
-            self.fastPcbAct.setEnabled(False)
 
         # --- Yardım ---
         help_menu = self._add_menu(bar, "&Yardım")
         self._add_action(help_menu, "Hakkında / Sürümler", self.show_about, "F1")
         self._add_action(help_menu, "Sürümleri Panoya Kopyala", self.copy_versions)
         self._add_action(help_menu, "Bağımlılık Durumu", self.show_dependencies)
+
+    # === Görünüm ===
+    def toggle_fullscreen(self, checked=None):
+        """@brief Pencereyi tam ekrana alır / normal duruma döndürür (F11).
+
+        @details Tam ekrana geçmeden ÖNCEKİ durum (`_was_maximized`) saklanır:
+        `showNormal()` maximize'i de kaldırdığından, tam ekrandan çıkarken
+        pencere önceden büyütülmüşse `showMaximized()` ile geri konur. Menü
+        çubuğu tam ekranda da görünür kaldığı için çıkış yolu hep elde olur.
+
+        @param checked Menü eyleminden gelen işaret durumu (None = sırala/çevir)
+        """
+        want = (not self.isFullScreen()) if checked is None else bool(checked)
+        if want == self.isFullScreen():
+            return
+        if want:
+            self._was_maximized = self.isMaximized()
+            self.showFullScreen()
+        elif getattr(self, "_was_maximized", False):
+            self.showMaximized()
+        else:
+            self.showNormal()
+
+    def changeEvent(self, event):
+        """@brief Pencere durumu değişince menüdeki Tam Ekran işaretini eşitler.
+
+        @details İşaret yalnız menüden değil, pencere yöneticisinden de
+        değişebilir (Windows'ta başlık çubuğu / kısayol). Tek doğruluk kaynağı
+        `isFullScreen()`; eylem her durum değişiminde ona eşitlenir.
+
+        @param event QEvent (WindowStateChange ilgilenilen tür)
+        """
+        if event.type() == QtCore.QEvent.WindowStateChange:
+            act = getattr(self, "fullScreenAct", None)
+            if act is not None and act.isChecked() != self.isFullScreen():
+                act.setChecked(self.isFullScreen())
+        super().changeEvent(event)
 
     # === Dil ===
     def set_language(self, code, persist=True):
@@ -823,15 +833,10 @@ class MainWindow(QtWidgets.QMainWindow):
     def generate_pcbgeo_action(self):
         """@brief Geometri tabanlı (canvas) PCB görüntüleyici üretimini başlatır.
 
-        SVG katmanları yerine ham geometri gömülür: dosya ~3-15x küçük,
+        SVG katmanları yerine ham geometri gömülür: dosya küçük,
         her zoom seviyesinde akıcı.
         """
         self._start_generation(mode="pcbgeo")
-
-    def generate_pcbview_action(self):
-        """@brief PCB görüntüleyici (HTML) üretimini başlatır.
-        """
-        self._start_generation(mode="pcbview")
 
     def generate_combined_action(self):
         """@brief Şematik + PCB + 3B birleşik görüntüleyici üretimini başlatır.
@@ -864,8 +869,7 @@ class MainWindow(QtWidgets.QMainWindow):
         @return Üretilen sonuç.
         """
         names = ["generateBtn", "generateJsonBtn", "bomBtn", "pnpBtn",
-                 "icmapBtn", "mcuPinBtn", "pcbViewerBtn", "pcbGeoBtn",
-                 "combinedBtn"]
+                 "icmapBtn", "mcuPinBtn", "pcbGeoBtn", "combinedBtn"]
         return [getattr(self, n) for n in names if getattr(self, n, None)]
 
     ## @brief Buton adı → gui.ui'deki KAYNAK (Türkçe) etiket.
@@ -878,8 +882,7 @@ class MainWindow(QtWidgets.QMainWindow):
         "pnpBtn": "Pick && Place (CSV)",
         "icmapBtn": "IC Bağlantı Haritası (Excel)",
         "mcuPinBtn": "MCU Pin Listesi (Excel)",
-        "pcbViewerBtn": "PCB Görüntüleyici üret",
-        "pcbGeoBtn": "PCB Hızlı (geometri) üret",
+        "pcbGeoBtn": "PCB Görüntüleyici üret",
         "combinedBtn": "Şematik + PCB + 3D hepsini üret",
     }
     _MODE_BTN = {
@@ -889,15 +892,14 @@ class MainWindow(QtWidgets.QMainWindow):
         "pnp": "pnpBtn",
         "icmap": "icmapBtn",
         "mcupin": "mcuPinBtn",
-        "pcbview": "pcbViewerBtn",
         "pcbgeo": "pcbGeoBtn",
         "combined": "combinedBtn",
     }
 
     def _start_generation(self, mode):
         """@brief Seçilen modda arka plan üretimini başlatır; arayüzü kilitler.
-        
-        @param mode Üretim modu (html/json/bom/pnp/icmap/mcupin/pcbview/combined)
+
+        @param mode Üretim modu (html/json/bom/pnp/icmap/mcupin/pcbgeo/combined)
         """
         project_path = self.projectPathEdit.text().strip()
         output_path = self.outputPathEdit.text().strip()
@@ -939,12 +941,9 @@ class MainWindow(QtWidgets.QMainWindow):
             base = Path(output_path)
             tag = main_desigs if main_desigs else "MCU"
             output_path = str(base.with_name(base.stem + f"_{tag}_PinListesi").with_suffix(".xlsx"))
-        elif mode == "pcbview":
-            base = Path(output_path)
-            output_path = str(base.with_name(base.stem + "_PCB").with_suffix(".html"))
         elif mode == "pcbgeo":
             base = Path(output_path)
-            output_path = str(base.with_name(base.stem + "_PCB_hizli").with_suffix(".html"))
+            output_path = str(base.with_name(base.stem + "_PCB").with_suffix(".html"))
         elif mode == "combined":
             base = Path(output_path)
             output_path = str(base.with_name(base.stem + "_Birlesik").with_suffix(".html"))
@@ -974,13 +973,11 @@ class MainWindow(QtWidgets.QMainWindow):
             pbar.setFormat(tr("Başlatılıyor… %p%"))
             pbar.setVisible(True)
 
-        fast_chk = getattr(self, "fastPcbCheck", None)
         self.worker = GeneratorThread(
             mode, project_path, output_path,
             inter_color=self.inter_color, intra_color=self.intra_color,
             main_designators=main_desigs or None, min_pins=min_pins,
             exclude_prefixes=exclude_prefixes or None,
-            fast_pcb=bool(fast_chk is not None and fast_chk.isChecked()),
         )
         self.worker.log_signal.connect(self.log)
         self.worker.progress_signal.connect(self.on_progress)

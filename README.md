@@ -45,15 +45,18 @@ No web server, no installation, no internet required. Works directly via `file:/
   English board to a colleague and a Turkish one to another.
 
 * **Menu bar with keyboard shortcuts**
-  File / Generate / Settings / Help — every generator is also reachable from the menu
-  (`Ctrl+1..4` for the viewers), plus `Ctrl+O` open project, `Ctrl+B` open last output,
-  `F1` about.
+  File / Generate / View / Settings / Help — every generator is also reachable from the
+  menu (`Ctrl+1..3` for the viewers), plus `Ctrl+O` open project, `Ctrl+B` open last
+  output, `F11` full screen, `F1` about.
 
 * **Interactive Schematic Viewer**
   All pages in a single pan/zoom canvas, clickable nets and components, selectable text like PDF.
 
-* **PCB Viewer**
-  Full-screen layered view similar to Altium, layer toggling, copper/net highlighting, cross-probing.
+* **PCB Viewer (geometry / canvas)**
+  Full-screen layered view similar to Altium — layer toggling, copper/net highlighting,
+  cross-probing. Instead of embedding layer SVGs it embeds the raw board geometry
+  (tracks/pads/vias/regions/text) and draws it on a `<canvas>`: much smaller files and
+  smooth at any zoom, plus rotate/mirror, measurement and touch support.
 
 * **Schematic + PCB + 3D in One HTML**
   Side-by-side layout with bidirectional cross-probing and real embedded **STEP 3D models**.
@@ -70,14 +73,6 @@ No web server, no installation, no internet required. Works directly via `file:/
 * **Touch / Mobile Ready**
   Works on phones and tablets: one-finger pan, two-finger pinch zoom, tap to select
   (schematic, PCB and 3D views alike), responsive sidebars.
-
-* **Geometry PCB Viewer (fast)**
-  Embeds raw board geometry (tracks/pads/vias/regions/text) instead of layer SVGs and
-  draws it on a `<canvas>`: ~3-15x smaller files, smooth at any zoom, plus rotate/mirror,
-  measurement, net & component selection, BOM/assembly panel and touch support.
-  The combined viewer can use it too — tick **"Use fast PCB in combined view"** (on by
-  default); the 3D board texture (copper, pads, silkscreen text) is rendered from the same
-  geometry, so only solder-mask/paste layers are unavailable.
 
 * **Measure, Net Browser & PNG Export (PCB viewer)**
   Two-click distance in mm/mil that snaps to pad centers, searchable net list with
@@ -111,14 +106,13 @@ No web server, no installation, no internet required. Works directly via `file:/
 
 ## 📦 Outputs
 
-The application generates nine types of outputs:
+The application generates eight types of outputs:
 
 | Output                     | Format           | Description                       |
 | -------------------------- | ---------------- | --------------------------------- |
 | **Schematic Viewer**       | HTML (~30 MB)    | Single-file interactive schematic |
-| **PCB Viewer**             | HTML (~30-40 MB) | Layered PCB with net highlighting |
-| **PCB Fast (geometry)**    | HTML (~3-8 MB)   | Canvas viewer from raw geometry   |
-| **Schematic + PCB + 3D ★** | HTML (~45-50 MB) | Combined view with cross-probing  |
+| **PCB Viewer**             | HTML (~3-8 MB)   | Canvas viewer from raw geometry, net highlighting |
+| **Schematic + PCB + 3D ★** | HTML (~8-15 MB)  | Combined view with cross-probing  |
 | **MCU Pin List**           | XLSX             | MCU-centric pin mapping           |
 | **IC Connection Map**      | XLSX             | Signal/interface mapping          |
 | **BOM**                    | CSV              | Full bill of materials            |
@@ -170,8 +164,9 @@ python3 gui.py
 | ---------- | ---------------------------- |
 | `Ctrl+O`   | Open project                 |
 | `Ctrl+S`   | Choose output path           |
-| `Ctrl+1-4` | Generate Schematic / PCB / PCB fast / Combined |
+| `Ctrl+1-3` | Generate Schematic / PCB / Combined |
 | `Ctrl+B`   | Open last output in browser  |
+| `F11`      | Full screen on / off         |
 | `F1`       | About / versions             |
 | `Ctrl+Q`   | Quit                         |
 
@@ -189,6 +184,9 @@ python3 gui.py
 | `Esc`   | Clear selection     |
 | `?`     | Show help           |
 | `1-4`   | Switch views        |
+
+In the combined view the top bar also has a full-screen button (same effect as the
+browser's `F11`).
 
 Touch: one finger = pan (rotate in 3D), two fingers = pinch zoom, tap = click,
 double tap = double click.
@@ -279,15 +277,14 @@ Projeyi seçin, bir düğmeye basın — çıktı olarak **çift tıkla açılan
 ##  Öne Çıkanlar
 
 - **Türkçe / İngilizce arayüz** — **Ayarlar → Dil** menüsünden anında geçiş, seçim hatırlanır. Dil her yerde geçerlidir: masaüstü arayüzü, üretim log'u ve ilerleme etiketleri, **ve üretilen HTML görüntüleyiciler**. HTML dosyası üretildiği dili taşır; aynı projeden hem Türkçe hem İngilizce görüntüleyici üretip farklı kişilere verebilirsiniz.
-- **Üst menü ve klavye kısayolları** — Dosya / Üret / Ayarlar / Yardım. Her üretim menüden de erişilebilir (`Ctrl+1..4` görüntüleyiciler), ayrıca `Ctrl+O` proje aç, `Ctrl+B` son çıktıyı aç, `F1` hakkında.
+- **Üst menü ve klavye kısayolları** — Dosya / Üret / Görünüm / Ayarlar / Yardım. Her üretim menüden de erişilebilir (`Ctrl+1..3` görüntüleyiciler), ayrıca `Ctrl+O` proje aç, `Ctrl+B` son çıktıyı aç, `F11` tam ekran, `F1` hakkında.
 - **İnteraktif Şematik Viewer** — Tüm sayfalar tek pan/zoom kanvasında, tıklanabilir net'ler ve komponentler, PDF gibi seçilip kopyalanabilir metinler.
-- **PCB Görüntüleyici** — Altium benzeri tam ekran katman görüntüleyici; katman aç/kapa, bakır yol/net highlight, komponente tıkla → şematik ↔ PCB cross-probe.
+- **PCB Görüntüleyici (geometri / canvas)** — Altium benzeri tam ekran katman görüntüleyici; katman aç/kapa, bakır yol/net highlight, komponente tıkla → şematik ↔ PCB cross-probe. Katman SVG'leri yerine board'un ham geometrisi gömülüp canvas'a çizilir: dosya çok daha küçük, her zoom'da akıcı; döndürme/ayna ve dokunmatik dahil.
 - **Şematik + PCB + 3D tek HTML'de** — Yan yana, çift yönlü cross-probe; gerçek gömülü **STEP 3D modelleriyle** board önizlemesi.
 - **Excel &amp; CSV çıktıları** — MCU pin listesi, IC bağlantı haritası, BOM, Pick &amp; Place.
 - **AI/LLM dostu JSON** — Gerçek elektriksel bağlantı (pin → net), BOM ve varyant verisiyle kompakt dışa aktarma.
 - **Not &amp; kutu araçları** — Şematik üzerine PDF editörü tarzı not/işaret ekleme, kaydetme.
 - **Dokunmatik / mobil** — Telefon ve tablette çalışır: tek parmak kaydırma, iki parmak yakınlaştırma, dokunarak seçme (şematik, PCB ve 3D); dar ekranda kayan sol panel.
-- **PCB Hızlı (geometri) görünümü** — Katman SVG'leri yerine board'un ham geometrisi gömülür ve canvas'a çizilir: dosya ~3-15 kat küçük, her zoom'da akıcı; döndürme/ayna, ölçüm, net & komponent seçimi, BOM·Montaj paneli, dokunmatik dahil. Birleşik görünümde de kullanılabilir: **"Birleşikte hızlı PCB kullan"** kutucuğu (varsayılan AÇIK); 3D board dokusu (bakır, pad, silkscreen yazıları) da geometriden üretilir, yalnız mask/paste katmanları bulunmaz.
 - **Ölçüm · Net listesi · PNG (PCB)** — İki tıkla mesafe (mm + mil, pad merkezine yapışır), aranabilir net listesi (Güç/GND/Sinyal filtresi, tıkla → vurgula), tek tıkla görünümün PNG'si, `?` ile yardım.
 - **BOM · Montaj paneli (PCB)** — Değer + footprint'e göre gruplanmış liste; satıra dokun → grubun tamamı board'da vurgulanır, ✓ ile montaj takibi (tarayıcıda saklanır), Üst/Alt/Kalan filtreleri, seçili parçada pin-1 işareti.
 - **Cross-platform** — Windows ve Linux; kodun tamamı `pathlib` ile OS-bağımsız.
@@ -312,15 +309,14 @@ Projeyi seçin, bir düğmeye basın — çıktı olarak **çift tıkla açılan
 
 ##  Üretilen Çıktılar
 
-Uygulama dokuz ayrı çıktı üretir:
+Uygulama sekiz ayrı çıktı üretir:
 
 
 | Çıktı                    | Format           | Açıklama                                                     |
 | ------------------------ | ---------------- | ------------------------------------------------------------ |
 | **Şematik Viewer**       | HTML (~30 MB)    | Gömülü SVG'lerle tek dosya interaktif şematik                |
-| **PCB Görüntüleyici**    | HTML (~30-40 MB) | Tam ekran katmanlı PCB, net highlight, cross-probe           |
-| **PCB Hızlı (geometri)** | HTML (~3-8 MB)   | Ham geometriden canvas görüntüleyici, her zoom'da akıcı      |
-| **Şematik + PCB + 3D ★** | HTML (~45-50 MB) | Üçü tek dosyada, çift yönlü cross-probe + 3D                 |
+| **PCB Görüntüleyici**    | HTML (~3-8 MB)   | Ham geometriden canvas PCB, net highlight, cross-probe       |
+| **Şematik + PCB + 3D ★** | HTML (~8-15 MB)  | Üçü tek dosyada, çift yönlü cross-probe + 3D                 |
 | **MCU Pin Listesi**      | XLSX             | MCU merkezli pin listesi (fonksiyon/arayüz otomatik tespiti) |
 | **IC Bağlantı Haritası** | XLSX             | IC gruplarına göre sinyal/arayüz tablosu                     |
 | **BOM**                  | CSV              | Tüm parametre sütunlarıyla malzeme listesi                   |
@@ -379,8 +375,9 @@ python3 gui.py
 | ---------- | ---------------------------------------------- |
 | `Ctrl+O`   | Proje aç                                       |
 | `Ctrl+S`   | Çıktı yolunu seç                               |
-| `Ctrl+1-4` | Şematik / PCB / PCB hızlı / Birleşik üret      |
+| `Ctrl+1-3` | Şematik / PCB / Birleşik üret                  |
 | `Ctrl+B`   | Son çıktıyı tarayıcıda aç                      |
+| `F11`      | Tam ekran aç / kapat                           |
 | `F1`       | Hakkında / sürümler                            |
 | `Ctrl+Q`   | Çıkış                                          |
 
@@ -399,6 +396,9 @@ python3 gui.py
 | `Esc`           | Seçimi/aracı temizle                        |
 | `?`             | Kısayol yardımını aç                        |
 | `1 / 2 / 3 / 4` | Birleşik görünümde Şematik / Böl / PCB / 3D |
+
+Birleşik görünümün üst çubuğunda ayrıca **tam ekran düğmesi** vardır (tarayıcının
+`F11`'i ile aynı işi yapar).
 
 **Dokunmatik:** tek parmak sürükle = kaydır (3D'de döndür) · iki parmak = yakınlaştır
 (pinch) + kaydır · tek dokunuş = tıklama · çift dokunuş = çift tıklama.

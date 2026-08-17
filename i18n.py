@@ -111,34 +111,17 @@ _EN = {
     "İnteraktif şematik HTML görüntüleyici üret":
         "Generate an interactive schematic HTML viewer",
     "Şematik Viewer üret": "Generate Schematic Viewer",
-    "Tam ekran PCB görüntüleyici: tüm katmanlar, tıklanabilir komponentler "
-    "(Altium benzeri)":
-        "Full-screen PCB viewer: all layers, clickable components (Altium-like)",
+    "Tam ekran PCB görüntüleyici (geometri/canvas): katman aç-kapa, tıklanabilir "
+    "komponentler, ölçüm, net seçimi, BOM · Montaj paneli, döndür/çevir.":
+        "Full-screen PCB viewer (geometry/canvas): layer toggling, clickable "
+        "components, measurement, net selection, BOM · Assembly panel, "
+        "rotate/flip.",
     "PCB Görüntüleyici üret": "Generate PCB Viewer",
-    "Geometri tabanlı PCB görüntüleyici: SVG yerine ham geometri gömülür → dosya "
-    "çok daha küçük, her zoom seviyesinde akıcı (canvas). Ölçüm, net/komponent "
-    "seçimi, döndürme dahil.":
-        "Geometry-based PCB viewer: raw geometry is embedded instead of SVG → "
-        "much smaller file, smooth at every zoom level (canvas). Includes "
-        "measurement, net/component selection and rotation.",
-    "PCB Hızlı (geometri) üret": "Generate PCB Fast (geometry)",
     "Şematik + PCB + 3D tek dosyada. Üç yönlü cross-probe: birinde komponente "
     "tıkla → diğerlerinde gösterilir":
         "Schematic + PCB + 3D in a single file. Three-way cross-probe: click a "
         "component in one → it is shown in the others",
     "Şematik + PCB + 3D hepsini üret": "Generate Schematic + PCB + 3D (all)",
-    "Birleşik görünümün PCB panelinde geometri (canvas) görüntüleyiciyi kullan: "
-    "katman SVG'leri hiç render edilmez → üretim çok daha hızlı, dosya çok daha "
-    "küçük, her zoom'da akıcı.\nKARŞILIĞI: 3D board yüzey dokusu "
-    "(bakır/silkscreen) üretilmez (board düz yeşil kalır) ve solder mask / paste "
-    "katmanları listelenmez.":
-        "Use the geometry (canvas) viewer in the PCB panel of the combined view: "
-        "layer SVGs are never rendered → much faster generation, much smaller "
-        "file, smooth at every zoom.\nTRADE-OFF: the 3D board surface texture "
-        "(copper/silkscreen) is not produced (the board stays plain green) and "
-        "solder mask / paste layers are not listed.",
-    "Birleşikte hızlı PCB kullan (geometri)":
-        "Use fast PCB in combined view (geometry)",
     "↗  Son çıktıyı tarayıcıda aç": "↗  Open last output in browser",
     "Şematik bağlantı renkleri": "Schematic connection colors",
     "Sayfalar arası:": "Between sheets:",
@@ -155,14 +138,15 @@ _EN = {
     "&Üret": "&Generate",
     "Şematik Viewer": "Schematic Viewer",
     "PCB Görüntüleyici": "PCB Viewer",
-    "PCB Hızlı (geometri)": "PCB Fast (geometry)",
     "Şematik + PCB + 3D  ★": "Schematic + PCB + 3D  ★",
+    "&Görünüm": "&View",
+    "Tam Ekran": "Full Screen",
+    "Pencereyi tam ekran yap / geri al (F11)":
+        "Make the window full screen / restore it (F11)",
     "&Ayarlar": "&Settings",
     "Dil / Language": "Language / Dil",
     "Sayfalar Arası Renk…": "Between-sheets Color…",
     "Sayfa İçi Renk…": "Within-sheet Color…",
-    "Birleşikte Hızlı PCB Kullan (geometri)":
-        "Use Fast PCB in Combined View (geometry)",
     "&Yardım": "&Help",
     "Hakkında / Sürümler": "About / Versions",
     "Sürümleri Panoya Kopyala": "Copy Versions to Clipboard",
@@ -232,8 +216,6 @@ _EN = {
         "MCU pin list could not be generated (enter an MCU designator / no netlist)",
     "PCB görüntüleyici üretilemedi (PCB dosyası yok/okunamadı)":
         "PCB viewer could not be generated (PCB file missing/unreadable)",
-    "PCB (geometri) görüntüleyici üretilemedi (PCB dosyası yok/okunamadı)":
-        "PCB (geometry) viewer could not be generated (PCB file missing/unreadable)",
     "Birleşik görünüm üretilemedi": "Combined view could not be generated",
     "\nHATA: {hata}\n{iz}": "\nERROR: {hata}\n{iz}",
 
@@ -395,10 +377,6 @@ _EN_LOG = {
         "\n· PCB file not found — skipping cross-probe.",
     "\n! AltiumPcbDoc API yok — PCB cross-probe atlanıyor.":
         "\n! AltiumPcbDoc API missing — skipping PCB cross-probe.",
-    "\n! AltiumPcbDoc API yok — PCB görüntüleyici atlanıyor.":
-        "\n! AltiumPcbDoc API missing — skipping PCB viewer.",
-    "\nPCB görüntüleyici: {a0} ({a1} komponent)":
-        "\nPCB viewer: {a0} ({a1} components)",
     "\nPCB (geometri): {a0}": "\nPCB (geometry): {a0}",
     "! PCB'de komponent bulunamadı (parse boş).":
         "! No components found on the PCB (empty parse).",
@@ -407,19 +385,9 @@ _EN_LOG = {
     "! PCB parse hatası: {a0}": "! PCB parse error: {a0}",
     "\n! PCB dosyası bulunamadı veya parse edilemedi.":
         "\n! PCB file not found or could not be parsed.",
-    "! PCB görüntüleyici üretilemedi (PCB yok veya parse edilemedi).":
-        "! PCB viewer could not be generated (no PCB or parse failed).",
     "! Geometri çıkarılamadı.": "! Geometry could not be extracted.",
-    "! Katman render hatası: {a0}": "! Layer render error: {a0}",
     "  ! katman referansı okunamadı: {a0}":
         "  ! layer reference could not be read: {a0}",
-    "  ✓ {a0} katman render edildi · {a1} komponent · görüntü {a2:.0f}×{a3:.0f}mm":
-        "  ✓ {a0} layers rendered · {a1} components · view {a2:.0f}×{a3:.0f}mm",
-    "  · {a0} atlandı ({a1:.0f}MB > {a2}MB limit)":
-        "  · {a0} skipped ({a1:.0f}MB > {a2}MB limit)",
-    "  ✓ {a0} net listelendi": "  ✓ {a0} nets listed",
-    "  · net listesi çıkarılamadı: {a0}":
-        "  · net list could not be extracted: {a0}",
     "  ✓ geometri: {a0} iz · {a1} yay · {a2} pad · {a3} via · "
     "{a4}+{a5} region/metin · {a6} katman":
         "  ✓ geometry: {a0} tracks · {a1} arcs · {a2} pads · {a3} vias · "
@@ -444,35 +412,15 @@ _EN_LOG = {
     "  · gömülü model girişleri okunamadı: {a0}":
         "  · embedded model entries could not be read: {a0}",
     "  · STEP '{a0}' atlandı: {a1}": "  · STEP '{a0}' skipped: {a1}",
-    "  ✓ 3D yüzey dokusu: top {a0}KB + bot {a1}KB (gzip)":
-        "  ✓ 3D surface texture: top {a0}KB + bottom {a1}KB (gzip)",
     "  ✓ 3D yüzey dokusu (geometriden): top {a0}KB + bot {a1}KB (gzip)":
         "  ✓ 3D surface texture (from geometry): top {a0}KB + bottom {a1}KB (gzip)",
     "  · yüzey dokusu atlandı: {a0}": "  · surface texture skipped: {a0}",
-    "  · yüzey dokusu üretilemedi: {a0}":
-        "  · surface texture could not be generated: {a0}",
     "  · geometriden yüzey dokusu üretilemedi: {a0}":
         "  · surface texture could not be generated from geometry: {a0}",
-    "  · board outline merkezi: {a0} eşleşme (bcx={a1}, bcy={a2}, {a3} aday)":
-        "  · board outline center: {a0} match (bcx={a1}, bcy={a2}, {a3} candidates)",
-    "boyut+#C0A000": "size+#C0A000",
-    "boyut": "size",
-    "  · doku viewBox board'a kırpıldı: {a0}×{a1} → {a2}×{a3}mm "
-    "(silk çözünürlüğü artar)":
-        "  · texture viewBox cropped to the board: {a0}×{a1} → {a2}×{a3}mm "
-        "(silkscreen resolution improves)",
-    "  · board outline boyut eşleşmedi, #C0A000 ipucu kullanıldı.":
-        "  · board outline size did not match, used the #C0A000 hint.",
-    "  · board outline bulunamadı — doku merkezlendi (hizalama yaklaşık).":
-        "  · board outline not found — texture centered (alignment approximate).",
-    "  · board merkezi tespiti başarısız ({a0}) — doku merkezlendi.":
-        "  · board center detection failed ({a0}) — texture centered.",
 
     # --- birleşik görünüm ---------------------------------------------------
     "Birleşik görünüm: şematik + PCB toplanıyor...":
         "Combined view: collecting schematic + PCB...",
-    "\nŞematik komponent bilgisi (cross-probe zenginleştirme)...":
-        "\nSchematic component data (cross-probe enrichment)...",
     "  · Şematik bilgisi alınamadı (yine de devam): {a0}":
         "  · Schematic data unavailable (continuing anyway): {a0}",
     "  · Cross-probe için {a0} net PCB adıyla eşleştirildi (ör. şematik etiketi ↔ "
@@ -490,7 +438,6 @@ _EN_LOG = {
     "\n✓ IC Bağlantı Haritası üretildi: {a0}":
         "\n✓ IC Connection Map generated: {a0}",
     "\n✓ MCU pin listesi üretildi: {a0}": "\n✓ MCU pin list generated: {a0}",
-    "\n✓ PCB görüntüleyici üretildi: {a0}": "\n✓ PCB viewer generated: {a0}",
     "\n✓ PCB (geometri) görüntüleyici üretildi: {a0}":
         "\n✓ PCB (geometry) viewer generated: {a0}",
     "\n✓ Birleşik görünüm üretildi: {a0}": "\n✓ Combined view generated: {a0}",
@@ -527,12 +474,8 @@ _EN_LOG = {
     "Şematik verisi hazır": "Schematic data ready",
     "HTML oluşturuluyor": "Building HTML",
     "Şematik HTML oluşturuluyor": "Building schematic HTML",
-    "PCB HTML oluşturuluyor": "Building PCB HTML",
     "PCB okunuyor": "Reading PCB",
-    "PCB katmanları render ediliyor (uzun sürebilir)…":
-        "Rendering PCB layers (may take a while)…",
-    "PCB geometrisi çıkarılıyor (hızlı mod)":
-        "Extracting PCB geometry (fast mode)",
+    "PCB geometrisi çıkarılıyor": "Extracting PCB geometry",
     "Geometri çıkarılıyor": "Extracting geometry",
     "Şematik komponent bilgisi": "Schematic component data",
     "3D verisi": "3D data",
@@ -554,6 +497,7 @@ _EN.update(_EN_LOG)
 # ---------------------------------------------------------------------------
 _EN_HTML = {
     # --- ortak: araç çubuğu / gezinme -------------------------------------
+    "Tam ekran aç / kapat ( F11 )": "Toggle full screen ( F11 )",
     "Tümü": "All",
     "Güç": "Power",
     "Sinyal": "Signal",
@@ -563,8 +507,6 @@ _EN_HTML = {
     "Kapat": "Close",
     "Sıfırla": "Reset",
     "Sığdır": "Fit",
-    "Yaklaş": "Zoom in",
-    "Uzaklaş": "Zoom out",
     "Yaklaş ( + )": "Zoom in ( + )",
     "Uzaklaş ( − )": "Zoom out ( − )",
     "Üst": "Top",
@@ -579,69 +521,85 @@ _EN_HTML = {
     "Değer": "Value",
     "Açıklama": "Description",
     "Dönüş": "Rotation",
-    "Konum (mm)": "Position (mm)",
     "PCB Konumu": "PCB Position",
     "Şema Sayfası": "Schematic Sheet",
     "Sayfa…": "Sheet…",
     "Sayfaya git": "Go to sheet",
     "Zemin": "Background",
     "Zemin rengi": "Background color",
-    "Arka plan rengini değiştir": "Change the background color",
-    "Arka plan:": "Background:",
-    "Siyah": "Black",
-    "Koyu gri": "Dark gray",
-    "Gri": "Gray",
-    "Açık": "Light",
-    "(tıkla: değiştir)": "(click: change)",
     "Görüntü": "Image",
     "Ölç": "Measure",
     "Çevir": "Flip",
-    "· Çevir": "· Flip",
     "Parçalar": "Parts",
     "Döndür": "Rotate",
     "Dışa": "Export",
     "İçe": "Import",
     "Kopyala": "Copy",
-    "Paneller": "Panels",
-    "Paneli gizle": "Hide panel",
     "Paneli göster": "Show panel",
     "Paneli gizle ( B )": "Hide panel ( B )",
     "Sol paneli gizle / göster": "Hide / show the left panel",
-    "Bu pencere": "This window",
     "Bu pencereyi aç / kapat": "Open / close this window",
     "Bu görünüm hakkında": "About this view",
     "Küçült / Büyüt": "Collapse / expand",
     "Sürükle: yeniden boyutlandır": "Drag: resize",
     "Seçimi temizle": "Clear the selection",
-    "Vurguyu temizle": "Clear the highlight",
     "Görünümü sıfırla": "Reset the view",
     "Renk Pickers": "Color pickers",
-    "Yön:": "Direction:",
 
     # --- arama -------------------------------------------------------------
     "Komponent / net": "Component / net",
     "Komponent / net ara...": "Search component / net...",
-    "Komponent / değer ara... ( / )": "Search component / value... ( / )",
     "net ara... ( / )": "search net... ( / )",
     "komponent ara... ( / )": "search component... ( / )",
     "ara... ( / )": "search... ( / )",
-    "Aramayı aç (komponent · net · değer)":
-        "Open search (component · net · value)",
     "Aramayı aç/kapat ( / )": "Open/close search ( / )",
     "Arama kutusuna git": "Go to the search box",
     "Aramada ilk sonucu seç": "Select the first result in the search",
-    "Ada göre ara, tıkla → net vurgusu (Güç/GND/Sinyal filtresi)":
-        "Search by name, click → net highlight (Power/GND/Signal filter)",
     "eşleşen yok": "no match",
     "eşleşen net yok": "no matching net",
     "eşleşen komponent yok": "no matching component",
     "komponent daha": "more components",
-    "bulunamadı": "not found",
     "de bulunamadı:": " not found on:",
+    "sayfa ara... ( / )": "search sheet... ( / )",
+    "eşleşen sayfa yok": "no matching sheet",
+
+    # --- şematik hiyerarşi (KiCad tarzı ağaç + sayfa gezinme) -------------
+    "Hiyerarşi": "Hierarchy",
+    "Şematik Hiyerarşi": "Schematic Hierarchy",
+    "Şematik hiyerarşi ( H )": "Schematic hierarchy ( H )",
+    "Hiyerarşi sekmesini aç": "Open the hierarchy tab",
+    "Hiyerarşide sayfaya tık": "Click a sheet in the hierarchy",
+    "O sayfaya git — alt sayfaları ok ile aç/kapat":
+        "Go to that sheet — expand/collapse children with the arrow",
+    "Block (sheet symbol) yazısına tık": "Click a block (sheet symbol) label",
+    "Alt sayfaya gir (hiyerarşide o dala geçilir)":
+        "Enter the child sheet (the hierarchy follows that branch)",
+    "tıkla: alt sayfaya gir": "click: enter the child sheet",
+    "tıkla: bu sayfaya git": "click: go to this sheet",
+    "Üst sayfa": "Parent",
+    "üst sayfa": "parent sheet",
+    "hiyerarşi": "hierarchy",
+    "sayfa": "page",
+    "(bu projede yok)": "(not in this project)",
+    "hedef SchDoc bu projede yok": "the target SchDoc is not in this project",
+    "Üst sayfaya dön — hiyerarşide bir seviye yukarı":
+        "Go up to the parent sheet — one level up in the hierarchy",
+    "Üst sayfaya dön — hiyerarşide bir seviye yukarı ( Alt+Backspace )":
+        "Go up to the parent sheet — one level up in the hierarchy ( Alt+Backspace )",
+    "Ana (kök) sayfaya git": "Go to the root sheet",
+    "Ana (kök) sayfaya git ( Alt+Home )": "Go to the root sheet ( Alt+Home )",
+    "Kök": "Root",
+    "Kök sayfa bulunamadı": "No root sheet found",
+    "Sayfa geçmişinde geri / ileri": "Back / forward in the sheet history",
+    "Zaten en üst sayfadasın": "Already at the top of the hierarchy",
+    "Zaten ana sayfadasın": "Already on the root sheet",
+    "Geçmişte daha geri gidilemez": "No earlier sheet in the history",
+    "Geçmişte daha ileri gidilemez": "No later sheet in the history",
+    "Tümünü aç": "Expand all",
+    "Tümünü kapat": "Collapse all",
 
     # --- kısayol / yardım tabloları ---------------------------------------
     "Kısayollar (?)": "Shortcuts (?)",
-    "Kısayollar / yardım ( ? )": "Shortcuts / help ( ? )",
     "Yardım ( ? )": "Help ( ? )",
     "tüm kısayollar": "all shortcuts",
     "Fare": "Mouse",
@@ -656,7 +614,6 @@ _EN_HTML = {
     "Tek dokunuş": "Single tap",
     "Çift dokunuş": "Double tap",
     "Dokun / çift dokun": "Tap / double tap",
-    "Tek dokunuş / çift dokunuş": "Single tap / double tap",
     "Tek parmak": "One finger",
     "Tek parmak sürükle": "One-finger drag",
     "İki parmak": "Two fingers",
@@ -666,15 +623,12 @@ _EN_HTML = {
     "Mouse altına zoom": "Zoom under the mouse",
     "İmleç altına zoom": "Zoom under the cursor",
     "Yakınlaştır + kaydır": "Zoom + pan",
-    "Yakınlaştır (pinch) + kaydır": "Zoom (pinch) + pan",
     "Parmakların ortasına zoom + aynı anda kaydır":
         "Zoom to the midpoint of the fingers + pan at the same time",
-    "Tıklama / çift tıklama ile aynı": "Same as click / double-click",
     "Fare tıklaması ile aynı (net / designator / block)":
         "Same as a mouse click (net / designator / block)",
     "Çift tıklama ile aynı (sayfayı sığdır, notu düzenle)":
         "Same as a double-click (fit the sheet, edit the note)",
-    "Boşluğa tıkla": "Click empty space",
     "Shift + tık": "Shift + click",
     "Sil (Del)": "Delete (Del)",
 
@@ -699,8 +653,6 @@ _EN_HTML = {
         "Zoom to the component + pulse + detail popup",
     "Designator'a tık (şema)": "Click a designator (schematic)",
     "Komponent detay popup'ı aç": "Open the component detail popup",
-    "Block (.SchDoc) yazısına tık": "Click a block (.SchDoc) label",
-    "O sayfaya navigate et": "Navigate to that sheet",
     "Sayfa kartına çift tık": "Double-click a sheet card",
     "O sayfayı ekrana sığdır": "Fit that sheet to the screen",
     "Tüm sayfaları sığdır": "Fit all sheets",
@@ -713,7 +665,6 @@ _EN_HTML = {
     "tıkla: bağlantı yayları · Shift+tık: karşılaştır":
         "click: connection arcs · Shift+click: compare",
     "tıkla: detay + cross-probe": "click: detail + cross-probe",
-    "tıkla: sayfaya git": "click: go to the sheet",
     "parça (multi-part)": "part (multi-part)",
     "güç": "power",
     "toprak": "ground",
@@ -723,13 +674,9 @@ _EN_HTML = {
     "Bu tarayıcı sıkıştırılmış şemayı açamıyor (DecompressionStream gerekli).":
         "This browser cannot decompress the schematic (DecompressionStream "
         "required).",
-    "(DecompressionStream gerekli) — lütfen tarayıcıyı güncelleyin.":
-        "(DecompressionStream required) — please update your browser.",
     "Bu tarayıcı sıkıştırılmış görünümü açamıyor (DecompressionStream gerekli).":
         "This browser cannot decompress the view (DecompressionStream required).",
     "Lütfen tarayıcıyı güncelleyin.": "Please update your browser.",
-    "Bu tarayıcı sıkıştırılmış katmanları açamıyor":
-        "This browser cannot decompress the layers",
     "Bu tarayıcı sıkıştırılmış geometriyi açamıyor (DecompressionStream gerekli).":
         "This browser cannot decompress the geometry (DecompressionStream "
         "required).",
@@ -737,21 +684,12 @@ _EN_HTML = {
     "akıcılık). Kapatınca her zaman canlı SVG.":
         "LOD: sheets are drawn as bitmaps at far zoom and while navigating "
         "(smoothness on Chromium). Turn it off for live SVG at all times.",
-    "LOD: gezinirken board bitmap çizilir (Chromium'da akıcılık). Kapatınca her "
-    "zaman canlı SVG.":
-        "LOD: the board is drawn as a bitmap while navigating (smoothness on "
-        "Chromium). Turn it off for live SVG at all times.",
     "LOD: döndürme/zoom sırasında çözünürlük düşürülür (akıcılık), durunca "
     "netleşir":
         "LOD: resolution is lowered while rotating/zooming (smoothness) and "
         "sharpens when it stops",
     "html2canvas yüklenmedi": "html2canvas did not load",
-    "PNG üretilemedi": "PNG could not be generated",
-    "PNG indirildi": "PNG downloaded",
     "Görünümü PNG indir": "Download the view as PNG",
-    "O anki görünümü PNG olarak indir": "Download the current view as PNG",
-    "Görünümü PNG olarak indir (görünür katmanlar + vurgu)":
-        "Download the view as PNG (visible layers + highlight)",
     "Kopyalama hatası:": "Copy error:",
 
     # --- not / kutu (annotation) araçları ----------------------------------
@@ -798,14 +736,9 @@ _EN_HTML = {
     "Renk (not yazısı / kutu kenarı)": "Color (note text / box border)",
 
     # --- PCB görüntüleyici --------------------------------------------------
-    "PCB Görüntüleyici ·": "PCB Viewer ·",
     "Geometri tabanlı": "Geometry-based",
-    "Göster/gizle · ↑ ile en üste getir · renk = çizim rengi":
-        "Show/hide · bring to front with ↑ · color = drawing color",
     "Bu katmanı en üste getir (tekrar bas: normal sıra)":
         "Bring this layer to the front (press again: normal order)",
-    "En üste getir (tekrar bas: orijinal sıra)":
-        "Bring to the front (press again: original order)",
     "Katman sırası normal": "Layer order is normal",
     "en üstte": "at the front",
     "Tüm katmanları göster": "Show all layers",
@@ -813,57 +746,23 @@ _EN_HTML = {
     "Üst / alt katman setini değiştir ( T )":
         "Switch the top / bottom layer set ( T )",
     "Pad etiketleri · Üst/Alt katman seti": "Pad labels · Top/Bottom layer set",
-    "Pad pin no + net adı": "Pad pin number + net name",
     "Pad no + net ( P )": "Pad number + net ( P )",
-    "Komponente tıkla": "Click a component",
     "Komponent seç (detay + cross-probe)":
         "Select a component (detail + cross-probe)",
-    "Detay paneli + şematik/3D cross-probe":
-        "Detail panel + schematic/3D cross-probe",
-    "Bakır ize çift tıkla": "Double-click a copper track",
     "Altındaki net'i vurgula": "Highlight the net underneath",
-    "O net'i tüm katmanlarda vurgula": "Highlight that net on all layers",
-    "Tıkla: komponent · Çift tıkla: bakır yol":
-        "Click: component · Double-click: copper track",
-    "Board'u kaydır": "Pan the board",
-    "Board'u ekrana sığdır": "Fit the board to the screen",
-    "Board'u 90° döndür": "Rotate the board by 90°",
-    "Board'u 90° döndür ( R )": "Rotate the board by 90° ( R )",
     "90° döndür ( R )": "Rotate by 90° ( R )",
-    "Board'u çevir — alt yüzden bakış (ayna) ( X )":
-        "Flip the board — view from the bottom (mirror) ( X )",
-    "Alt yüzden bakış (ayna) — \"Üst/Alt\" ile birlikte kullan":
-        "View from the bottom (mirror) — use together with Top/Bottom",
     "Alt yüzden bakış / ayna ( X )": "View from the bottom / mirror ( X )",
     "Döndür / çevir (ayna)": "Rotate / flip (mirror)",
-    "· ayna (alt yüzden bakış)": "· mirror (view from the bottom)",
     "Ölçüm ( M )": "Measurement ( M )",
     "Ölçüm:": "Measurement:",
     "Ölçüm (mm/mil, pad merkezine yapışır)":
         "Measurement (mm/mil, snaps to the pad center)",
-    "Ölçüm: iki noktaya tıkla (Esc iptal)":
-        "Measurement: click two points (Esc cancels)",
     "Ölçüm: iki noktaya tıkla (pad merkezine yapışır) · Esc iptal":
         "Measurement: click two points (snaps to the pad center) · Esc cancels",
-    "Ölçüm: iki noktaya tıkla → mesafe (mm + mil). Esc iptal":
-        "Measurement: click two points → distance (mm + mil). Esc cancels",
-    "nokta pad merkezine yapıştı": "point snapped to the pad center",
-    "· yeni ölçüm için tıkla, Esc kapatır":
-        "· click for a new measurement, Esc closes",
     "· Esc kapatır": "· Esc closes",
-    "Vurgu / ölçüm / yardım kapat": "Close highlight / measurement / help",
-    "bakır eleman · Esc temizler": "copper elements · Esc clears",
-    "komponent gizli katmanda — \"Üst/Alt\" ile karşı yüzü aç":
-        "components are on a hidden layer — open the other side with Top/Bottom",
     "● TOP katmanı": "● TOP layer",
     "● BOTTOM katmanı": "● BOTTOM layer",
-    "pad": "pads",
-    "iz": "tracks",
     "primitif": "primitives",
-    "Sürükle: kaydır · Tekerlek: zoom · Komponente tıkla: detay":
-        "Drag: pan · Wheel: zoom · Click a component: detail",
-    "Sürükle / tek parmak: kaydır · Tekerlek / iki parmak: zoom ·":
-        "Drag / one finger: pan · Wheel / two fingers: zoom ·",
     "Sürükle / tek parmak: kaydır · Tekerlek / iki parmak: zoom · Tıkla: "
     "komponent · Çift tık: net":
         "Drag / one finger: pan · Wheel / two fingers: zoom · Click: component "
@@ -871,25 +770,16 @@ _EN_HTML = {
 
     # --- BOM / montaj paneli ------------------------------------------------
     "BOM · Montaj": "BOM · Assembly",
-    "Değer+footprint grubu; tıkla → grubu vurgula, ✓ ile montaj takibi":
-        "Value+footprint group; click → highlight the group, track assembly "
-        "with ✓",
     "Montaj işaretlerini dosyaya kaydet": "Save the assembly marks to a file",
     "Kaydedilmiş işaretleri yükle": "Load saved marks",
     "Tüm işaretleri temizle": "Clear all marks",
-    "Tüm montaj işaretleri silinsin mi?": "Delete all assembly marks?",
     "Tum montaj isaretleri silinsin mi?": "Delete all assembly marks?",
-    "(değer yok)": "(no value)",
     "komponent vurgulandi": "components highlighted",
-    "grup dosyaya aktarıldı": "groups exported to the file",
     "grup dosyaya aktarildi": "groups exported to the file",
-    "grup yüklendi": "groups loaded",
     "grup yuklendi": "groups loaded",
     "grup bu boardda yok": "groups are not on this board",
     # SVG sürümünde metin JS'te kaçışlıdır (board\'da) — anahtar ÇALIŞMA-ANI
     # biçimindedir, yani ters bölüyü İÇERİR (bkz. tools/check_html_i18n.py)
-    "grup bu board\\'da yok": "groups are not on this board",
-    "Geçersiz dosya": "Invalid file",
     "Gecersiz dosya": "Invalid file",
     "Kaydetme hatası:": "Save error:",
     "Export hatası:": "Export error:",
@@ -911,13 +801,8 @@ _EN_HTML = {
     "Not": "Note",
     "Kutu": "Box",
     "komponent": "components",
-    "filtreli": "filtered",
     "aramayla daralt": "narrow it down with the search",
     "Esc temizler": "Esc clears",
-    "Ölçüm aracı — iki nokta arası mm/mil;":
-        "Measurement tool — mm/mil between two points;",
-    "pad/via üzerine tıklarsan MERKEZİNE yapışır":
-        "if you click on a pad/via it snaps to its CENTER",
     "Ara": "Search",
     "Kaydet": "Save",
     # canvas yardım tablosu — kaynakta çok satırlı, her satır ayrı anahtar

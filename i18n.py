@@ -223,6 +223,32 @@ _EN = {
     "Bağımlılıklar ({sayi} paket):": "Dependencies ({sayi} packages):",
     "doğrudan": "direct",
     "alt bağımlılık": "sub-dependency",
+
+    # --- gui.py: not taşıma (Dosya menüsü) ------------------------------
+    "Notları Eski Çıktıdan Taşı…": "Transfer Notes From an Older Output…",
+    "Eski HTML deki (veya _notlar.json daki) şematik notlarını yeni üretilen HTML e taşı":
+        "Move schematic notes from an older HTML (or _notlar.json) into the newly generated HTML",
+    "Not taşıma": "Note transfer",
+    "Notların OKUNACAĞI dosya (eski HTML veya _notlar.json)":
+        "File to READ notes FROM (older HTML or _notlar.json)",
+    "Not kaynağı (*.html *.htm *.json)":
+        "Note source (*.html *.htm *.json)",
+    "Kaynak okunamadı: {hata}": "Could not read source: {hata}",
+    "Bu dosyada not bulunamadı. Notların taşınabilmesi için görüntüleyicide önce Kaydet (HTML e göm) ya da Dışa (_notlar.json) kullanılmış olmalı.":
+        "No notes found in this file. To transfer notes, first use Save (embed into the HTML) or Export (_notlar.json) in the viewer.",
+    "Notların YAZILACAĞI HTML (yeni üretilen)":
+        "HTML to WRITE notes INTO (the newly generated one)",
+    "Görüntüleyici HTML (*.html *.htm)": "Viewer HTML (*.html *.htm)",
+    "Kaynak ve hedef aynı dosya.": "Source and target are the same file.",
+    "Hedefte zaten {sayi} not gömülü. Üzerine yazılsın mı?":
+        "The target already has {sayi} embedded notes. Overwrite them?",
+    "Notlar yazılamadı: {hata}": "Could not write notes: {hata}",
+    " (birleşik görünümün şematik paneline)":
+        " (into the schematic pane of the combined view)",
+    "✓ {sayi} not taşındı: {kaynak} → {hedef}{ek}":
+        "✓ {sayi} notes transferred: {kaynak} → {hedef}{ek}",
+    "{sayi} not/kutu {hedef} dosyasına gömüldü. Dosyayı tarayıcıda Ctrl+F5 ile açınca notlar görünür.":
+        "{sayi} notes/boxes embedded into {hedef}. Open the file with Ctrl+F5 in the browser to see them.",
 }
 
 
@@ -481,6 +507,10 @@ _EN_LOG = {
     "3D verisi": "3D data",
     "Birleştiriliyor ve yazılıyor": "Merging and writing",
     "Tamamlandı": "Completed",
+
+    # --- not taşıma (write_annotations) ---------------------------------
+    "Bu dosya bir şematik görüntüleyici değil (not yuvası bulunamadı).":
+        "This file is not a schematic viewer (no note slot found).",
 }
 
 _EN.update(_EN_LOG)
@@ -816,6 +846,17 @@ _EN_HTML = {
     "region/metin) olarak gömülür ve canvas'a çizilir → dosya çok küçük,":
         "region/text) instead of SVG and drawn on a canvas → a much smaller file,",
     "her zoom'da akıcı.": "smooth at every zoom level.",
+
+    # --- şematik: notları dışa/içe aktarma -------------------------------
+    "Notları dosyaya aktar (proje_notlar.json iner). Yeniden üretilen HTML e ya da başka bilgisayara taşımanın tarayıcıdan bağımsız yolu — localStorage taşınmaz":
+        "Export notes to a file (downloads project_notlar.json). The browser-independent way to move them into a regenerated HTML or onto another computer — localStorage does not travel",
+    "Notları dosyadan yükle: _notlar.json VEYA notları gömülü eski bir HTML seçilebilir. Mevcut notlar silinmez, üzerine eklenir":
+        "Load notes from a file: pick a _notlar.json OR an older HTML with embedded notes. Existing notes are kept and the imported ones are added",
+    "Aktarılacak not yok": "No notes to export",
+    "not dosyaya aktarıldı": "notes exported to file",
+    "Dosyada not bulunamadı": "No notes found in the file",
+    "not yüklendi — kalıcı olması için Kaydet":
+        "notes loaded — press Save to make it permanent",
 }
 
 _EN.update(_EN_HTML)

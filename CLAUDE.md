@@ -5,7 +5,7 @@ Wavenumber'ın ticari "viz sch 1.0" ürününün açık-kaynak alternatifi.
 [altium_monkey](https://github.com/wavenumber-eng/altium_monkey) kütüphanesi
 (Eli Hughes / Wavenumber) üzerine kurulu.
 
-**Mevcut sürüm**: `APP_VERSION` sabiti **`viewer.py`'de** tutulur (şu an 2.25.0);
+**Mevcut sürüm**: `APP_VERSION` sabiti **`viewer.py`'de** tutulur (şu an 2.26.0);
 `gui.py` oradan import eder (v2.9.29'da taşındı — HTML çıktıları da sürümü
 gösterebilsin diye, tek kaynak). Yeni özellik/düzeltme ekleyince bu sabiti
 güncelle (semver: major.minor.patch). Sürüm pencere başlığında, alt durum
@@ -54,6 +54,12 @@ sağ üst rozetinde (`{proje} · v{APP_VERSION}`) görünür.
     GUI'de **"PCB Görüntüleyici"** butonu (`mode='pcbgeo'`).
     **Bilinen kısıt**: solder mask / paste katmanları listelenmez — Altium onları
     pad'lerden türetiyor, dosyada primitive olarak yok.
+  - `read_annotations(path)` / `write_annotations(path, items)` → şematik
+    notlarını DOSYA düzeyinde oku/yaz (üretim yapmaz). Kaynak: `_notlar.json`,
+    notları gömülü şematik HTML'i veya birleşik görünüm (iç şematik HTML'i
+    gzip'ten çözülüp yazılır, yeniden sıkıştırılır). GUI'nin "Notları Eski
+    Çıktıdan Taşı…" eylemi bu ikisini kullanır; `ts` şimdiye ayarlanır ki
+    taşınan notlar bayat localStorage kaydına yenilsin.
   - `generate_combined_viewer(...)` → şematik + PCB tek HTML'de yan yana,
     çift yönlü cross-probe. İki viewer iframe içinde izole (her iframe'in HTML'i
     kabuğa JSON string olarak gömülür, runtime'da `iframe.srcdoc` ile yüklenir),
@@ -107,7 +113,8 @@ sağ üst rozetinde (`{proje} · v{APP_VERSION}`) görünür.
 
 **Menü çubuğu** `gui.py` → `_build_menu()` içinde KODLA kurulur (gui.ui'de yok):
 **Dosya** (Proje Aç `Ctrl+O`, Çıktı Yolu Seç `Ctrl+S`, Son Çıktıyı Tarayıcıda Aç
-`Ctrl+B`, Çıktı Klasörünü Aç, Log'u Temizle, Çıkış `Ctrl+Q`) · **Üret** (üç
+`Ctrl+B`, Çıktı Klasörünü Aç, **Notları Eski Çıktıdan Taşı…**, Log'u
+Temizle, Çıkış `Ctrl+Q`) · **Üret** (üç
 görüntüleyici `Ctrl+1..3` + beş veri çıktısı — hepsi mevcut buton slotlarını
 yeniden kullanır) · **Görünüm** (Tam Ekran `F11`, işaretlenebilir) ·
 **Ayarlar** (Dil alt menüsü, iki renk seçici) · **Yardım** (Hakkında `F1`,
@@ -346,6 +353,15 @@ Bir değişiklik yaptıktan sonra:
   kayıtta dosya seçtirir, handle oturumda saklanır → sonrakiler sessiz ✓;
   v2.9.41). Firefox/engelli ortamda `{proje}_notlu.html` kopyası indirir.
   Yüklemede localStorage ile gömülü veriden `ts`'i yeni olan kazanır.
+- **Notları taşıma — Dışa / İçe** (v2.26.0): toolbar'da iki düğme daha.
+  **Dışa** notları `{proje}_notlar.json` olarak indirir; **İçe** bir dosyadan
+  yükler ve o dosya `_notlar.json` DA olabilir, notları gömülü eski bir HTML de
+  (JSON parse başarısızsa `anno-embed` yuvası regex'le ayıklanır). İçe aktarma
+  EKLER, silmez: kimlik çakışırsa GELEN nota yeni `annoId()` verilir → mevcut
+  notlar kaybolmaz. Geri bildirim `hierToast` ile. **Neden gerekli**:
+  localStorage TARAYICIYA bağlıdır ve Chromium ile Firefox burada zıt davranır
+  (bkz. Çözülen Sorunlar, v2.26.0) — HTML yeniden üretilince notların
+  taşınabilir tek yolu dosyadır.
 - **Sol panel katlanabilir** (v2.9.23+): sağ üst köşedeki küçük ◂/▸ ok butonu
   veya `B` kısayolu; kapalıyken 26px şerit kalır. Komponent popup'ı (panele
   dock'lu) açılırsa veya `/` ile arama açılırsa panel otomatik açılır. Durum
@@ -587,6 +603,60 @@ mesajına bak.
   bu API olmayabilir (graceful fallback var, "veri yok" der).
 
 ## Çözülen Sorunlar (tarihçe)
+
+- **Uygulama güncellenip HTML yeniden üretilince eski notlar yeni dosyaya
+  gelmiyordu (v2.26.0, kullanıcı bildirimi)**: Notlar iki yerde durur —
+  localStorage (`schviz-anno:<proje>`, her değişiklikte otomatik) ve "Kaydet"
+  ile HTML'e gömülen `anno-embed` yuvası; açılışta `ts`'i yeni olan kazanır
+  (taze üretilen HTML'de yuva `null` olduğundan localStorage kazanır).
+  **Ölçüldü (headless, temiz profil)**: Chromium'da (Edge/Chrome) TÜM `file://`
+  sayfaları TEK localStorage havuzunu paylaşır — dosya adı/klasörü değişse bile
+  notlar gelir (`--allow-file-access-from-files` olmadan da). **Firefox tam
+  tersi**: `file://` deposunu DOSYA YOLUNA + ADINA göre böler; profil klasöründe
+  origin dizinleri `file++++C++…+eski+a.html` ve `file++++…+yeni+b.html` diye
+  AYRI oluştu, ikinci dosya birincinin verisini okuyamadı (`SONUC_BULAMADI`).
+  Yani Firefox'ta HTML yeniden üretilip adı/klasörü değişince notlar kaybolmuş
+  GİBİ görünür (aslında eski adın deposunda durur) — kullanıcının bildirdiği
+  durum tam olarak bu. localStorage tarafında JS ile yapılabilecek bir şey YOK:
+  bölünen şey anahtar değil ORIGIN'in kendisi.
+  **Çözüm iki katmanlı, ikisi de dosya düzeyinde** (tarayıcıdan bağımsız):
+  (1) Şematik toolbar'ına **Dışa / İçe** düğmeleri — `{proje}_notlar.json`;
+  içe aktarma HTML dosyası da kabul eder (gömülü yuvayı regex'le ayıklar) ve
+  mevcut notların üstüne EKLER (kimlik çakışırsa gelene yeni kimlik).
+  (2) GUI → **Dosya → Notları Eski Çıktıdan Taşı…** — kaynak (eski HTML veya
+  `_notlar.json`) ve hedef HTML seçilir, notlar hedefin `anno-embed` yuvasına
+  gömülür. Yeni `read_annotations` / `write_annotations` (viewer.py) bunu
+  yapar; **birleşik görünüm de desteklenir**: şematik iç HTML'i `SCH_GZ`
+  base64'ünden çözülüp yuvası yazılır ve yeniden sıkıştırılır (kabukta yuva
+  yoktur, tepeden regex bulamaz). Hedefte not varsa GUI onay sorar; üretim
+  sürerken eylem kilitlenir (`_menu_action_items` — çıktı dosyası o sırada
+  yeniden yazılıyor olabilir).
+  **Üç ayrıntı**: (i) gömülen JSON'da `<` → `\u003c` kaçırılır, yoksa not
+  metnindeki bir script kapatma etiketi yuvayı erken kapatır (annoBuildHtml'in
+  kuralının Python karşılığı); (ii) yazılan `ts` ŞİMDİ'dir — yoksa hedef
+  makinede duran daha yeni localStorage kaydı taşınan notları ezerdi;
+  (iii) okuma biçimi uzantıdan değil İÇERİKTEN anlaşılır, bozuk/yabancı
+  kayıtlar süzülür (yalnız `k` = note/box ve sayısal x/y geçer).
+  **Doğrulama**: dosya düzeyi 12/12 (round-trip, kaçış, JSON kaynak, bozuk
+  kayıt süzme, yuvasız hedefte ValueError, ts tazeliği) · headless Edge + CDP
+  21/21 (gömülü notların açılışta yüklenmesi, Dışa'nın indirdiği JSON'un adı ve
+  içeriği, JSON'dan ve HTML'den içe aktarma, kimlik çakışması, geçersiz dosya,
+  notsuzken indirme yapmama, 0 JS hatası) · birleşik görünüm 9/9 (combined
+  yazma + tarayıcıda şematik iframe'inde notların görünmesi) · offscreen Qt
+  14/14 (menü konumu, slot çağrısı, üretim kilidi, TR→EN→TR, eksik çeviri yok,
+  gerçek taşıma, aynı dosya ve yuvasız hedef uyarıları) · TR/EN çıktı 17/17
+  (`node --check` temiz, ⟪⟫ kalıntısı 0) · `tools/check_html_i18n.py` 240/240,
+  ölü anahtar 0.
+  **Test notu**: Chromium'da tüm `file://` sayfaları localStorage'ı paylaştığı
+  için ardışık sayfa testlerinde önceki testin notları bir sonrakine SIZAR —
+  "taze dosya boş olmalı" kontrolünden önce `localStorage.clear()` şart (ilk
+  koşuda 3 test bu yüzden yanlış FAIL verdi).
+  **Yapılmadı (aday iş)**: üretimde otomatik devralma (üzerine yazılacak
+  dosyadaki yuvayı okuyup yeni HTML'e gömmek) — Chromium'da zaten sorun yok,
+  Firefox'ta ise kullanıcı indirdiği `_notlu.html`'i çıktının üstüne
+  kopyalamadıkça işe yaramaz; ayrıca notlar MUTLAK kanvas koordinatında
+  olduğundan sayfa sayısı/sırası değişen projede kayar (kalıcı çözüm: notu
+  sayfa id + orana bağlamak).
 
 - **Şematik hiyerarşi paneli + KiCad tarzı sayfa gezinme (v2.25.0, kullanıcı
   isteği: KiCad 10'un "Şematik Hiyerarşi" panelinin ekran görüntüsü + "Alt+

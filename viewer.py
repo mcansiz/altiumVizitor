@@ -90,7 +90,7 @@ from altium_monkey.altium_schdoc import AltiumSchDoc
 
 # Uygulama sürümü — tek kaynak burası; gui.py buradan import eder.
 # HTML çıktılarında sağ üst köşedeki rozette görünür (build saati yerine).
-APP_VERSION = "2.25.0"
+APP_VERSION = "2.26.0"
 
 # Önerilen minimum altium_monkey sürümü. Bu sürümden öncesinde:
 #   · 2026.6.21 öncesi — STM32 gibi IC'lerde dikey pin adları yatay çiziliyordu.
@@ -2515,6 +2515,151 @@ def extract_pcb_geometry(pcb, log=print):
         "tracks": tracks, "arcs": arcs, "vias": vias, "pads": pads,
         "regions": regions, "texts": texts, "stexts": stexts,
     }
+
+
+# ---------------------------------------------------------------------------
+# Not (annotation) taşıma — üretilen HTML'ler arasında
+# ---------------------------------------------------------------------------
+# Şematik görüntüleyicideki notlar iki yerde durur: tarayıcının localStorage'ı
+# ve "Kaydet" ile HTML'e gömülen <script id="anno-embed"> yuvası. localStorage
+# TARAYICIYA bağlıdır — üstelik Firefox `file://` deposunu DOSYA YOLUNA (ad
+# dahil) böler: HTML yeniden üretilip adı/klasörü değişince notlar görünmez
+# olur (Chromium'da tüm file:// sayfaları tek havuzu paylaşır, orada sorun
+# çıkmaz). Tarayıcıdan bağımsız tek taşıma yolu gömülü yuvadır; aşağıdaki iki
+# fonksiyon onu DOSYA düzeyinde okur/yazar (GUI: "Notları Eski Çıktıdan Taşı",
+# HTML arayüzü: "Dışa" / "İçe" düğmeleri).
+
+## @brief Gömülü not yuvası: <script type="application/json" id="anno-embed">…</script>
+_ANNO_SLOT_RE = re.compile(
+    r'(<script[^>]*id="anno-embed"[^>]*>)(.*?)(</script>)', re.S)
+## @brief Birleşik görünümde şematik iç HTML'i (gzip+base64) burada durur.
+_SCH_GZ_RE = re.compile(r'(const SCH_GZ = ")([A-Za-z0-9+/=]*)(";)')
+
+
+def _anno_items(raw) -> list:
+    """@brief Ham JSON yükünden geçerli not/kutu kayıtlarını süzer.
+
+    @details Hem `{"ts":…,"items":[…]}` sarmalını hem çıplak listeyi kabul eder.
+    Bozuk/yabancı kayıtlar (bilinmeyen tip, sayısal olmayan konum) atılır —
+    hedef HTML'e yalnız görüntüleyicinin çizebileceği veri yazılır.
+
+    @param raw json.loads sonucu (dict | list | None)
+    @return Geçerli not/kutu sözlüklerinin listesi.
+    """
+    if isinstance(raw, dict):
+        raw = raw.get("items")
+    if not isinstance(raw, list):
+        return []
+    out = []
+    for a in raw:
+        if not isinstance(a, dict) or a.get("k") not in ("note", "box"):
+            continue
+        try:
+            float(a["x"]), float(a["y"])
+        except (KeyError, TypeError, ValueError):
+            continue
+        out.append(a)
+    return out
+
+
+def _combined_sch_html(html: str):
+    """@brief Birleşik görünüm kabuğundan şematik iç HTML'ini çözer.
+
+    @param html Birleşik görünüm HTML metni
+    @return İç şematik HTML'i; yuva yoksa/çözülemezse None.
+    """
+    import gzip as _gzip, base64 as _b64
+    m = _SCH_GZ_RE.search(html)
+    if not m:
+        return None
+    try:
+        return _gzip.decompress(_b64.b64decode(m.group(2))).decode("utf-8")
+    except Exception:
+        return None
+
+
+def _anno_slot_payload(html: str):
+    """@brief HTML'in gömülü not yuvasındaki JSON'u çözer (birleşikte içeriden).
+
+    @param html Şematik veya birleşik görünüm HTML metni
+    @return json.loads sonucu; yuva yoksa/bozuksa None.
+    """
+    for text in (html, _combined_sch_html(html)):
+        if text is None:
+            continue
+        m = _ANNO_SLOT_RE.search(text)
+        if not m:
+            continue
+        try:
+            return json.loads(m.group(2))
+        except json.JSONDecodeError:
+            return None
+    return None
+
+
+def read_annotations(path) -> list:
+    """@brief Bir dosyadan şematik notlarını okur.
+
+    @details Üç kaynağı da kabul eder: görüntüleyicinin "Dışa" düğmesiyle inen
+    `*_notlar.json`, notları gömülü bir şematik HTML'i ("Kaydet" ile üretilen)
+    ve birleşik görünüm HTML'i (şematik iç HTML'i gzip'ten çözülüp orada
+    aranır). Biçim uzantıdan değil İÇERİKTEN anlaşılır.
+
+    @param path Kaynak dosya yolu
+    @return Not/kutu sözlüklerinin listesi (bulunamazsa boş liste).
+    """
+    text = Path(path).read_text(encoding="utf-8", errors="replace")
+    if text.lstrip()[:1] in ("{", "["):
+        try:
+            return _anno_items(json.loads(text))
+        except json.JSONDecodeError:
+            pass
+    return _anno_items(_anno_slot_payload(text))
+
+
+def write_annotations(path, items) -> str:
+    """@brief Notları bir görüntüleyici HTML'inin gömülü yuvasına yazar.
+
+    @details Şematik HTML'inde yuva doğrudan bulunur; birleşik görünümde şematik
+    iç HTML'i gzip'ten çözülür, yuvası yazılır, yeniden sıkıştırılıp kabuğa geri
+    konur. Hedefte not varsa YERİNE geçer. Damga (`ts`) şimdiye ayarlanır:
+    görüntüleyici açılışta localStorage ile gömülü veriden yeni olanı seçtiği
+    için taşınan notlar bayat yerel kayda yenilir.
+
+    @param path Hedef HTML yolu
+    @param items Not/kutu listesi
+    @return Yazma yeri: "html" (şematik görüntüleyici) | "combined" (birleşik)
+    @throws ValueError Hedefte not yuvası yoksa (ör. PCB/3D çıktısı seçilmiş).
+    """
+    import gzip as _gzip, base64 as _b64
+    p = Path(path)
+    text = p.read_text(encoding="utf-8", errors="replace")
+    # Gömülü JSON'da '<' kaçırılır: not metninde script kapatma etiketi geçse
+    # bile yuva erken kapanmasın (annoBuildHtml'deki kuralın aynısı).
+    payload = json.dumps(
+        {"ts": int(datetime.datetime.now().timestamp() * 1000), "items": items},
+        ensure_ascii=False, separators=(",", ":")).replace("<", "\\u003c")
+
+    def put(m):
+        return m.group(1) + payload + m.group(3)
+
+    new, n = _ANNO_SLOT_RE.subn(put, text, count=1)
+    if n:
+        p.write_text(new, encoding="utf-8")
+        return "html"
+
+    inner = _combined_sch_html(text)
+    if inner is not None:
+        inner, n = _ANNO_SLOT_RE.subn(put, inner, count=1)
+        if n:
+            b64 = _b64.b64encode(
+                _gzip.compress(inner.encode("utf-8"), 6)).decode()
+            new = _SCH_GZ_RE.sub(lambda m: m.group(1) + b64 + m.group(3),
+                                 text, count=1)
+            p.write_text(new, encoding="utf-8")
+            return "combined"
+    raise ValueError(tr("Bu dosya bir şematik görüntüleyici değil "
+                        "(not yuvası bulunamadı)."))
 
 
 @_with_library_logs
@@ -6456,6 +6601,11 @@ def build_html(sheets, net_list, components, timestamp,
             title="⟪Kutu içine al: butona bas, sürükleyerek çerçeve çiz (Esc iptal). Sonradan: kenarına tıkla seç → sürükle taşı · köşe tutamaçlarıyla boyutlandır · Del sil · −/+ kenar kalınlığı⟫">⟪Kutu⟫</button>
     <button class="tool-btn" id="anno-save"
             title="⟪Not ve kutuları HTML dosyasının içine göm ve kaydet. Chromium'da AÇIK DOSYANIN ÜSTÜNE yazabilir (ilk kayıtta dosyayı seç; aynı oturumda sonrakiler sessiz). Firefox'ta kopya indirir. Paylaşınca/başka bilgisayarda da görünür⟫">⟪Kaydet⟫</button>
+    <button class="tool-btn" id="anno-exp"
+            title="⟪Notları dosyaya aktar (proje_notlar.json iner). Yeniden üretilen HTML e ya da başka bilgisayara taşımanın tarayıcıdan bağımsız yolu — localStorage taşınmaz⟫">⟪Dışa⟫</button>
+    <button class="tool-btn" id="anno-imp"
+            title="⟪Notları dosyadan yükle: _notlar.json VEYA notları gömülü eski bir HTML seçilebilir. Mevcut notlar silinmez, üzerine eklenir⟫">⟪İçe⟫</button>
+    <input type="file" id="anno-file" accept=".json,.html,.htm" hidden>
     <div class="toolbar-sep"></div>
     <button class="tool-btn" id="shortcut-btn" title="⟪Kısayollar (?)⟫">?</button>
     <button class="tool-btn" id="export-png">PNG</button>
@@ -8491,6 +8641,60 @@ annoColorInp.addEventListener('input', () => {{
   a.color = annoColorInp.value;
   annoStore(); annoRender();
 }});
+
+// Notları dosyaya aktar / dosyadan yükle. localStorage TARAYICIYA bağlıdır —
+// Firefox `file://` deposunu DOSYA ADINA göre böldüğünden HTML yeniden
+// üretilip adı değişince notlar görünmez olur; notları başka bir HTML'e ya da
+// başka bilgisayara taşımanın taşınabilir yolu budur. İçe aktarma hem
+// _notlar.json'u hem notları gömülü bir şematik HTML'ini kabul eder.
+function annoParseImport(txt) {{
+  let d = null;
+  try {{ d = JSON.parse(txt); }} catch (err) {{}}
+  if (!d) {{                     // HTML seçildi → gömülü not yuvasını çıkar
+    const m = txt.match(/id="anno-embed"[^>]*>([\\s\\S]*?)<\\/script>/);
+    if (m) {{ try {{ d = JSON.parse(m[1]); }} catch (err) {{}} }}
+  }}
+  const raw = (d && Array.isArray(d.items)) ? d.items
+            : (Array.isArray(d) ? d : null);
+  if (!raw) return null;
+  return raw.filter(a => a && (a.k === 'note' || a.k === 'box')
+                      && isFinite(a.x) && isFinite(a.y));
+}}
+document.getElementById('anno-exp').onclick = () => {{
+  if (!annotations.length) {{ hierToast('⟪Aktarılacak not yok⟫'); return; }}
+  const blob = new Blob([JSON.stringify(
+    {{ project: PROJECT_NAME, ts: Date.now(), items: annotations }}, null, 2)],
+    {{ type: 'application/json' }});
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = (PROJECT_NAME || 'schematic') + '_notlar.json';
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(a.href), 5000);
+  hierToast(annotations.length + ' ⟪not dosyaya aktarıldı⟫');
+}};
+document.getElementById('anno-imp').onclick = () =>
+  document.getElementById('anno-file').click();
+document.getElementById('anno-file').onchange = e => {{
+  const f = e.target.files && e.target.files[0];
+  if (!f) return;
+  const rd = new FileReader();
+  rd.onload = () => {{
+    const items = annoParseImport(String(rd.result));
+    if (!items || !items.length) {{ hierToast('⟪Dosyada not bulunamadı⟫'); return; }}
+    // Kimlik çakışırsa GELEN nota yeni kimlik verilir → mevcut notlar kaybolmaz
+    const have = new Set(annotations.map(a => String(a.id)));
+    items.forEach(a => {{
+      const c = Object.assign({{}}, a);
+      if (have.has(String(c.id))) c.id = annoId();
+      have.add(String(c.id));
+      annotations.push(c);
+    }});
+    annoStore(); annoRender();
+    hierToast(items.length + ' ⟪not yüklendi — kalıcı olması için Kaydet⟫');
+  }};
+  rd.readAsText(f);
+  e.target.value = '';
+}};
 
 // Kaydet: notlar gömülü HTML. Chromium'da File System Access API ile mevcut
 // dosyanın ÜSTÜNE yazılabilir (ilk kayıtta dosya seçtirir — tarayıcı güvenliği

@@ -53,6 +53,7 @@ from viewer import (generate_viewer, generate_json,
                     generate_bom_csv, generate_pnp_csv,
                     generate_ic_map_xlsx, generate_mcu_pinout_xlsx,
                     generate_pcb_canvas_viewer, generate_combined_viewer,
+                    read_annotations, write_annotations,
                     APP_VERSION)
 
 
@@ -465,6 +466,10 @@ class MainWindow(QtWidgets.QMainWindow):
         self.openOutputAct.setEnabled(False)
         self._add_action(file_menu, "Çıktı Klasörünü Aç", self.open_output_folder)
         file_menu.addSeparator()
+        self.transferNotesAct = self._add_action(
+            file_menu, "Notları Eski Çıktıdan Taşı…", self.transfer_notes,
+            tip="Eski HTML deki (veya _notlar.json daki) şematik notlarını yeni üretilen HTML e taşı")
+        file_menu.addSeparator()
         self._add_action(file_menu, "Log'u Temizle", self.clear_log)
         file_menu.addSeparator()
         self._add_action(file_menu, "Çıkış", self.close, "Ctrl+Q",
@@ -490,6 +495,9 @@ class MainWindow(QtWidgets.QMainWindow):
             self._add_action(gen_menu, "JSON (AI / LLM için)",
                              self.generate_json_action),
         ]
+        # Üretim çıktı dosyasını yeniden yazdığından, o sırada not taşımak
+        # yarış oluşturur → aynı kilide dahil edilir.
+        self._menu_action_items.append(self.transferNotesAct)
 
         # --- Görünüm ---
         view_menu = self._add_menu(bar, "&Görünüm")
@@ -673,6 +681,91 @@ class MainWindow(QtWidgets.QMainWindow):
             return
         QtGui.QDesktopServices.openUrl(
             QtCore.QUrl.fromLocalFile(str(folder)))
+
+    def transfer_notes(self):
+        """@brief Şematik notlarını eski bir çıktıdan yeni üretilene taşır.
+
+        @details Notlar iki yerde durur: tarayıcının localStorage'ı ve
+        görüntüleyicide "Kaydet" ile HTML'e gömülen yuva. localStorage
+        TARAYICIYA bağlıdır — Firefox `file://` deposunu DOSYA ADINA göre
+        böldüğünden HTML yeniden üretilip adı/klasörü değişince notlar
+        görünmez olur. Bu eylem gömülü yuvayı DOSYA düzeyinde kopyalar:
+        kaynak eski bir görüntüleyici HTML'i ya da "Dışa" düğmesiyle inen
+        `_notlar.json` olabilir; hedefte birleşik görünüm de desteklenir
+        (şematik iç HTML'i açılıp yeniden sıkıştırılır).
+        """
+        start = ""
+        if self.last_output:
+            parent = Path(self.last_output).parent
+            if parent.is_dir():
+                start = str(parent)
+        title = tr("Not taşıma")
+
+        src, _ = QtWidgets.QFileDialog.getOpenFileName(
+            self, tr("Notların OKUNACAĞI dosya (eski HTML veya _notlar.json)"),
+            start, tr("Not kaynağı (*.html *.htm *.json)"))
+        if not src:
+            return
+        try:
+            items = read_annotations(src)
+        except Exception as e:
+            QtWidgets.QMessageBox.warning(
+                self, title, tr("Kaynak okunamadı: {hata}").format(hata=e))
+            return
+        if not items:
+            QtWidgets.QMessageBox.information(
+                self, title,
+                tr("Bu dosyada not bulunamadı. Notların taşınabilmesi için "
+                   "görüntüleyicide önce Kaydet (HTML e göm) ya da Dışa "
+                   "(_notlar.json) kullanılmış olmalı."))
+            return
+
+        dst, _ = QtWidgets.QFileDialog.getOpenFileName(
+            self, tr("Notların YAZILACAĞI HTML (yeni üretilen)"),
+            self.last_output or start,
+            tr("Görüntüleyici HTML (*.html *.htm)"))
+        if not dst:
+            return
+        try:
+            same = Path(src).resolve() == Path(dst).resolve()
+        except OSError:
+            same = False
+        if same:
+            QtWidgets.QMessageBox.warning(
+                self, title, tr("Kaynak ve hedef aynı dosya."))
+            return
+
+        try:
+            existing = read_annotations(dst)
+        except Exception:
+            existing = []
+        if existing:
+            ans = QtWidgets.QMessageBox.question(
+                self, title,
+                tr("Hedefte zaten {sayi} not gömülü. Üzerine yazılsın mı?")
+                .format(sayi=len(existing)),
+                QtWidgets.QMessageBox.Yes | QtWidgets.QMessageBox.No,
+                QtWidgets.QMessageBox.No)
+            if ans != QtWidgets.QMessageBox.Yes:
+                return
+
+        try:
+            where = write_annotations(dst, items)
+        except Exception as e:
+            QtWidgets.QMessageBox.warning(
+                self, title, tr("Notlar yazılamadı: {hata}").format(hata=e))
+            return
+
+        extra = (tr(" (birleşik görünümün şematik paneline)")
+                 if where == "combined" else "")
+        self.log(tr("✓ {sayi} not taşındı: {kaynak} → {hedef}{ek}").format(
+            sayi=len(items), kaynak=Path(src).name,
+            hedef=Path(dst).name, ek=extra))
+        QtWidgets.QMessageBox.information(
+            self, title,
+            tr("{sayi} not/kutu {hedef} dosyasına gömüldü. Dosyayı tarayıcıda "
+               "Ctrl+F5 ile açınca notlar görünür.").format(
+                   sayi=len(items), hedef=Path(dst).name))
 
     # === Proje seçimi ===
     def _last_project_dir(self) -> str:

@@ -35,6 +35,7 @@ from pathlib import Path
 import codecs
 import json
 import logging
+import math
 import re
 import sys
 import datetime
@@ -90,7 +91,7 @@ from altium_monkey.altium_schdoc import AltiumSchDoc
 
 # Uygulama sürümü — tek kaynak burası; gui.py buradan import eder.
 # HTML çıktılarında sağ üst köşedeki rozette görünür (build saati yerine).
-APP_VERSION = "2.26.0"
+APP_VERSION = "2.27.0"
 
 # Önerilen minimum altium_monkey sürümü. Bu sürümden öncesinde:
 #   · 2026.6.21 öncesi — STM32 gibi IC'lerde dikey pin adları yatay çiziliyordu.
@@ -632,6 +633,390 @@ def namespace_svg_ids(svg_str: str, prefix: str) -> str:
 
     svg_str = re.sub(r'(\sid\s*=\s*)"([^"]*)"', _decl, svg_str)
     return _SVG_ID_REF_RE.sub(_ref, svg_str)
+
+
+# ===========================================================================
+# Şematik sayfa SVG'si → kanvas çizim listesi ("draw-list")
+# ===========================================================================
+# v2.27.0'a kadar sayfalar HTML'e satır içi SVG olarak gömülüyordu. 64 sayfalık
+# bir projede bu ÖLÇÜLDÜ: 180 512 SVG elemanı (toplam 186 338 DOM düğümü) +
+# LOD bitmap'leri için 132 MB kanvas belleği + 29 MB HTML. Chromium
+# CSS-transform edilen bu dev katmanı her zoom adımında CPU'da yeniden
+# rasterize ettiği için gezinme takılıyordu (Firefox/WebRender vektörü GPU'da
+# çizdiğinden akıcıydı — kullanıcının bildirdiği fark tam olarak buydu).
+#
+# Çözüm PCB tarafındakinin aynısı: geometri ÜRETİMDE düzleştirilip kompakt bir
+# çizim listesine çevrilir, tarayıcıda tek <canvas>'a çizilir. altium_monkey'in
+# ürettiği SVG lehçesi bunun için biçilmiş kaftan (BRK-210'da ölçüldü):
+#   line %52 · g %23 (YALNIZ id — hiç transform yok) · text %14 · rect %6
+#   polygon %3 · path 42 (yalnız yay) · ellipse 27 · image 9 · clipPath 175
+# `<g>`'lerde transform olmadığı için tüm koordinatlar mutlaktır → düzleştirme
+# kayıpsızdır. Yine de bir gün transform çıkarsa sessizce bozulmasın diye
+# parser bir CTM yığını tutar ve dönüşümü koordinatlara PİŞİRİR.
+#
+# Metin seçilebilirliği (v2.9.22'den beri var olan "PDF gibi kopyala" özelliği)
+# PDF.js'in yöntemiyle korunur: kanvasın üstünde, YALNIZ görünür sayfalar için
+# ve yalnız okunur zoom'da kurulan saydam <span> katmanı (bkz. build_html
+# içindeki tlBuild). 180 512 düğüm yerine birkaç yüz düğüm.
+_DL_TAG = re.compile(
+    r"<(/?)([A-Za-z][\w:.-]*)((?:\s+[\w:.-]+\s*=\s*\"[^\"]*\")*)\s*(/?)>", re.S)
+_DL_ATTR = re.compile(r"([\w:.-]+)\s*=\s*\"([^\"]*)\"")
+_DL_NUM = re.compile(r"[-+]?\d*\.?\d+(?:[eE][-+]?\d+)?")
+_DL_FONTFACE = re.compile(r"@font-face\s*\{[^{}]*\}", re.S)
+_DL_ENT = re.compile(r"&(#x?[0-9A-Fa-f]+|amp|lt|gt|quot|apos);")
+_DL_XFORM = re.compile(r"([a-zA-Z]+)\s*\(([^)]*)\)")
+
+
+def _dl_unescape(s: str) -> str:
+    """@brief SVG metin içeriğindeki XML varlıklarını (&amp; &#39; …) çözer.
+
+    @param s Ham metin
+    @return Çözülmüş metin
+    """
+    if "&" not in s:
+        return s
+
+    def rep(m):
+        v = m.group(1)
+        if v == "amp":
+            return "&"
+        if v == "lt":
+            return "<"
+        if v == "gt":
+            return ">"
+        if v == "quot":
+            return '"'
+        if v == "apos":
+            return "'"
+        try:
+            return chr(int(v[2:], 16)) if v[1] in "xX" else chr(int(v[1:]))
+        except Exception:
+            return m.group(0)
+
+    return _DL_ENT.sub(rep, s)
+
+
+def _dl_f(v, default=0.0) -> float:
+    """@brief SVG attribute değerinden sayı çeker ("0.5px" → 0.5).
+
+    @param v Attribute değeri (None olabilir)
+    @param default Değer okunamazsa dönecek sayı
+    @return float
+    """
+    if v is None:
+        return default
+    m = _DL_NUM.search(str(v))
+    return float(m.group(0)) if m else default
+
+
+def _dl_r(x, nd=2):
+    """@brief Koordinatı yuvarla; tam sayıysa int döndür (JSON'da kısalık).
+
+    @param x Sayı
+    @param nd Ondalık basamak
+    @return int | float
+    """
+    v = round(float(x), nd)
+    return int(v) if v == int(v) else v
+
+
+def _dl_parse_transform(txt: str):
+    """@brief SVG transform listesini 2×3 afin matrise çevirir.
+
+    @details `translate/scale/rotate/matrix/skewX/skewY` desteklenir; tanınmayan
+    fonksiyon ATLANIR (birim gibi davranır) — böylece beklenmedik bir çıktı
+    sayfayı düşürmez, en fazla o öğe yerinde durur.
+
+    @param txt transform attribute metni
+    @return (a, b, c, d, e, f)
+    """
+    m = (1.0, 0.0, 0.0, 1.0, 0.0, 0.0)
+    for fn, args in _DL_XFORM.findall(txt or ""):
+        v = [float(x) for x in _DL_NUM.findall(args)]
+        fn = fn.lower()
+        if fn == "translate":
+            t = (1, 0, 0, 1, v[0] if v else 0, v[1] if len(v) > 1 else 0)
+        elif fn == "scale":
+            sx = v[0] if v else 1
+            sy = v[1] if len(v) > 1 else sx
+            t = (sx, 0, 0, sy, 0, 0)
+        elif fn == "rotate":
+            a = math.radians(v[0] if v else 0)
+            ca, sa = math.cos(a), math.sin(a)
+            t = (ca, sa, -sa, ca, 0, 0)
+            if len(v) >= 3:                     # rotate(a cx cy)
+                cx, cy = v[1], v[2]
+                t = _dl_mul(_dl_mul((1, 0, 0, 1, cx, cy), t), (1, 0, 0, 1, -cx, -cy))
+        elif fn == "matrix" and len(v) >= 6:
+            t = tuple(v[:6])
+        elif fn == "skewx":
+            t = (1, 0, math.tan(math.radians(v[0] if v else 0)), 1, 0, 0)
+        elif fn == "skewy":
+            t = (1, math.tan(math.radians(v[0] if v else 0)), 0, 1, 0, 0)
+        else:
+            continue
+        m = _dl_mul(m, t)
+    return m
+
+
+def _dl_mul(m, n):
+    """@brief İki 2×3 afin matrisi çarpar (m · n).
+
+    @param m Sol matris (a,b,c,d,e,f)
+    @param n Sağ matris
+    @return Çarpım matrisi
+    """
+    a1, b1, c1, d1, e1, f1 = m
+    a2, b2, c2, d2, e2, f2 = n
+    return (a1 * a2 + c1 * b2, b1 * a2 + d1 * b2,
+            a1 * c2 + c1 * d2, b1 * c2 + d1 * d2,
+            a1 * e2 + c1 * f2 + e1, b1 * e2 + d1 * f2 + f1)
+
+
+_DL_IDENT = (1.0, 0.0, 0.0, 1.0, 0.0, 0.0)
+
+
+def _dl_pt(m, x, y):
+    """@brief Noktayı 2×3 matrisle dönüştürür.
+
+    @param m Matris (a,b,c,d,e,f)
+    @param x X
+    @param y Y
+    @return (x', y')
+    """
+    return (m[0] * x + m[2] * y + m[4], m[1] * x + m[3] * y + m[5])
+
+
+def svg_to_drawlist(svg_str: str, img_table: dict, font_faces: dict,
+                    used_fonts: set) -> dict:
+    """@brief Bir sayfa SVG'sini kanvas çizim listesine (draw-list) düzleştirir.
+
+    @details Çıktı JSON'a serileştirilip gzip'lenerek HTML'e gömülür; tarayıcı
+    tarafı bunu tek `<canvas>`'a çizer (bkz. modül başındaki uzun açıklama).
+    Gömülü görseller (`<image>` base64 PNG) ve `@font-face` blokları PROJE
+    GENELİNDE tekilleştirilir — BRK-210'un 64 sayfalık kopyasında ölçüldü:
+    görseller 23.4 MB → 0.61 MB, fontlar 5.11 MB → 0.64 MB.
+
+    Sayısal alanlar (`ln`, `rc`, `el`, `im`) yer kaplamasın diye DÜZ dizidir;
+    her öğe sabit sayıda eleman kaplar (aşağıdaki yorumlara bakın).
+
+    @param svg_str Sayfanın SVG metni (namespace_svg_ids uygulanmış olabilir)
+    @param img_table Proje geneli görsel tablosu {href: index} — yerinde güncellenir
+    @param font_faces Proje geneli @font-face tablosu {css: family} — yerinde güncellenir
+    @param used_fonts Kullanılan font ailesi adları — yerinde güncellenir
+    @return draw-list sözlüğü
+    """
+    st, st_ix = [], {}      # şekil stilleri: [fill, fillOpacity, stroke, strokeW, hairline, dash]
+    ts, ts_ix = [], {}      # metin stilleri: [family, color, weight, style]
+    ln = []                 # çizgiler   — düz: [si, x1, y1, x2, y2] ×n
+    rc = []                 # dikdörtgen — düz: [si, x, y, w, h, rx] ×n
+    el = []                 # elips      — düz: [si, cx, cy, rx, ry] ×n
+    im = []                 # görsel     — düz: [x, y, w, h, imgIndex] ×n
+    pg = []                 # poligon    — [[si, x0, y0, x1, y1, …], …]
+    pt = []                 # path       — [[si, "d"], …] (yalnız yaylar)
+    tx = []                 # metin      — [[si, x, y, fontSize, rot, clipIx, matIx, metin], …]
+    cl = []                 # clip dikdörtgenleri — [[x, y, w, h], …]
+    mt = []                 # birim OLMAYAN matrisler — [[a,b,c,d,e,f], …]
+    clip_ids = {}           # clipPath id → cl indeksi
+    mt_ix = {}
+
+    def sid(fill, fop, stroke, sw, hair, dash):
+        k = (fill or "", fop, stroke or "", sw, 1 if hair else 0, dash or "")
+        i = st_ix.get(k)
+        if i is None:
+            i = st_ix[k] = len(st)
+            st.append(list(k))
+        return i
+
+    def tid(fam, color, weight, style):
+        k = (fam or "sans-serif", color or "#000000", weight or "", style or "")
+        i = ts_ix.get(k)
+        if i is None:
+            i = ts_ix[k] = len(ts)
+            ts.append(list(k))
+            used_fonts.add(k[0])
+        return i
+
+    def mid(m):
+        if m == _DL_IDENT:
+            return -1
+        k = tuple(round(v, 6) for v in m)
+        i = mt_ix.get(k)
+        if i is None:
+            i = mt_ix[k] = len(mt)
+            mt.append([_dl_r(v, 6) for v in k])
+        return i
+
+    def shape_style(a):
+        fill = a.get("fill", "")
+        if fill.lower() in ("none", ""):
+            fill = ""
+        stroke = a.get("stroke", "")
+        if stroke.lower() in ("none", ""):
+            stroke = ""
+        return sid(fill, round(_dl_f(a.get("fill-opacity"), 1.0), 3),
+                   stroke, _dl_r(_dl_f(a.get("stroke-width"), 1.0), 3),
+                   a.get("vector-effect", "").lower() == "non-scaling-stroke",
+                   a.get("stroke-dasharray", ""))
+
+    vb = [0.0, 0.0, 1000.0, 1000.0]
+    ctm = [_DL_IDENT]       # transform yığını (pratikte hep birim)
+    skip_depth = 0          # <defs> içi: çizilmez
+    clip_cur = None         # açık <clipPath id>
+    pos = 0
+    n = len(svg_str)
+    while pos < n:
+        m = _DL_TAG.search(svg_str, pos)
+        if not m:
+            break
+        closing, tag, attrs_raw, selfclose = m.group(1), m.group(2), m.group(3), m.group(4)
+        pos = m.end()
+        tag_l = tag.lower()
+
+        if closing:
+            if tag_l == "g" and len(ctm) > 1:
+                ctm.pop()
+            elif tag_l == "defs" and skip_depth:
+                skip_depth -= 1
+            elif tag_l == "clippath":
+                clip_cur = None
+            continue
+
+        a = dict(_DL_ATTR.findall(attrs_raw)) if attrs_raw else {}
+
+        if tag_l == "svg":
+            if "viewBox" in a:
+                v = [float(x) for x in _DL_NUM.findall(a["viewBox"])]
+                if len(v) >= 4:
+                    vb = v[:4]
+            continue
+        if tag_l == "style":
+            end = svg_str.find("</style>", pos)
+            css = svg_str[pos:end if end >= 0 else n]
+            for ff in _DL_FONTFACE.findall(css):
+                fam = re.search(r'font-family\s*:\s*["\']?([^;"\']+)', ff)
+                font_faces[ff.strip()] = (fam.group(1).strip() if fam else "")
+            pos = (end + 8) if end >= 0 else n
+            continue
+        if tag_l == "defs":
+            if not selfclose:
+                skip_depth += 1
+            continue
+        if tag_l == "clippath":
+            clip_cur = a.get("id") or ""
+            continue
+        if tag_l == "g":
+            if not selfclose:
+                ctm.append(_dl_mul(ctm[-1], _dl_parse_transform(a["transform"]))
+                           if "transform" in a else ctm[-1])
+            continue
+
+        M = ctm[-1]
+        if "transform" in a and tag_l != "text":
+            M = _dl_mul(M, _dl_parse_transform(a["transform"]))
+
+        if clip_cur is not None:
+            # clipPath içindeki dikdörtgen = kırpma penceresi
+            if tag_l == "rect":
+                x0, y0 = _dl_pt(M, _dl_f(a.get("x")), _dl_f(a.get("y")))
+                x1, y1 = _dl_pt(M, _dl_f(a.get("x")) + _dl_f(a.get("width")),
+                                _dl_f(a.get("y")) + _dl_f(a.get("height")))
+                clip_ids[clip_cur] = len(cl)
+                cl.append([_dl_r(min(x0, x1)), _dl_r(min(y0, y1)),
+                           _dl_r(abs(x1 - x0)), _dl_r(abs(y1 - y0))])
+            continue
+        if skip_depth:
+            continue
+
+        if tag_l == "line":
+            x1, y1 = _dl_pt(M, _dl_f(a.get("x1")), _dl_f(a.get("y1")))
+            x2, y2 = _dl_pt(M, _dl_f(a.get("x2")), _dl_f(a.get("y2")))
+            ln.extend((shape_style(a), _dl_r(x1), _dl_r(y1), _dl_r(x2), _dl_r(y2)))
+
+        elif tag_l == "rect":
+            x, y = _dl_f(a.get("x")), _dl_f(a.get("y"))
+            w, h = _dl_f(a.get("width")), _dl_f(a.get("height"))
+            rx = _dl_f(a.get("rx"))
+            if abs(M[1]) < 1e-9 and abs(M[2]) < 1e-9:       # döndürme/eğme yok
+                x0, y0 = _dl_pt(M, x, y)
+                x1, y1 = _dl_pt(M, x + w, y + h)
+                rc.extend((shape_style(a), _dl_r(min(x0, x1)), _dl_r(min(y0, y1)),
+                           _dl_r(abs(x1 - x0)), _dl_r(abs(y1 - y0)),
+                           _dl_r(rx * abs(M[0]))))
+            else:                                            # döndürülmüş → poligon
+                p = [shape_style(a)]
+                for cx, cy in ((x, y), (x + w, y), (x + w, y + h), (x, y + h)):
+                    px, py = _dl_pt(M, cx, cy)
+                    p.extend((_dl_r(px), _dl_r(py)))
+                pg.append(p)
+
+        elif tag_l in ("polygon", "polyline"):
+            vals = [float(v) for v in _DL_NUM.findall(a.get("points", ""))]
+            if len(vals) >= 4:
+                p = [shape_style(a)]
+                for i in range(0, len(vals) - 1, 2):
+                    px, py = _dl_pt(M, vals[i], vals[i + 1])
+                    p.extend((_dl_r(px), _dl_r(py)))
+                if tag_l == "polyline":
+                    p[0] = -p[0] - 1        # negatif = kapatma YOK (açık çoklu çizgi)
+                pg.append(p)
+
+        elif tag_l in ("ellipse", "circle"):
+            cx, cy = _dl_pt(M, _dl_f(a.get("cx")), _dl_f(a.get("cy")))
+            r = _dl_f(a.get("r"))
+            rx = _dl_f(a.get("rx"), r) * abs(M[0] or 1)
+            ry = _dl_f(a.get("ry"), r) * abs(M[3] or 1)
+            el.extend((shape_style(a), _dl_r(cx), _dl_r(cy), _dl_r(rx), _dl_r(ry)))
+
+        elif tag_l == "path":
+            d = a.get("d", "").strip()
+            if d:
+                s = shape_style(a)
+                pt.append([s, d] if M == _DL_IDENT else [s, d, mid(M)])
+
+        elif tag_l == "image":
+            href = a.get("xlink:href") or a.get("href") or ""
+            if href:
+                idx = img_table.get(href)
+                if idx is None:
+                    idx = img_table[href] = len(img_table)
+                x0, y0 = _dl_pt(M, _dl_f(a.get("x")), _dl_f(a.get("y")))
+                x1, y1 = _dl_pt(M, _dl_f(a.get("x")) + _dl_f(a.get("width")),
+                                _dl_f(a.get("y")) + _dl_f(a.get("height")))
+                im.extend((_dl_r(min(x0, x1)), _dl_r(min(y0, y1)),
+                           _dl_r(abs(x1 - x0)), _dl_r(abs(y1 - y0)), idx))
+
+        elif tag_l == "text":
+            end = svg_str.find("</text>", pos)
+            body = svg_str[pos:end if end >= 0 else n]
+            pos = (end + 7) if end >= 0 else n
+            # İç etiket varsa (tspan — bu üreticide görülmedi) düz metne indir
+            content = _dl_unescape(re.sub(r"<[^>]*>", "", body))
+            if not content.strip():
+                continue
+            rot = 0.0
+            if "transform" in a:
+                # Bu üreticide daima `rotate(a cx cy)` ve (cx,cy) == (x,y)
+                rm = re.match(r"\s*rotate\(\s*([-\d.]+)", a["transform"])
+                if rm:
+                    rot = float(rm.group(1))
+                else:
+                    M = _dl_mul(M, _dl_parse_transform(a["transform"]))
+            cix = -1
+            cp = a.get("clip-path", "")
+            if cp.startswith("url(#"):
+                cix = clip_ids.get(cp[5:].rstrip(")"), -1)
+            tx.append([
+                tid(a.get("font-family"), a.get("fill"),
+                    a.get("font-weight"), a.get("font-style")),
+                _dl_r(_dl_f(a.get("x")), 3), _dl_r(_dl_f(a.get("y")), 3),
+                _dl_r(_dl_f(a.get("font-size"), 10.0), 3),
+                _dl_r(rot, 3), cix, mid(M), content,
+            ])
+
+    return {"vb": [_dl_r(v, 3) for v in vb], "st": st, "ts": ts, "ln": ln,
+            "rc": rc, "el": el, "im": im, "pg": pg, "pt": pt, "tx": tx,
+            "cl": cl, "mt": mt}
 
 
 def collect_net_names_from_sheet(schdoc) -> set:
@@ -6108,15 +6493,22 @@ def build_html(sheets, net_list, components, timestamp,
     max_x = max((s["x"] + s["w"] for s in sheets), default=2000) + 100
     max_y = max((s["y"] + s["h"] for s in sheets), default=1200) + 100
 
-    # Sayfa SVG'leri HTML'e HAM gömüldüğünde çıktı büyüyordu (BRK-210: 6.3 MB).
-    # PCB katmanlarındaki desenin aynısı: tüm sayfa SVG'leri tek gzip+base64
-    # blob'unda taşınır, açılışta DecompressionStream ile çözülüp .sheet-body
-    # içine enjekte edilir; ardından SVG'ye bağlı kurulumlar (tıklanabilir net /
-    # block / designator sınıfları, LOD bitmap'leri) çalıştırılır.
+    # Sayfalar HTML'e SVG olarak değil, düzleştirilmiş ÇİZİM LİSTESİ olarak
+    # gömülür (bkz. svg_to_drawlist) ve tarayıcıda tek <canvas>'a çizilir.
+    # Gömülü görseller ile @font-face blokları proje genelinde TEKİLLEŞTİRİLİR
+    # (aynı logo/font her sayfada tekrar gömülüyordu: 64 sayfada 23.4 MB + 5.1 MB).
+    # @font-face yalnız GERÇEKTEN kullanılan aile için taşınır — altium_monkey
+    # metrik-uyumlu bir yedek fontu (Arimo) hiç referans edilmese de gömüyor.
     import gzip as _gzip, base64 as _b64
-    sheet_gz = _b64.b64encode(_gzip.compress(
-        json.dumps({str(s["id"]): s["svg"] for s in sheets},
-                   separators=(",", ":")).encode("utf-8"), 6)).decode()
+    dl_imgs, dl_faces, dl_used = {}, {}, set()
+    dl_map = {str(s["id"]): svg_to_drawlist(s["svg"], dl_imgs, dl_faces, dl_used)
+              for s in sheets}
+    draw_gz = _b64.b64encode(_gzip.compress(json.dumps(
+        {"s": dl_map, "im": list(dl_imgs.keys())},
+        separators=(",", ":")).encode("utf-8"), 6)).decode()
+    _used_low = {f.lower() for f in dl_used}
+    font_css = "\n".join(css for css, fam in dl_faces.items()
+                         if fam and any(fam.lower() in u for u in _used_low))
     sheet_divs = "\n".join(
         f'<div class="sheet-card" id="sheet-{s["id"]}" data-sheet-id="{s["id"]}" '
         f'style="left:{s["x"]}px;top:{s["y"]}px;width:{s["w"]}px;height:{s["h"]}px;">'
@@ -6126,9 +6518,13 @@ def build_html(sheets, net_list, components, timestamp,
         for s in sheets
     )
 
+    # vb (viewBox) burada da taşınır: komponent vurgu kutusu (schBoxToCanvas)
+    # çizim listesi henüz çözülmeden de doğru hesaplanabilsin (cross-probe
+    # açılışta gelebiliyor).
     sheet_positions = {
         s["id"]: {"x": s["x"], "y": s["y"], "w": s["w"], "h": s["h"],
-                  "name": s["name"], "blocks": s.get("blocks", [])}
+                  "name": s["name"], "blocks": s.get("blocks", []),
+                  "vb": dl_map[str(s["id"])]["vb"]}
         for s in sheets
     }
     # Komponent highlight kutuları: {sheet_id: {designator: [x,y,w,h]}}
@@ -6147,6 +6543,10 @@ def build_html(sheets, net_list, components, timestamp,
 <meta http-equiv="cache-control" content="no-cache">
 <title>Schematic Viz · {timestamp}</title>
 <style>
+/* Şemaya gömülü fontlar (altium_monkey `<style>` ile veriyor) — proje genelinde
+   TEKİLLEŞTİRİLDİ ve yalnız gerçekten kullanılan aileler taşındı. Kanvas
+   `ctx.font` ile bunları kullanabilsin diye belgeye hoist edilir. */
+{font_css}
   * {{ box-sizing: border-box; }}
   body {{ margin:0; background:#1a1a1a; color:#ddd;
           font-family: 'Consolas','Courier New', monospace;
@@ -6258,46 +6658,46 @@ def build_html(sheets, net_list, components, timestamp,
      SVG elemanını hit-test edip :hover stil değişimleriyle repaint tetikliyor.
      Sınıf mousedown'da değil GERÇEK harekette eklenir (panMoved eşiği) —
      hareketsiz tıklamanın hedef elemanı değişmez. */
-  #viewport.panning .sheet-body svg {{ pointer-events:none; }}
+  #viewport.panning .tl {{ pointer-events:none; }}
+  /* Sayfaların ÇİZİLDİĞİ kanvas: ekran boyutunda, #canvas'ın ALTINDA durur.
+     Pan/zoom CSS transform'la DEĞİL çizim sırasında uygulanır (aynı tx/ty/
+     scale) → DOM overlay'lerle (kart çerçevesi, net yayları, notlar, vurgu
+     kutusu) birebir hizalı kalır. Arka planı saydam: #viewport'un radyal
+     gradyanı görünmeye devam etsin. */
+  #sheet-canvas {{ position:absolute; left:0; top:0; width:100%; height:100%;
+                   display:block; pointer-events:none; z-index:0; }}
   #canvas {{ position:absolute; transform-origin:0 0; left:0; top:0;
-             width:{max_x}px; height:{max_y}px; will-change:transform; }}
-  /* contain: hover/highlight repaint'ini tek karta sınırlar (tüm kanvası boyatmaz) */
-  .sheet-card {{ position:absolute; background:#fff; overflow:hidden;
+             width:{max_x}px; height:{max_y}px; will-change:transform;
+             z-index:1; }}
+  /* Kart artık ZEMİN ÇİZMEZ — sayfanın beyaz zemini ve içeriği kanvasa
+     çizilir; karttan geriye çerçeve (box-shadow), başlık şeridi ve metin
+     katmanının kabı kalır. contain: hover/highlight repaint'ini karta sınırlar. */
+  .sheet-card {{ position:absolute; background:transparent; overflow:hidden;
                  contain:layout paint;
                  box-shadow: 0 0 0 1px #444, 0 6px 24px rgba(0,0,0,0.6);
                  display:flex; flex-direction:column; }}
   .sheet-title {{ height:30px; background:#252525; color:#ccc; padding:6px 10px;
                    font-size:14px; border-bottom:1px solid #3a3a3a; text-align:center;
                    flex-shrink:0; line-height:18px; }}
-  .sheet-body {{ flex:1; overflow:hidden; background:#fff; position:relative; }}
-  .sheet-body svg {{ width:100%; height:100%; display:block; }}
-  /* LOD: uzak zoom'da sayfa yerine bir kez üretilmiş bitmap gösterilir (bkz.
-     buildLods JS'i). SVG display:none DEĞİL visibility:hidden ile gizlenir —
-     highlight/arama getBoundingClientRect ölçümleri çalışmaya devam eder. */
-  .lod-bitmap {{ position:absolute; left:0; top:0; width:100%; height:100%;
-                 display:none; }}
-  #canvas.lod .sheet-body.lod-ready svg {{ visibility:hidden; }}
-  /* lod-fade: bitmap→SVG dönüşünde bitmap ~160ms daha ÜSTTE kalır (SVG sonra
-     eklendiği için değil — bitmap DOM'da svg'den sonra) → Chromium SVG
-     karolarını bitmap'in arkasında rasterize eder, beyaz parlama görünmez. */
-  #canvas.lod .sheet-body.lod-ready .lod-bitmap,
-  #canvas.lod-fade .sheet-body.lod-ready .lod-bitmap {{ display:block; }}
-  /* Şematik metinleri PDF'teki gibi seçilebilir/kopyalanabilir (body user-select:none
-     bunu global kapatıyor; text elemanlarında geri açılır). Tıklanabilir sınıflar
-     (net/block/designator) pointer imlecini korur — hem seçilir hem tıklanır. */
-  /* Şematikte etkileşimli olan tek şey YAZIdır; şekiller (tel, kutu, dolgu)
-     tıklamayı yakalamamalı. Altium'un "Blanket" nesnesi (diferansiyel çift /
-     net-class direktiflerini saran yarı saydam beyaz poligon) net etiketinin
-     ÜSTÜNE çiziliyor ve tıklamayı yiyordu → o etiketler aramada bulunuyor ama
-     şema üzerinde seçilemiyordu (kullanıcı bildirimi: RS485AB_P). Şekilleri
-     tıklamaya geçirgen yapmak pan/boş-alan davranışını değiştirmez: mousedown
-     hedefi artık <svg>'nin kendisi olur, oradaki kontroller aynı çalışır. */
-  .sheet-body svg * {{ pointer-events:none; }}
-  .sheet-body svg text, .sheet-body svg text * {{ pointer-events:auto; }}
-  .sheet-body svg text {{ user-select:text; -webkit-user-select:text; cursor:text; }}
-  .sheet-body svg text::selection {{ background:#4ec9b0; color:#000; }}
-  .sheet-body svg text.clickable-net, .sheet-body svg text.block-link,
-  .sheet-body svg text.comp-designator {{ cursor:pointer; }}
+  .sheet-body {{ flex:1; overflow:hidden; background:transparent; position:relative; }}
+  /* === Metin katmanı (PDF.js deseni) =====================================
+     Şematik yazıları kanvasa çizilir; SEÇİM · KOPYALAMA · TIKLAMA · HOVER
+     için üstüne SAYDAM <span>'lardan bir katman konur. Yalnız GÖRÜNÜR
+     sayfalar ve okunur zoom için kurulur (bkz. tlUpdate) → 64 sayfalık
+     projede 180 000 SVG düğümü yerine birkaç yüz span.
+     Span kutusu user-birimindedir (font-size = SVG font-size) ve gövde
+     px'ine `transform: matrix(...)` ile taşınır; bu yüzden left/top 0. */
+  .tl {{ position:absolute; left:0; top:0; width:100%; height:100%;
+         overflow:hidden; }}
+  .tl span {{ position:absolute; left:0; top:0; transform-origin:0 0;
+              white-space:pre; line-height:1; color:transparent;
+              user-select:text; -webkit-user-select:text; cursor:text; }}
+  /* Seçim vurgusu YARI SAYDAM: altındaki kanvas yazısı okunmaya devam etsin
+     (PDF.js'te de böyle — span'in kendi metni görünmez). */
+  .tl span::selection {{ background:rgba(78,201,176,0.45); color:transparent; }}
+  .tl span::-moz-selection {{ background:rgba(78,201,176,0.45); color:transparent; }}
+  .tl span.clickable-net, .tl span.block-link,
+  .tl span.comp-designator {{ cursor:pointer; }}
   .sheet-card.hit {{ box-shadow: 0 0 0 3px {inter_color}, 0 0 40px rgba(0,0,0,0.5); }}
   .sheet-card.hit-1 {{ box-shadow: 0 0 0 3px #ff9800, 0 0 40px rgba(255,152,0,0.5); }}
   .sheet-card.hit-2 {{ box-shadow: 0 0 0 3px #e91e63, 0 0 40px rgba(233,30,99,0.5); }}
@@ -6324,7 +6724,7 @@ def build_html(sheets, net_list, components, timestamp,
   /* Araç aktifken: crosshair imleç, şema SVG'leri ve mevcut notlar tıklamaya kapalı
      (yeni not/kutu mevcutların üstüne de konabilsin) */
   #viewport.anno-mode {{ cursor:crosshair; }}
-  #viewport.anno-mode .sheet-body svg {{ pointer-events:none; }}
+  #viewport.anno-mode .tl {{ pointer-events:none; }}
   #viewport.anno-mode #anno-layer .anno {{ pointer-events:none; }}
   /* Yerinde yazma editörü (Foxit typewriter gibi) — canvas içinde, onunla ölçeklenir.
      white-space:pre → otomatik sarma YOK (SVG render'ı ile birebir; satır = Enter).
@@ -6410,14 +6810,16 @@ def build_html(sheets, net_list, components, timestamp,
   .popup-copy:hover {{ color:{inter_color}; }}
   .popup-copy.copied {{ color:{inter_color}; }}
   /* Komponent highlight: designator text'i camgöbeği (PCB highlight ile uyumlu) */
+  /* Metin katmanı span'ı normalde SAYDAM; vurgulanan designator burada
+     görünür camgöbeğine döner (kanvastaki yazının üstüne biner = vurgu). */
   @keyframes comp-pulse {{
-    0%, 100% {{ fill: #00e5ff; }}
-    50% {{ fill: #7af6ff; }}
+    0%, 100% {{ color: #00e5ff; }}
+    50% {{ color: #7af6ff; }}
   }}
   .comp-highlight {{
     animation: comp-pulse 1.1s ease-in-out infinite;
     font-weight: bold !important;
-    filter: drop-shadow(0 0 2px #00e5ff) drop-shadow(0 0 6px rgba(0,229,255,0.6));
+    text-shadow: 0 0 2px #00e5ff, 0 0 6px rgba(0,229,255,0.6);
   }}
   /* Seçili komponent kutusu (PCB'deki #hl-marker ile aynı stil). Çizgi/yazı
      kalınlığı JS'te 1/scale ile ölçeklenir (CSS transform zoom'da ekran-sabit). */
@@ -6573,6 +6975,7 @@ def build_html(sheets, net_list, components, timestamp,
   </div>
 </aside>
 <div id="viewport">
+  <canvas id="sheet-canvas"></canvas>
   <div id="canvas">
     <svg id="arc-layer" width="{max_x}" height="{max_y}"></svg>
     {sheet_divs}
@@ -6585,8 +6988,6 @@ def build_html(sheets, net_list, components, timestamp,
     <button class="tool-btn" id="zoom-in" title="⟪Yaklaş ( + )⟫">+</button>
     <button class="tool-btn" id="zoom-out" title="⟪Uzaklaş ( − )⟫">−</button>
     <button class="tool-btn" id="fit-all" title="⟪Tüm sayfaları sığdır⟫">⟪Tümü⟫</button>
-    <button class="tool-btn active" id="lod-toggle"
-            title="⟪LOD: uzak zoom'da ve gezinirken sayfalar bitmap çizilir (Chromium'da akıcılık). Kapatınca her zaman canlı SVG.⟫">LOD</button>
     <div class="toolbar-sep"></div>
     <label class="color-input" title="⟪Sayfalar arası yay rengi⟫">
       <input type="color" id="inter-color-picker" value="{inter_color}">
@@ -6699,9 +7100,10 @@ const PCB = {json.dumps({
 const NET_COLORS = ['{inter_color}', '#ff9800', '#e91e63', '#ffeb3b'];
 let INTRA_COLOR = '{intra_color}';
 
-// Sayfa SVG'leri gzip+base64 gömülü — script sonunda initSheets() çözüp
-// .sheet-body'lere enjekte eder, sonra SVG'ye bağlı kurulumları çalıştırır.
-const SHEET_GZ = "{sheet_gz}";
+// Sayfa GEOMETRİSİ gzip+base64 gömülü: SVG metni değil, düzleştirilmiş çizim
+// listesi (bkz. svg_to_drawlist). Script sonunda initSheets() çözüp kanvasa
+// çizer; DOM'a hiçbir sayfa elemanı girmez.
+const DRAW_GZ = "{draw_gz}";
 async function gunzipB64(b64) {{
   const bin = Uint8Array.from(atob(b64), c => c.charCodeAt(0));
   if (typeof DecompressionStream === 'undefined') return null;
@@ -6727,204 +7129,394 @@ schHlOverlay.setAttribute('height', arcLayer.getAttribute('height') || 10000);
 canvas.appendChild(schHlOverlay);
 let schMarkerBox = null;   // {{x,y,w,h,label}}
 
-// === LOD: uzak zoom'da sayfa bitmap'leri ==================================
-// Chromium CSS-scale edilen dev SVG katmanını HER zoom adımında CPU'da yeniden
-// rasterize eder (Firefox/WebRender vektörü GPU'da çizer — akıcılık farkı
-// buradan). Uzak zoom'da her sayfanın yerine bir kez üretilen bitmap (canvas)
-// gösterilir: bitmap'i kaydırıp ölçeklemek compositor'da bedavaya yakındır.
-// LOD_OFF üstüne yakınlaşınca canlı SVG'ye dönülür — tıklama/metin seçimi/hover
-// zaten o zoom'da yapılır. Bitmap üretimi idle'da sayfa sayfa yapılır; üretim
-// bitene kadar (ve üretilemeyen sayfalarda) canlı SVG kalır = eski davranış.
-const LOD_ON = 0.85, LOD_OFF = 1.05;  // histerezis: girişte <ON, çıkışta >OFF
-// Etkileşim (pan sürükleme / tekerlek zoom serisi) SIRASINDA bitmap, yakın
-// zoom'da da gösterilir (harita uygulaması deseni: harekette yumuşak ama
-// akıcı, durunca keskin canlı SVG). Üst sınır: çok aşırı zoom'da bitmap
-// çirkinleşir + görünür alan zaten küçük olduğundan canlı SVG akıcıdır.
-// (v2.15.0) Bu sınır artık SABİT DEĞİL: etkileşim bitmap'i zoom'a göre
-// yeniden üretildiğinden (aşağıdaki lodRetune) bitmap keskin olduğu SÜRECE
-// kullanılır. Aşağıdaki oran "bitmap ekran çözünürlüğünün en az %55'i" demek.
-const LOD_SHARP = 0.55;
-// Sayfa başına bitmap uzun kenar sınırı (bellek): 700×470'lik kartta res≈4.
-const LOD_MAX_PX = 2800;
-// Bitmap çözünürlüğü: LOD aralığının tepesinde (scale≈1) ekran pikseliyle
-// eşleşsin diye DPR kadar; alt sınır 1.25 (etkileşim bitmap'i okunur kalsın),
-// bellek için 1.6 ile sınırlı (kart 700×470 → ~2-3MB/sayfa).
-const LOD_RES = Math.min(1.6, Math.max(1.25, window.devicePixelRatio || 1));
-let lodActive = false, lodReady = 0, lodFadeT = null, lodEnabled = true;
-let panInteract = false, wheelInteract = false, wheelIdleT = null;
-function updateLod() {{
-  if (!lodReady) return;
-  const rest = lodActive ? (scale < LOD_OFF) : (scale < LOD_ON);
-  // Etkileşim sırasında bitmap yalnız YETERİNCE KESKİNSE kullanılır; değilse
-  // canlı SVG (bulanık bitmap yerine). lodMinRes, GÖRÜNÜR sayfaların en düşük
-  // bitmap çözünürlüğü — lodRetune onu zoom'a yaklaştırır.
-  const sharp = lodMinRes() >= scale * LOD_SHARP;
-  const want = lodEnabled &&
-    (rest || ((panInteract || wheelInteract) && sharp));
-  if (want === lodActive) return;
-  lodActive = want;
-  if (want) {{
-    clearTimeout(lodFadeT); canvas.classList.remove('lod-fade');
-    canvas.classList.add('lod');
-  }} else {{
-    // Bitmap'i hemen söndürme: SVG görünür olur, bitmap 160ms üstte kalır →
-    // SVG karoları arkada rasterize edilir (bkz. .lod-fade CSS yorumu).
-    canvas.classList.remove('lod');
-    canvas.classList.add('lod-fade');
-    clearTimeout(lodFadeT);
-    lodFadeT = setTimeout(() => canvas.classList.remove('lod-fade'), 160);
+// === Sayfa çizici: tek <canvas> + PDF.js tarzı metin katmanı ==============
+// (v2.27.0) Sayfalar artık satır içi SVG DOM'u DEĞİL: üretimde düzleştirilen
+// çizim listesi (bkz. svg_to_drawlist) TEK kanvasa çizilir. 64 sayfalık bir
+// projede ölçülen fark — DOM 186 338 düğüm → ~200, LOD bitmap 132 MB → 0,
+// HTML 29 MB → ~7 MB, kare çizimi 0.3-2 ms. LOD makinesi tamamen kalktı
+// (Chromium'un raster darboğazı artık yok: her karede yeniden rasterize
+// edilecek dev bir SVG display-list'i kalmadı).
+//
+// Pan/zoom kanvasa CSS transform ile DEĞİL çizim sırasında uygulanır; DOM
+// overlay'ler (#canvas: kart çerçeveleri, net yayları, notlar, vurgu kutusu)
+// aynı tx/ty/scale ile CSS transform alır → ikisi birebir hizalı kalır.
+const TITLE_H = 30;              // .sheet-title yüksekliği (CSS ile AYNI olmalı)
+const TEXT_MIN_PX = 3.2;         // ekranda bundan küçük yazı çizilmez
+const HAIR_MIN_PX = 0.35;        // en ince çizgi en az bu kadar piksel görünür
+const TL_MIN_SCALE = 0.85;       // metin katmanı bu zoom'un ÜSTÜNDE kurulur
+const TL_MAX_SHEETS = 6;         // aynı anda en çok bu kadar sayfa için span
+const schCv = document.getElementById('sheet-canvas');
+const schCtx = schCv.getContext('2d');
+let DL = null;                   // {{sheetId: draw-list}}
+let DLIMG = [];                  // gömülü görseller (Image nesneleri)
+
+function dlFont(ts, fs) {{       // metin stili + boyut → CSS font dizgesi
+  const fam = String(ts[0] || 'sans-serif').replace(/["\\\\]/g, '');
+  return ((ts[3] || '') + ' ' + (ts[2] || '') + ' ' + fs + 'px "' + fam
+          + '", sans-serif').trim();
+}}
+// Yuvarlatılmış dikdörtgen — Path2D.roundRect her yerde yok, arcTo her yerde var
+function dlRRect(p, x, y, w, h, r) {{
+  r = Math.min(r || 0, Math.abs(w) / 2, Math.abs(h) / 2);
+  if (r <= 0) {{ p.rect(x, y, w, h); return; }}
+  p.moveTo(x + r, y);
+  p.arcTo(x + w, y, x + w, y + h, r);
+  p.arcTo(x + w, y + h, x, y + h, r);
+  p.arcTo(x, y + h, x, y, r);
+  p.arcTo(x, y, x + w, y, r);
+  p.closePath();
+}}
+// Sayfanın Path2D paketlerini BİR KEZ kur (sonraki kareler bedava).
+function dlPrep(d) {{
+  if (d._p) return d._p;
+  const P = {{ fills: [], strokes: [], paths: [], texts: [] }};
+  const bag = new Map();
+  const path = si => {{ let p = bag.get(si); if (!p) {{ p = new Path2D(); bag.set(si, p); }} return p; }};
+  const L = d.ln;
+  for (let i = 0; i < L.length; i += 5) {{
+    const p = path(L[i]); p.moveTo(L[i + 1], L[i + 2]); p.lineTo(L[i + 3], L[i + 4]);
   }}
+  const R = d.rc;
+  for (let i = 0; i < R.length; i += 6) dlRRect(path(R[i]), R[i + 1], R[i + 2], R[i + 3], R[i + 4], R[i + 5]);
+  const E = d.el;
+  for (let i = 0; i < E.length; i += 5) {{
+    const p = path(E[i]);
+    p.ellipse(E[i + 1], E[i + 2], Math.max(E[i + 3], 0.01), Math.max(E[i + 4], 0.01), 0, 0, 6.2832);
+  }}
+  d.pg.forEach(g => {{
+    const open = g[0] < 0, si = open ? -g[0] - 1 : g[0], p = path(si);
+    p.moveTo(g[1], g[2]);
+    for (let i = 3; i < g.length; i += 2) p.lineTo(g[i], g[i + 1]);
+    if (!open) p.closePath();
+  }});
+  bag.forEach((p, si) => {{
+    const s = d.st[si];
+    if (s[0]) P.fills.push({{ p: p, c: s[0], o: s[1] }});
+    if (s[2]) P.strokes.push({{ p: p, c: s[2], w: s[3], hair: s[4], dash: s[5] }});
+  }});
+  d.pt.forEach(a => {{           // <path> (bu üreticide yalnız yaylar)
+    try {{ P.paths.push({{ p: new Path2D(a[1]), s: d.st[a[0]],
+                          m: a.length > 2 ? d.mt[a[2]] : null }}); }} catch (e) {{}}
+  }});
+  // Yazıları (stil, boyut) ikilisine göre grupla — ctx.font değişimi pahalı
+  const tg = new Map();
+  d.tx.forEach(t => {{
+    const k = t[0] + '|' + t[3];
+    let g = tg.get(k); if (!g) {{ g = []; tg.set(k, g); }} g.push(t);
+  }});
+  tg.forEach(items => {{
+    const s = d.ts[items[0][0]], fs = items[0][3];
+    P.texts.push({{ font: dlFont(s, fs), c: s[1], fs: fs, items: items }});
+  }});
+  d._p = P;
+  return P;
 }}
-// Tekerlek zoom serisi: her event sayacı tazeler; 180ms sessizlik = seri bitti.
-function lodWheelTouch() {{
-  wheelInteract = true;
-  updateLod();
-  clearTimeout(wheelIdleT);
-  wheelIdleT = setTimeout(() => {{ wheelInteract = false; updateLod(); }}, 180);
-}}
-// Toolbar LOD toggle'ı — kapatınca her zoom'da canlı SVG (tercih localStorage'da,
-// restoreUi geri yükler). Bitmap'ler yine üretilir ki açınca anında çalışsın.
-const lodBtn = document.getElementById('lod-toggle');
-function setLodEnabled(on) {{
-  lodEnabled = on;
-  lodBtn.classList.toggle('active', on);
-  updateLod();
-  lsSet({{ lod: on }});
-}}
-lodBtn.addEventListener('click', () => setLodEnabled(!lodEnabled));
-// Bir sayfanın bitmap'ini VERİLEN çözünürlükte üret/yenile (res = kart
-// boyutunun katı). Mevcut bitmap üretim bitene kadar ekranda kalır → görüntü
-// atlamaz. `body.dataset.lodRes` üretilmiş çözünürlüğü taşır.
-function lodRender(body, res, done) {{
-  const svgEl = body.querySelector('svg');
-  if (!svgEl) {{ done(false); return; }}
-  const w = Math.max(1, Math.round(body.clientWidth * res));
-  const h = Math.max(1, Math.round(body.clientHeight * res));
-  const src = new XMLSerializer().serializeToString(svgEl);
-  const img = new Image();
-  let url = '', triedData = false;
-  const fin = ok => {{
-    if (url) {{ URL.revokeObjectURL(url); url = ''; }}
-    if (ok) {{
-      try {{
-        const cv = document.createElement('canvas');
-        cv.width = w; cv.height = h;
-        // preserveAspectRatio="none" → hedef boyuta gerilir, ekranla birebir
-        cv.getContext('2d').drawImage(img, 0, 0, w, h);
-        cv.className = 'lod-bitmap';
-        const old = body.querySelector('canvas.lod-bitmap');
-        if (old) old.remove();
-        body.appendChild(cv);
-        body.dataset.lodRes = String(res);
-        if (!body.classList.contains('lod-ready')) {{
-          body.classList.add('lod-ready'); lodReady++;
-        }}
-        updateLod();
-      }} catch (e) {{ ok = false; }}   // bu sayfa canlı SVG'de kalır
+// Bir sayfayı kanvasa çiz (bx,by,bw,bh = sayfa GÖVDESİNİN ekran dikdörtgeni)
+function dlDrawSheet(g, d, bx, by, bw, bh) {{
+  const vb = d.vb, kx = bw / vb[2], ky = bh / vb[3], k = (kx + ky) / 2;
+  const P = dlPrep(d);
+  g.save();
+  g.beginPath(); g.rect(bx, by, bw, bh); g.clip();
+  g.translate(bx - vb[0] * kx, by - vb[1] * ky);
+  g.scale(kx, ky);
+  g.lineCap = 'round'; g.lineJoin = 'round';
+  for (let i = 0; i < P.fills.length; i++) {{
+    const f = P.fills[i];
+    g.fillStyle = f.c; g.globalAlpha = f.o; g.fill(f.p);
+  }}
+  g.globalAlpha = 1;
+  for (let i = 0; i < P.strokes.length; i++) {{
+    const s = P.strokes[i];
+    // vector-effect="non-scaling-stroke": SVG'de kalınlık viewBox→element
+    // eşlemesinden ETKİLENMEZ ama dış CSS zoom'undan etkilenirdi → aynı
+    // görünüm için `w * scale / k` (yani element uzayında sabit `w` px).
+    // ÖNEMLİ: bu yalnız kalınlık değil GÖRÜNÜM meselesi — Altium kesikli
+    // çizgiyi ayrı kısa segmentlerle çiziyor; ince çizersek yuvarlak uçlar
+    // boşluğu kapatamaz ve düz olması gereken oda çerçevesi KESİKLİ görünür.
+    let lw = s.hair ? Math.max(s.w, 0.5) * scale / k : s.w;
+    if (lw * k < HAIR_MIN_PX) lw = HAIR_MIN_PX / k;
+    g.strokeStyle = s.c; g.lineWidth = lw;
+    if (s.dash) g.setLineDash(String(s.dash).split(/[\\s,]+/).map(Number).filter(v => v > 0));
+    g.stroke(s.p);
+    if (s.dash) g.setLineDash([]);
+  }}
+  for (let i = 0; i < P.paths.length; i++) {{
+    const a = P.paths[i], s = a.s;
+    if (a.m) {{ g.save(); g.transform(a.m[0], a.m[1], a.m[2], a.m[3], a.m[4], a.m[5]); }}
+    if (s[0]) {{ g.fillStyle = s[0]; g.globalAlpha = s[1]; g.fill(a.p); g.globalAlpha = 1; }}
+    if (s[2]) {{
+      let lw = s[4] ? Math.max(s[3], 0.5) * scale / k : s[3];
+      if (lw * k < HAIR_MIN_PX) lw = HAIR_MIN_PX / k;
+      g.strokeStyle = s[2]; g.lineWidth = lw; g.stroke(a.p);
     }}
-    done(ok);
-  }};
-  img.onload = () => fin(true);
-  img.onerror = () => {{
-    // blob: bazı ortamlarda engellenebilir → data: URI ile bir kez daha dene
-    if (triedData) {{ fin(false); return; }}
-    triedData = true;
-    if (url) {{ URL.revokeObjectURL(url); url = ''; }}
-    img.src = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(src);
-  }};
-  url = URL.createObjectURL(new Blob([src], {{ type: 'image/svg+xml;charset=utf-8' }}));
-  img.src = url;
-}}
-// SVG'ler enjekte edildikten SONRA çalışır (initSheets çağırır): taban
-// çözünürlükte tüm sayfaların bitmap'i (idle'da, sırayla).
-function buildLods() {{
-  const bodies = Array.from(document.querySelectorAll('.sheet-body'));
-  const idle = window.requestIdleCallback
-    ? (f => window.requestIdleCallback(f, {{ timeout: 800 }}))
-    : (f => setTimeout(f, 150));
-  let i = 0;
-  function step() {{
-    if (i >= bodies.length) return;
-    lodRender(bodies[i++], LOD_RES, () => idle(step));
+    if (a.m) g.restore();
   }}
-  idle(step);
+  for (let i = 0; i < P.texts.length; i++) {{
+    const t = P.texts[i];
+    if (t.fs * ky < TEXT_MIN_PX) continue;   // okunmuyor → hiç çizme
+    g.font = t.font; g.fillStyle = t.c;
+    for (let j = 0; j < t.items.length; j++) {{
+      const it = t.items[j], cl = it[5] >= 0 ? d.cl[it[5]] : null;
+      if (cl || it[4] || it[6] >= 0) {{
+        g.save();
+        if (cl) {{ g.beginPath(); g.rect(cl[0], cl[1], cl[2], cl[3]); g.clip(); }}
+        if (it[6] >= 0) {{ const m = d.mt[it[6]]; g.transform(m[0], m[1], m[2], m[3], m[4], m[5]); }}
+        if (it[4]) {{
+          g.translate(it[1], it[2]); g.rotate(it[4] * Math.PI / 180);
+          g.translate(-it[1], -it[2]);
+        }}
+        g.fillText(it[7], it[1], it[2]);
+        g.restore();
+      }} else g.fillText(it[7], it[1], it[2]);
+    }}
+  }}
+  const IM = d.im;
+  for (let i = 0; i < IM.length; i += 5) {{
+    const img = DLIMG[IM[i + 4]];
+    if (img && img.complete && img.naturalWidth) g.drawImage(img, IM[i], IM[i + 1], IM[i + 2], IM[i + 3]);
+  }}
+  g.restore();
 }}
-// === Zoom'a göre bitmap tazeleme (mip) ====================================
-// Sabit çözünürlüklü bitmap yakın zoom'da bulanıklaştığı için eskiden scale>4'te
-// devre dışı kalıyordu (ve orada takılma geri geliyordu). Artık hareket
-// durduğunda GÖRÜNÜR sayfaların bitmap'i o zoom'a uygun çözünürlükte yeniden
-// üretilir → etkileşim bitmap'i her zoom'da keskin, canlı SVG yalnız DURAN
-// görünümde (tıklama/metin seçimi tam olarak korunur).
-function lodCapRes(body) {{
-  const m = Math.max(body.clientWidth, body.clientHeight) || 1;
-  return Math.max(LOD_RES, LOD_MAX_PX / m);
+// Tüm görünür sayfaları çiz (kare başına bir kez, applyT'den senkron çağrılır)
+function schDraw() {{
+  const r = viewport.getBoundingClientRect();
+  const W = Math.max(1, Math.round(r.width)), H = Math.max(1, Math.round(r.height));
+  const dpr = Math.min(window.devicePixelRatio || 1, 2);
+  const cw = Math.round(W * dpr), ch = Math.round(H * dpr);
+  if (schCv.width !== cw || schCv.height !== ch) {{ schCv.width = cw; schCv.height = ch; }}
+  const g = schCtx;
+  g.setTransform(dpr, 0, 0, dpr, 0, 0);
+  g.clearRect(0, 0, W, H);
+  if (!DL) return;
+  for (const id in sheetPos) {{
+    const sp = sheetPos[id];
+    const sx = sp.x * scale + tx, sy = sp.y * scale + ty;
+    const sw = sp.w * scale, sh = sp.h * scale;
+    if (sx > W || sy > H || sx + sw < 0 || sy + sh < 0) continue;   // görünmüyor
+    const th = TITLE_H * scale;
+    const by = sy + th, bh = sh - th;
+    if (bh <= 0.5 || sw <= 0.5) continue;
+    g.fillStyle = '#ffffff'; g.fillRect(sx, by, sw, bh);
+    const d = DL[id];
+    if (d) dlDrawSheet(g, d, sx, by, sw, bh);
+  }}
 }}
-function lodVisibleBodies() {{
-  const vp = viewport.getBoundingClientRect();
-  const out = [];
-  document.querySelectorAll('.sheet-body').forEach(b => {{
-    const r = b.getBoundingClientRect();
-    if (r.right > vp.left - 40 && r.left < vp.right + 40 &&
-        r.bottom > vp.top - 40 && r.top < vp.bottom + 40) out.push(b);
-  }});
-  return out;
+// SVG-viewBox kutusu → KANVAS koordinatı. Eskiden bu dönüşüm designator
+// yazısının getBBox ↔ getBoundingClientRect eşlemesinden türetiliyordu; panel
+// gizliyken tüm ölçümler 0 döndüğü için kutu alakasız bir yere düşüyordu
+// (v2.24.0'da bekletme yamasıyla örtülmüştü). Artık ÖLÇÜM YOK — dönüşüm
+// sayfanın kart konumu + viewBox'ından doğrudan hesaplanır.
+function schBoxToCanvas(sheetId, box) {{
+  const sp = sheetPos[sheetId];
+  if (!sp) return null;
+  const vb = (DL && DL[sheetId] && DL[sheetId].vb) || sp.vb;
+  if (!vb || !vb[2] || !vb[3]) return null;
+  const kx = sp.w / vb[2], ky = (sp.h - TITLE_H) / vb[3];
+  return {{ x: sp.x + (box[0] - vb[0]) * kx, y: sp.y + TITLE_H + (box[1] - vb[1]) * ky,
+            w: box[2] * kx, h: box[3] * ky }};
 }}
-// Görünür sayfaların en düşük bitmap çözünürlüğü (updateLod keskinlik kararı)
-function lodMinRes() {{
-  const vis = lodVisibleBodies();
-  if (!vis.length) return LOD_RES;
-  let m = Infinity;
-  vis.forEach(b => {{
-    if (!b.classList.contains('lod-ready')) return;
-    m = Math.min(m, +(b.dataset.lodRes || LOD_RES));
-  }});
-  return m === Infinity ? 0 : m;
-}}
-let lodTuneT = null, lodTuning = false;
-function lodRetune() {{
-  if (lodTuning || !lodEnabled) return;
-  const want = Math.max(LOD_RES, Math.min(scale * (window.devicePixelRatio || 1), 64));
-  const queue = lodVisibleBodies().filter(b => {{
-    const cap = lodCapRes(b);
-    const target = Math.min(want, cap);
-    const cur = +(b.dataset.lodRes || 0);
-    // Hedefin altındaysa yenile; çok üstündeyse (uzaklaşıldı) küçült — aradaki
-    // %5'lik pay gereksiz yeniden üretimi engeller.
-    return cur < target * 0.95 || cur > target * 1.6;
-  }});
-  if (!queue.length) return;
-  lodTuning = true;
-  let i = 0;
-  (function next() {{
-    if (i >= queue.length) {{ lodTuning = false; updateLod(); return; }}
-    const b = queue[i++];
-    lodRender(b, Math.min(want, lodCapRes(b)), () => setTimeout(next, 0));
-  }})();
-}}
-// Hareket durduktan 400ms sonra tazele (sürükleme/zoom sırasında değil)
-function lodScheduleRetune() {{
-  clearTimeout(lodTuneT);
-  lodTuneT = setTimeout(lodRetune, 400);
+// Bir sayfadaki EŞLEŞEN yazıların birleşik kanvas kutusu (SCH_BOXES yoksa yedek)
+function dlTextBox(sheetId, content) {{
+  const d = DL && DL[sheetId], sp = sheetPos[sheetId];
+  if (!d || !sp) return null;
+  const vb = d.vb, kx = sp.w / vb[2], ky = (sp.h - TITLE_H) / vb[3];
+  let x0 = 1e9, y0 = 1e9, x1 = -1e9, y1 = -1e9;
+  for (let i = 0; i < d.tx.length; i++) {{
+    const t = d.tx[i];
+    if ((t[7] || '').trim() !== content) continue;
+    const w = t[3] * 0.6 * t[7].length, h = t[3];
+    const ax = t[4] ? t[1] - h : t[1], ay = t[4] ? t[2] - w : t[2] - h;
+    const bx2 = t[4] ? t[1] : t[1] + w, by2 = t[4] ? t[2] : t[2];
+    x0 = Math.min(x0, ax); y0 = Math.min(y0, ay);
+    x1 = Math.max(x1, bx2); y1 = Math.max(y1, by2);
+  }}
+  if (x0 > x1) return null;
+  return {{ x: sp.x + (x0 - vb[0]) * kx, y: sp.y + TITLE_H + (y0 - vb[1]) * ky,
+            w: (x1 - x0) * kx, h: (y1 - y0) * ky }};
 }}
 
+// === Metin katmanı (PDF.js deseni) ========================================
+// Kanvas yazıyı çizer ama SEÇİLEMEZ. Seçim/kopyalama/tıklama/hover için
+// görünür sayfaların yazıları saydam <span>'lar olarak DOM'a konur — mevcut
+// sınıf tabanlı olay kodu (clickable-net / block-link / comp-designator)
+// hiç değişmeden bunlar üzerinde çalışır.
+const tlSheets = new Set();
+let schHlDesig = null;   // vurgulanan designator (katman sonradan kurulursa da işaretlenir)
+function tlMarkDesig(id) {{
+  const card = document.getElementById('sheet-' + id);
+  const l = card && card.querySelector('.tl');
+  if (!l || !schHlDesig) return;
+  l.querySelectorAll('span').forEach(s => {{
+    if ((s.textContent || '').trim() === schHlDesig) s.classList.add('comp-highlight');
+  }});
+}}
+const tlMetCache = new Map();
+const tlClsCache = {{}};
+function tlMetrics(font, fs) {{
+  let m = tlMetCache.get(font);
+  if (m) return m;
+  schCtx.save(); schCtx.font = font;
+  const mm = schCtx.measureText('Hxg');
+  schCtx.restore();
+  const asc = (mm.fontBoundingBoxAscent || mm.actualBoundingBoxAscent || fs * 0.8) / fs;
+  const desc = (mm.fontBoundingBoxDescent || mm.actualBoundingBoxDescent || fs * 0.2) / fs;
+  m = {{ asc: asc, desc: desc }};
+  tlMetCache.set(font, m);
+  return m;
+}}
+function tlMul(m, n) {{           // iki 2x3 afin matris çarpımı
+  return [m[0] * n[0] + m[2] * n[1], m[1] * n[0] + m[3] * n[1],
+          m[0] * n[2] + m[2] * n[3], m[1] * n[2] + m[3] * n[3],
+          m[0] * n[4] + m[2] * n[5] + m[4], m[1] * n[4] + m[3] * n[5] + m[5]];
+}}
+// Sayfadaki yazı içeriklerini sınıflandır (net / block / komponent) — eski
+// setupNetTexts + setupSheetTexts mantığının aynısı, ama SVG yerine draw-list
+// üzerinden ve sayfa başına BİR kez.
+function tlClasses(id) {{
+  let c = tlClsCache[id];
+  if (c) return c;
+  c = {{}};
+  const sp = sheetPos[id] || {{}}, d = DL && DL[id];
+  const blockMap = {{}};
+  (sp.blocks || []).forEach(b => {{
+    if (!b.target_id) return;
+    if (b.designator) blockMap[b.designator] = b.target_id;
+    if (b.filename) blockMap[b.filename] = b.target_id;
+    if (b.target_name) blockMap[b.target_name] = b.target_id;
+  }});
+  const compMap = compsBySheet[id] || {{}};
+  if (d) d.tx.forEach(t => {{
+    const s = (t[7] || '').trim();
+    if (!s || (s in c)) return;
+    const e = {{}};
+    if (netNameSet.has(s)) e.net = s;
+    if (blockMap[s]) e.block = blockMap[s];
+    else {{
+      const dg = resolveCompDesignator(s, compMap);
+      if (dg) e.comp = dg;
+    }}
+    c[s] = (e.net || e.block || e.comp) ? e : null;
+  }});
+  tlClsCache[id] = c;
+  return c;
+}}
+function tlBuild(id) {{
+  const d = DL && DL[id], sp = sheetPos[id];
+  if (!d || !sp) return;
+  const card = document.getElementById('sheet-' + id);
+  const body = card && card.querySelector('.sheet-body');
+  if (!body || body.querySelector('.tl')) return;
+  const vb = d.vb, kx = sp.w / vb[2], ky = (sp.h - TITLE_H) / vb[3];
+  const base = [kx, 0, 0, ky, -vb[0] * kx, -vb[1] * ky];
+  const cls = tlClasses(id);
+  const layer = document.createElement('div');
+  layer.className = 'tl';
+  const frag = document.createDocumentFragment();
+  for (let i = 0; i < d.tx.length; i++) {{
+    const t = d.tx[i], st = d.ts[t[0]], fs = t[3];
+    if (fs * ky * scale < 4) continue;          // ekranda okunmayacak kadar küçük
+    const font = dlFont(st, fs), met = tlMetrics(font, fs);
+    // line-height:1 satır kutusunun ÜSTÜ ile taban çizgisi arası
+    const bl = fs * ((1 - (met.asc + met.desc)) / 2 + met.asc);
+    let m = base;
+    if (t[6] >= 0) m = tlMul(m, d.mt[t[6]]);
+    if (t[4]) {{
+      const a = t[4] * Math.PI / 180, ca = Math.cos(a), sa = Math.sin(a);
+      m = tlMul(m, [1, 0, 0, 1, t[1], t[2]]);
+      m = tlMul(m, [ca, sa, -sa, ca, 0, 0]);
+      m = tlMul(m, [1, 0, 0, 1, -t[1], -t[2]]);
+    }}
+    m = tlMul(m, [1, 0, 0, 1, t[1], t[2] - bl]);
+    const el = document.createElement('span');
+    el.textContent = t[7];
+    el.style.font = font;
+    el.style.transform = 'matrix(' + m.map(v => +v.toFixed(4)).join(',') + ')';
+    const k = cls[(t[7] || '').trim()];
+    if (k) {{
+      if (k.net) {{ el.classList.add('clickable-net'); el.setAttribute('data-net', k.net); }}
+      if (k.block) {{
+        el.classList.add('block-link');
+        el.setAttribute('data-target-sheet-id', k.block);
+      }} else if (k.comp) {{
+        el.classList.add('comp-designator');
+        el.setAttribute('data-comp-designator', k.comp);
+        el.setAttribute('data-comp-sheet-id', id);
+      }}
+    }}
+    frag.appendChild(el);
+  }}
+  layer.appendChild(frag);
+  body.appendChild(layer);
+  tlSheets.add(id);
+  if (schHlDesig) tlMarkDesig(id);
+}}
+function tlDrop(id) {{
+  const card = document.getElementById('sheet-' + id);
+  const l = card && card.querySelector('.tl');
+  if (l) l.remove();
+  tlSheets.delete(id);
+}}
+function tlDropAll() {{ Array.from(tlSheets).forEach(tlDrop); }}
+// Görünür + okunur sayfalarda katmanı kur, kalanları kaldır
+function tlUpdate() {{
+  if (!DL) return;
+  const keep = [];
+  if (scale >= TL_MIN_SCALE) {{
+    const r = viewport.getBoundingClientRect();
+    for (const id in sheetPos) {{
+      const sp = sheetPos[id];
+      const sx = sp.x * scale + tx, sy = sp.y * scale + ty;
+      const sw = sp.w * scale, sh = sp.h * scale;
+      if (sx > r.width + 150 || sy > r.height + 150 || sx + sw < -150 || sy + sh < -150) continue;
+      keep.push(id);
+      if (keep.length >= TL_MAX_SHEETS) break;
+    }}
+  }}
+  Array.from(tlSheets).forEach(id => {{ if (keep.indexOf(id) < 0) tlDrop(id); }});
+  keep.forEach(id => {{ if (!tlSheets.has(id)) tlBuild(id); }});
+}}
+let tlTimer = null;
+function tlSchedule() {{
+  clearTimeout(tlTimer);
+  tlTimer = setTimeout(tlUpdate, 140);   // hareket dururken kur (pan'i takmasın)
+}}
+
+// smoothT'nin "nereden" bilgisi: en SON UYGULANAN görünüm (applyT günceller)
+let smoothRaf = 0;
+const viewApplied = {{ tx: tx, ty: ty, s: scale }};
 function applyT() {{
+  viewApplied.tx = tx; viewApplied.ty = ty; viewApplied.s = scale;
   canvas.style.transform = `translate(${{tx}}px,${{ty}}px) scale(${{scale}})`;
   zoomVal.textContent = scale.toFixed(2) + 'x';
+  schDraw();                 // SENKRON: kanvas ile DOM overlay aynı karede
   updateSchMarkerMetrics();
   // Not/kutu seçim görselleri + mini bar (modül aşağıda kurulur; var hoisting
   // sayesinde ilk applyT çağrılarında typeof güvenle 'undefined' döner)
   if (typeof __annoUi === 'function') __annoUi();
-  updateLod();
-  if (typeof lodScheduleRetune === 'function') lodScheduleRetune();
+  tlSchedule();
 }}
 applyT();
 // Programatik görünüm değişimlerinde (fit/reset/zoom butonu) yumuşak geçiş.
+// Eskiden CSS transition'dı; sayfalar artık kanvasa çizildiği için geçişin
+// JS'te yapılması ŞART — yoksa DOM overlay animasyonla kayarken kanvas anında
+// hedefe atlar ve ikisi 350 ms boyunca birbirinden ayrı düşer.
 // Fare tekerleği/pan doğrudan applyT kullanır (gecikme hissi olmasın).
 function smoothT() {{
-  canvas.style.transition = 'transform 0.35s ease';
-  applyT();
-  clearTimeout(smoothT._t);
-  smoothT._t = setTimeout(() => {{ canvas.style.transition = 'none'; }}, 400);
+  const from = {{ tx: viewApplied.tx, ty: viewApplied.ty, s: viewApplied.s }}, to = {{ tx: tx, ty: ty, s: scale }};
+  if (smoothRaf) cancelAnimationFrame(smoothRaf);
+  if (Math.abs(from.tx - to.tx) < 0.5 && Math.abs(from.ty - to.ty) < 0.5
+      && Math.abs(from.s - to.s) < 1e-4) {{ applyT(); return; }}
+  const t0 = performance.now(), DUR = 350;
+  (function step(now) {{
+    const u = Math.min(1, (now - t0) / DUR);
+    const e = u < 0.5 ? 2 * u * u : 1 - Math.pow(-2 * u + 2, 2) / 2;   // ease-in-out
+    tx = from.tx + (to.tx - from.tx) * e;
+    ty = from.ty + (to.ty - from.ty) * e;
+    scale = from.s + (to.s - from.s) * e;
+    applyT();
+    if (u < 1) smoothRaf = requestAnimationFrame(step);
+    else {{ smoothRaf = 0; tx = to.tx; ty = to.ty; scale = to.s; applyT(); }}
+  }})(performance.now());
 }}
 
 function classifyNet(name) {{
@@ -6939,20 +7531,20 @@ viewport.addEventListener('mousedown', e => {{
   if (gTouchActive()) return;   // dokunma jesti sürüyor (compat fare olayı)
   if (e.target.closest('.tool-btn') || e.target.closest('#detail-panel')) return;
   if (annoTool) return;   // not/kutu aracı aktif — pan yerine araç çalışır
-  // SVG metni üzerinde pan BAŞLATMA → tarayıcının native metin seçimi çalışsın
-  // (PDF'teki gibi sürükleyip kopyalama). Boş alanda pan aynen devam eder.
-  if (e.target.closest && e.target.closest('.sheet-body') && e.target.closest('text')) return;
+  // Metin katmanı span'ı üzerinde pan BAŞLATMA → tarayıcının native metin
+  // seçimi çalışsın (PDF'teki gibi sürükleyip kopyalama). Boş alanda pan aynen
+  // devam eder.
+  if (e.target.closest && e.target.closest('.tl')) return;
   panning = true; panMoved = false; sx = e.clientX; sy = e.clientY; stx = tx; sty = ty;
   viewport.classList.add('grabbing');
 }});
 window.addEventListener('mousemove', e => {{
   if (!panning) return;
   if (Math.abs(e.clientX - sx) > 3 || Math.abs(e.clientY - sy) > 3) {{
-    // Gerçek pan başladı: SVG hit-testing'i kapat (bkz. #viewport.panning CSS'i)
-    // + etkileşim boyunca bitmap moduna geç (akıcı sürükleme).
+    // Gerçek pan başladı: metin katmanının hit-testing'ini kapat
+    // (bkz. #viewport.panning CSS'i) — sürükleme yazıya takılmasın.
     if (!panMoved) {{ panMoved = true; viewport.classList.add('panning');
-                      svgTip.style.display = 'none';
-                      panInteract = true; updateLod(); }}
+                      svgTip.style.display = 'none'; }}
   }}
   tx = stx + (e.clientX - sx);
   ty = sty + (e.clientY - sy);
@@ -6960,16 +7552,13 @@ window.addEventListener('mousemove', e => {{
 }});
 window.addEventListener('mouseup', () => {{
   panning = false; viewport.classList.remove('grabbing', 'panning');
-  if (panInteract) {{ panInteract = false; updateLod(); }}
 }});
-// Tekerlek zoom'u rAF ile birleştirilir: Chromium her scale değişiminde görünür
-// karoları yeniden rasterize eder; yüksek çözünürlüklü tekerlek/trackpad kare
-// başına birden çok event üretebildiğinden çarpanlar wheelF'te biriktirilip
-// kare başına TEK transform uygulanır (tek event/kare durumunda aynı matematik).
+// Tekerlek zoom'u rAF ile birleştirilir: yüksek çözünürlüklü tekerlek/trackpad
+// kare başına birden çok event üretebildiğinden çarpanlar wheelF'te biriktirilip
+// kare başına TEK çizim yapılır (tek event/kare durumunda aynı matematik).
 let wheelF = 1, wheelPend = false, wheelMx = 0, wheelMy = 0;
 viewport.addEventListener('wheel', e => {{
   e.preventDefault();
-  lodWheelTouch();   // zoom serisi boyunca bitmap modu (akıcı tekerlek)
   const r = viewport.getBoundingClientRect();
   wheelMx = e.clientX - r.left; wheelMy = e.clientY - r.top;
   wheelF *= e.deltaY < 0 ? 1.15 : 0.87;
@@ -6999,11 +7588,9 @@ installGesture(viewport, {{
     panMoved = true;
     svgTip.style.display = 'none';
     viewport.classList.add('panning');
-    panInteract = true; updateLod();
   }},
   end: () => {{
     viewport.classList.remove('panning');
-    if (panInteract) {{ panInteract = false; updateLod(); }}
   }},
   pan: (dx, dy) => {{ tx += dx; ty += dy; applyT(); }},
   pinch: (f, cx, cy, mdx, mdy) => {{
@@ -7013,7 +7600,6 @@ installGesture(viewport, {{
     // Pinch merkezine göre zoom + iki parmağın ortak kayması (aynı anda pan)
     tx = mx - (mx - tx) * (scale / old) + mdx;
     ty = my - (my - ty) * (scale / old) + mdy;
-    lodWheelTouch();   // jest boyunca bitmap modu (akıcılık)
     applyT();
   }}
 }});
@@ -7091,29 +7677,27 @@ let compHighlightTimeout = null;
 
 function clearCompHighlight() {{
   document.querySelectorAll('.comp-highlight').forEach(el => el.classList.remove('comp-highlight'));
+  schHlDesig = null;
   schHlOverlay.innerHTML = '';
   schMarkerBox = null;
   if (compHighlightTimeout) {{ clearTimeout(compHighlightTimeout); compHighlightTimeout = null; }}
 }}
 
+// Kutu artık DOM ÖLÇÜMÜNDEN türetilmiyor (bkz. schBoxToCanvas) — sayfa gizli
+// bir panelde olsa bile doğru hesaplanır.
 function highlightComponent(designator, sheetId, focus = true) {{
   clearCompHighlight();
-  const sheetCard = document.getElementById('sheet-' + sheetId);
-  if (!sheetCard) {{ if (focus) {{ fitToSheet(sheetId); lastFitSheetId = sheetId; }} return; }}
+  if (!sheetPos[sheetId]) {{
+    if (focus) {{ fitToSheet(sheetId); lastFitSheetId = sheetId; }}
+    return;
+  }}
   lastFitSheetId = sheetId;
-  // Eşleşen designator text(ler)i bul (transform türetmek + text vurgusu için)
-  const matches = [];
-  sheetCard.querySelectorAll('svg text').forEach(t => {{
-    if ((t.textContent || '').trim() === designator) matches.push(t);
-  }});
-  // TAM komponent kutusu: full_bounds (SVG viewBox) → kanvas. Dönüşümü
-  // designator text'inin getBBox↔getBoundingClientRect eşlemesinden türet.
-  let cbox = null;
   const fullBox = (SCH_BOXES[sheetId] || {{}})[designator];   // [x,y,w,h] SVG viewBox
-  if (fullBox && matches.length) cbox = svgBoxToCanvas(matches[0], fullBox);
-  if (!cbox && matches.length) cbox = textsCanvasBox(matches);  // fallback: text bbox
+  let cbox = fullBox ? schBoxToCanvas(sheetId, fullBox) : null;
+  if (!cbox) cbox = dlTextBox(sheetId, designator);           // yedek: yazı kutusu
   if (!cbox) {{ if (focus) fitToSheet(sheetId); return; }}
-  matches.forEach(el => el.classList.add('comp-highlight'));
+  schHlDesig = designator;
+  tlSheets.forEach(tlMarkDesig);      // kurulu metin katmanlarında yazıyı da vurgula
   const pad = Math.max(cbox.w, cbox.h) * 0.12 + 5;
   schMarkerBox = {{ x: cbox.x - pad, y: cbox.y - pad,
                     w: cbox.w + 2 * pad, h: cbox.h + 2 * pad, label: designator }};
@@ -7122,33 +7706,9 @@ function highlightComponent(designator, sheetId, focus = true) {{
   if (focus) focusCanvasBox(schMarkerBox.x, schMarkerBox.y, schMarkerBox.w, schMarkerBox.h);
   drawSchMarker();
   compHighlightTimeout = setTimeout(() => {{
+    schHlDesig = null;
     document.querySelectorAll('.comp-highlight').forEach(el => el.classList.remove('comp-highlight'));
   }}, 6000);
-}}
-// Bir designator text'inin SVG-viewBox bbox'ı ↔ kanvas konumu eşlemesinden
-// SVG→kanvas dönüşümünü (sx,sy,offset) türetip fullBox'ı kanvasa çevir.
-function svgBoxToCanvas(textEl, fullBox) {{
-  let tb; try {{ tb = textEl.getBBox(); }} catch(e) {{ return null; }}
-  if (!tb.width || !tb.height) return null;
-  const vRect = viewport.getBoundingClientRect();
-  const r = textEl.getBoundingClientRect();
-  const tcx = (r.left - vRect.left - tx) / scale, tcy = (r.top - vRect.top - ty) / scale;
-  const sx = (r.width / scale) / tb.width, sy = (r.height / scale) / tb.height;
-  const offx = tcx - tb.x * sx, offy = tcy - tb.y * sy;
-  return {{ x: fullBox[0]*sx + offx, y: fullBox[1]*sy + offy,
-            w: fullBox[2]*sx, h: fullBox[3]*sy }};
-}}
-function textsCanvasBox(matches) {{
-  const vRect = viewport.getBoundingClientRect();
-  let x0=1e9,y0=1e9,x1=-1e9,y1=-1e9;
-  matches.forEach(el => {{
-    const bb = el.getBoundingClientRect();
-    const L=(bb.left-vRect.left-tx)/scale, T=(bb.top-vRect.top-ty)/scale;
-    const R=(bb.right-vRect.left-tx)/scale, B=(bb.bottom-vRect.top-ty)/scale;
-    x0=Math.min(x0,L);y0=Math.min(y0,T);x1=Math.max(x1,R);y1=Math.max(y1,B);
-  }});
-  if (x0>x1) return null;
-  return {{ x:x0, y:y0, w:x1-x0, h:y1-y0 }};
 }}
 
 function drawSchMarker() {{
@@ -7201,10 +7761,7 @@ function focusCanvasBox(x, y, w, h) {{
   scale = ns;
   tx = r.width / 2 - cx * scale;
   ty = r.height / 2 - cy * scale;
-  canvas.style.transition = 'transform 0.35s ease';
-  applyT();
-  clearTimeout(focusCanvasBox._t);
-  focusCanvasBox._t = setTimeout(() => {{ canvas.style.transition = 'none'; }}, 400);
+  smoothT();
 }}
 
 document.querySelectorAll('.tab').forEach(b => {{
@@ -7596,7 +8153,6 @@ function lsSet(patch) {{ try {{
   // Kullanıcının kaydedilmiş tercihi varsa ona uyulur.
   if (st.sidebar === false || (st.sidebar === undefined && window.innerWidth < 820))
     setSidebarOpen(false);
-  if (st.lod === false) setLodEnabled(false);
   if (st.inter) {{ NET_COLORS[0] = st.inter;
     document.getElementById('inter-color-picker').value = st.inter; }}
   if (st.intra) {{ INTRA_COLOR = st.intra;
@@ -8001,17 +8557,10 @@ function updateDetailPanel() {{
 
 const netNameSet = new Set(nets.map(n => n.name));
 
-// SVG text'lerinde net adlarını tıklanabilir yap
-// (SVG'ler gzip'ten sonra enjekte edildiğinden initSheets() çağırır)
-function setupNetTexts() {{
-  document.querySelectorAll('.sheet-body svg text').forEach(t => {{
-    const content = (t.textContent || '').trim();
-    if (netNameSet.has(content)) {{
-      t.classList.add('clickable-net');
-      t.setAttribute('data-net', content);
-    }}
-  }});
-}}
+// Not: net adı / block linki / komponent designator sınıflandırması artık
+// SVG text'leri üzerinde DEĞİL, metin katmanı kurulurken draw-list üzerinden
+// yapılır (bkz. tlClasses + tlBuild). Aşağıdaki netNameSet / compsBySheet /
+// resolveCompDesignator onun girdileridir.
 
 // Block linkleri: Python tarafından çıkarılan sheet_symbol verisinden
 // Komponent designator'ları: Python tarafından çıkarılan components verisinden
@@ -8044,45 +8593,6 @@ function resolveCompDesignator(content, compMap) {{
   return null;
 }}
 
-// Block link + komponent designator sınıflarını SVG metinlerine uygula
-// (SVG'ler gzip'ten sonra enjekte edildiğinden initSheets() çağırır)
-function setupSheetTexts() {{
-Object.entries(sheetPos).forEach(([sheetId, sp]) => {{
-  const card = document.getElementById('sheet-' + sheetId);
-  if (!card) return;
-
-  // Block linkleri
-  const blocks = sp.blocks || [];
-  const blockMap = {{}};
-  blocks.forEach(b => {{
-    if (!b.target_id) return;   // hedef SchDoc projede yok → tıklanabilir link üretme
-    if (b.designator) blockMap[b.designator] = b.target_id;
-    if (b.filename) blockMap[b.filename] = b.target_id;
-    if (b.target_name) blockMap[b.target_name] = b.target_id;
-  }});
-
-  // Komponent designator map'i (bu sayfadakiler)
-  const compMap = compsBySheet[sheetId] || {{}};
-
-  card.querySelectorAll('svg text').forEach(t => {{
-    const content = (t.textContent || '').trim();
-    if (!content) return;
-    // Block link?
-    if (blockMap[content]) {{
-      t.classList.add('block-link');
-      t.setAttribute('data-target-sheet-id', blockMap[content]);
-      return;
-    }}
-    // Komponent designator? (multi-part suffix dahil)
-    const desig = resolveCompDesignator(content, compMap);
-    if (desig) {{
-      t.classList.add('comp-designator');
-      t.setAttribute('data-comp-designator', desig);
-      t.setAttribute('data-comp-sheet-id', sheetId);
-    }}
-  }});
-}});
-}}
 document.querySelectorAll('.sheet-body').forEach(body => {{
   body.addEventListener('mousedown', e => {{
     if (e.target.classList && (
@@ -8704,15 +9214,17 @@ document.getElementById('anno-file').onchange = e => {{
 // temizlenir ki kayıt ilk açılıştaki gibi başlasın (script'ler yeniden kurar).
 function annoBuildHtml() {{
     const clone = document.documentElement.cloneNode(true);
-    clone.querySelectorAll('.lod-bitmap').forEach(el => el.remove());
-    clone.querySelectorAll('.lod-ready').forEach(el => el.classList.remove('lod-ready'));
+    // Çalışma-anı DOM'u temizlenir: metin katmanları, vurgu/not overlay'leri,
+    // kanvasın transform stili. Sayfa geometrisi zaten DOM'da değil (kanvasa
+    // çiziliyor) — kopya açılınca DRAW_GZ'den yeniden çizilir.
+    clone.querySelectorAll('.tl').forEach(el => el.remove());
     clone.querySelectorAll('#sch-hl-overlay, #anno-layer, #anno-editor, #anno-bar')
       .forEach(el => el.remove());
     clone.querySelectorAll('.comp-highlight').forEach(el => el.classList.remove('comp-highlight'));
     clone.querySelectorAll('.sheet-card').forEach(c =>
       c.classList.remove('hit', 'hit-1', 'hit-2', 'hit-3'));
     const cv = clone.querySelector('#canvas');
-    if (cv) {{ cv.classList.remove('lod', 'lod-fade'); cv.removeAttribute('style'); }}
+    if (cv) cv.removeAttribute('style');
     const arc = clone.querySelector('#arc-layer'); if (arc) arc.innerHTML = '';
     const cn = clone.querySelector('#current-net'); if (cn) cn.textContent = '';
     const dp = clone.querySelector('#detail-panel'); if (dp) dp.classList.remove('open');
@@ -8821,12 +9333,11 @@ function crossProbeNet(name) {{
 }}
 // --- Gizli paneldeyken gelen komponent seçimi BEKLETİLİR -------------------
 // Birleşik görünümün tek-panel modlarında (PCB / 3D) şematik iframe'i
-// display:none'dır → içindeki her `getBoundingClientRect()`/`getBBox()` SIFIR
-// döner. Ölçüm sıfırken `svgBoxToCanvas` ölçek 0 hesaplayıp vurgu kutusunu
-// ALAKASIZ bir koordinata koyuyordu (kullanıcı bildirimi: PCB'de komponent
-// seç → Şematik moduna geç → yanlış yer). Böl modunda iki panel de görünür
-// olduğu için sorun orada YOKTU. Çözüm PCB tarafındaki `pendingComp` deseninin
-// aynısı: ölçülemiyorsa seçim saklanır, panel görünür olunca uygulanır.
+// display:none'dır → içindeki her `getBoundingClientRect()` SIFIR döner.
+// v2.27.0'dan beri vurgu KUTUSU ölçümden bağımsız (schBoxToCanvas doğrudan
+// sayfa konumu + viewBox'tan hesaplar), ama görünümü komponente ORTALAMAK
+// (focusCanvasBox) hâlâ viewport boyutunu gerektirir → ölçülemiyorsa seçim
+// saklanır, panel görünür olunca uygulanır (PCB'deki `pendingComp` deseni).
 let pendingXpComp = null;
 function schMeasurable() {{
   const r = viewport.getBoundingClientRect();
@@ -8903,30 +9414,32 @@ window.addEventListener('message', ev => {{
   }}
 }});
 
-// === Sayfa SVG'lerini aç (gzip) ve SVG'ye bağlı kurulumları çalıştır ========
-// Sıra ÖNEMLİ: enjeksiyon → preserveAspectRatio → tıklanabilir metin sınıfları
-// (net / block / designator) → LOD bitmap'leri. Tıklama handler'ları
-// `.sheet-body` kaplarına bağlı olduğundan (delegasyon) yeniden kurulmaları
-// GEREKMEZ; yalnız sınıf/attribute atamaları SVG'yi gerektirir.
+// === Çizim listesini aç (gzip) ve ilk kareyi çiz ===========================
+// DOM'a hiçbir sayfa elemanı girmez; geometri kanvasa çizilir, metin katmanı
+// yalnız görünür sayfalar için kurulur (tlUpdate). Gömülü fontlar geç
+// yüklenebildiğinden `document.fonts.ready` sonrası bir kez daha çizilir —
+// yoksa ilk kare yedek fontla rasterize olur.
 (async function initSheets() {{
   let txt = null;
-  try {{ txt = await gunzipB64(SHEET_GZ); }} catch (e) {{ txt = null; }}
+  try {{ txt = await gunzipB64(DRAW_GZ); }} catch (e) {{ txt = null; }}
   if (txt === null) {{
     document.getElementById('current-net').textContent =
       '⟪Bu tarayıcı sıkıştırılmış şemayı açamıyor (DecompressionStream gerekli).⟫';
     return;
   }}
-  const map = JSON.parse(txt);
-  Object.keys(map).forEach(id => {{
-    const card = document.getElementById('sheet-' + id);
-    const body = card && card.querySelector('.sheet-body');
-    if (body) body.innerHTML = map[id];
+  const payload = JSON.parse(txt);
+  DL = payload.s;
+  DLIMG = (payload.im || []).map(src => {{
+    const i = new Image();
+    i.onload = () => schDraw();
+    i.src = src;
+    return i;
   }});
-  document.querySelectorAll('.sheet-body svg').forEach(s =>
-    s.setAttribute('preserveAspectRatio', 'none'));
-  setupNetTexts();
-  setupSheetTexts();
-  buildLods();
+  applyT();
+  tlUpdate();
+  if (document.fonts && document.fonts.ready) {{
+    document.fonts.ready.then(() => {{ tlMetCache.clear(); schDraw(); }});
+  }}
 }})();
 </script>
 </body></html>

@@ -5,7 +5,7 @@ Wavenumber'ın ticari "viz sch 1.0" ürününün açık-kaynak alternatifi.
 [altium_monkey](https://github.com/wavenumber-eng/altium_monkey) kütüphanesi
 (Eli Hughes / Wavenumber) üzerine kurulu.
 
-**Mevcut sürüm**: `APP_VERSION` sabiti **`viewer.py`'de** tutulur (şu an 2.26.0);
+**Mevcut sürüm**: `APP_VERSION` sabiti **`viewer.py`'de** tutulur (şu an 2.27.0);
 `gui.py` oradan import eder (v2.9.29'da taşındı — HTML çıktıları da sürümü
 gösterebilsin diye, tek kaynak). Yeni özellik/düzeltme ekleyince bu sabiti
 güncelle (semver: major.minor.patch). Sürüm pencere başlığında, alt durum
@@ -17,7 +17,8 @@ sağ üst rozetinde (`{proje} · v{APP_VERSION}`) görünür.
 - **`viewer.py`** — Tüm üretim mantığı. Ortak `_collect_data()` helper'ı sayfaları,
   netleri, komponentleri, sheet symbol'leri (block'ları), netlist'i (pin→net)
   ve BOM/PnP/varyant verilerini toplar. Altı public üretim fonksiyonu:
-  - `generate_viewer(...)` → tek dosya interaktif HTML (~30 MB, gömülü SVG'lerle)
+  - `generate_viewer(...)` → tek dosya interaktif HTML (sayfalar kanvasa
+    çizilir — v2.27.0'da SVG DOM'u bırakıldı; BRK-210: 3.80 → 1.72 MB)
   - `generate_json(...)` → AI/LLM analizine uygun kompakt JSON (pin→net, BOM,
     varyant dahil)
   - `generate_bom_csv(...)` → malzeme listesi CSV (tüm parametre sütunlarıyla)
@@ -374,14 +375,15 @@ Bir değişiklik yaptıktan sonra:
 - **Arama katlanabilir** (v2.9.22+): "▸ Ara" başlığı altında, varsayılan KAPALI;
   `/` açar+odaklar, `Esc` kapatır (kapatınca filtre temizlenir). **Enter** görünen
   listedeki ilk sonucu seçer; sonuç yoksa "eşleşen yok" mesajı.
-- **Şematik metinleri PDF gibi seçilebilir/kopyalanabilir** (v2.9.22+):
-  `.sheet-body svg text {user-select:text}`; fare metin üzerindeyken pan
-  BAŞLAMAZ (native seçim çalışır), boş alanda pan normal. Sürükleyip seçim
-  yapıldıysa click handler'ları aksiyonu tetiklemez
-  (`window.getSelection()` kontrolü). Tıklanabilir sınıflar pointer imlecini
-  korur (özgüllük: `.sheet-body svg text.clickable-net {cursor:pointer}`).
-- SVG text'leri tıklanabilir: net adı → bağlantı yayları; block (sheet symbol)
-  → hedef sayfaya navigate; komponent designator → detay popup
+- **Şematik metinleri PDF gibi seçilebilir/kopyalanabilir** (v2.9.22+,
+  v2.27.0'da metin katmanına taşındı): sayfa kanvasa çizilir, üstünde saydam
+  `<span>`'lardan bir katman durur (`.tl span {user-select:text}`) — fare
+  yazının üzerindeyken pan BAŞLAMAZ (native seçim çalışır), boş alanda pan
+  normal. Sürükleyip seçim yapıldıysa click handler'ları aksiyonu tetiklemez
+  (`window.getSelection()` kontrolü). Seçim vurgusu YARI SAYDAM ki altındaki
+  kanvas yazısı okunmaya devam etsin.
+- Metin katmanı span'ları tıklanabilir: net adı → bağlantı yayları; block
+  (sheet symbol) → hedef sayfaya navigate; komponent designator → detay popup
 - **Şematikte designator tıklamasında görünüm KAYMAZ** (v2.9.24+):
   `highlightComponent(desig, sheetId, focus=false)` — sadece kutu çizilir.
   Arama/Comps listesi ve cross-probe `focus=true` (varsayılan) ile ortalar.
@@ -466,27 +468,59 @@ sheet symbol (block) referanslarıdır.
   makinede/kişide geri yüklenir; bilinmeyen gruplar sayılıp bildirilir.
   (localStorage tarayıcıya bağlı olduğundan devretmenin tek yolu buydu.)
 
-### Şematik LOD: zoom'a uyarlı bitmap (v2.15.0+)
+### Şematik render: tek `<canvas>` + draw-list + metin katmanı (v2.27.0+)
 
-- Taban bitmap'ler açılışta idle'da üretilir (`buildLods` → `lodRender(body,
-  LOD_RES)`), sonra `lodRetune()` hareket durdukça GÖRÜNÜR sayfaları o zoom'a
-  uygun çözünürlükte yeniden üretir (`body.dataset.lodRes` takip eder).
-- `updateLod()` kararı: uzak zoomda (histerezis `LOD_ON/LOD_OFF`) her zaman
-  bitmap; etkileşim sırasında ise **yalnız bitmap yeterince keskinse**
-  (`lodMinRes() >= scale × LOD_SHARP`). Aşırı zoomda canlı SVG'ye düşer.
-- Duran görünümde her zaman canlı SVG → tıklama, hover, PDF gibi metin seçimi
-  aynen çalışır (LOD yalnız HAREKET anında devrede).
+Şematik sayfaları artık **SVG DOM'u DEĞİL**, üretimde düzleştirilmiş bir çizim
+listesi olarak taşınır ve tarayıcıda TEK kanvasa çizilir — PCB tarafında
+v2.12.0'da uygulanan desenin şematik karşılığı. LOD makinesi tamamen kalktı.
 
-### Şematik: sayfa SVG'leri gzip gömülü (v2.12.0+)
+- **Üretim**: `svg_to_drawlist(svg, img_table, font_faces, used_fonts)` sayfa
+  SVG'sini düz dizilere çevirir — `ln` (çizgi), `rc` (dikdörtgen), `pg`
+  (poligon), `el` (elips), `pt` (yay/path), `tx` (yazı), `im` (görsel), `cl`
+  (clip dikdörtgenleri), `mt` (birim olmayan matrisler) + stil tabloları
+  (`st` şekil, `ts` yazı). `build_html` hepsini tek gzip+base64 blob'unda
+  (`DRAW_GZ`) gömer. altium_monkey'in SVG lehçesi bunun için biçilmiş kaftan:
+  `<g>`'lerde HİÇ transform yok → koordinatlar mutlak, düzleştirme kayıpsız.
+  Yine de parser bir CTM yığını tutar (bir gün transform çıkarsa koordinatlara
+  pişirilir).
+- **Tekilleştirme**: gömülü `<image>` (logo) ve `@font-face` blokları PROJE
+  GENELİNDE bir kez taşınır; `@font-face` yalnız gerçekten kullanılan aile için
+  (altium_monkey metrik-uyumlu bir yedek fontu hiç referans edilmese de gömüyor).
+  64 sayfalık ölçüm: görseller 23.4 MB → 0.61 MB, fontlar 5.11 MB → 0 (kullanılmıyordu).
+- **Çizim**: `dlPrep(d)` sayfa başına stil bazlı `Path2D` paketleri kurar (bir
+  kez), `dlDrawSheet` bunları çizer, `schDraw` görünür sayfaları tarar (bbox
+  culling). `applyT()` kanvası **SENKRON** çizer — DOM overlay'ler (kart
+  çerçevesi, net yayları, notlar, vurgu kutusu) aynı `tx/ty/scale` ile CSS
+  transform aldığından ikisi birebir hizalı kalır.
+- **`smoothT()` artık JS tween'i** (eskiden CSS transition): kanvas ile DOM
+  overlay'in AYNI karede hareket etmesi şart — CSS transition'la overlay
+  animasyonla kayarken kanvas anında hedefe atlıyordu.
+- **Metin katmanı (PDF.js deseni)**: kanvas yazıyı çizer ama seçilemez. Seçim /
+  kopyalama / tıklama / hover için **yalnız görünür sayfalarda ve okunur
+  zoom'da** (`TL_MIN_SCALE`, en çok `TL_MAX_SHEETS` sayfa) saydam `<span>`
+  katmanı kurulur (`tlBuild`/`tlUpdate`, hareket durunca 140 ms sonra).
+  Span'lar `clickable-net` / `block-link` / `comp-designator` sınıflarını
+  taşır → mevcut sınıf tabanlı tıklama/hover kodu HİÇ değişmeden çalışır.
+  Sınıflandırma `tlClasses(id)` ile draw-list üzerinden yapılır (eski
+  `setupNetTexts` + `setupSheetTexts` yerine).
+- **Span konumu ölçümle değil MATEMATİKLE** kurulur: font-size = SVG
+  font-size (user birimi), `transform: matrix(...)` ile gövde px'ine taşınır;
+  taban çizgisi ofseti `ctx.measureText` font metriklerinden hesaplanır
+  (`tlMetrics`). Doğrulandı: 60/60 span kanvastaki glifin üstünde.
+- **`schBoxToCanvas(sheetId, box)`**: SVG-viewBox kutusu → kanvas koordinatı,
+  DOM ölçümü OLMADAN (sayfa kartı + viewBox'tan). Eski `svgBoxToCanvas`
+  `getBBox`↔`getBoundingClientRect` eşlemesine dayandığından gizli panelde
+  sıfır ölçümle çöküyordu (v2.24.0 yaması); o hata sınıfı yapısal olarak yok.
 
-PCB katmanlarındaki desenin aynısı: tüm sayfa SVG'leri tek gzip+base64
-blob'unda (`SHEET_GZ`), açılışta çözülüp `.sheet-body`'lere enjekte edilir.
-**BRK-210: 6.3 MB → 0.29 MB.** Tıklama handler'ları `.sheet-body` kaplarına
-bağlı (delegasyon) olduğundan yeniden kurulmaz; yalnız SVG'ye bağlı kurulumlar
-`initSheets()` içinden SIRAYLA çağrılır: `preserveAspectRatio` →
-`setupNetTexts()` (tıklanabilir net sınıfları) → `setupSheetTexts()`
-(block link + designator sınıfları) → `buildLods()`. Bu sıra bozulursa
-tıklanabilirlik veya LOD sessizce kaybolur.
+**İKİ İNCE NOKTA**:
+1. `kx`/`ky` çizimde ZOOM'U DA İÇERİR (`bw = sp.w * scale`); metin katmanında
+   İÇERMEZ (span'lar `#canvas`'ın CSS transform'u altında). Aynı formülü iki
+   yerde kullanırken karıştırma.
+2. `vector-effect="non-scaling-stroke"` genişliği `w * scale / k`'dır (SVG'de
+   kalınlık viewBox→element eşlemesinden etkilenmez ama dış CSS zoom'undan
+   etkilenirdi). `w / k` yazılırsa çizgiler ~zoom katı ince kalır ve **Altium'un
+   ayrı kısa segmentlerle çizdiği kesikli oda çerçeveleri kopuk görünür**
+   (yuvarlak uçlar boşluğu kapatamaz).
 
 ### PCB Viewer: paneller, ölçüm, PNG (canvas)
 
@@ -603,6 +637,66 @@ mesajına bak.
   bu API olmayabilir (graceful fallback var, "veri yok" der).
 
 ## Çözülen Sorunlar (tarihçe)
+
+- **Chromium'da şematik gezinmesi 64 sayfalık projede kullanılamaz hale
+  geliyordu — SVG DOM'u bırakıldı, kanvasa geçildi (v2.27.0, kullanıcı
+  bildirimi: "cromium tabanlılarda şematik gerçekten çok yavaşlıyor, Firefox
+  daha iyi; LOD ekledik ama 64 şemalık projede çok kötü. PCB tarafı akıcı
+  çalışıyor.")**: v2.9.34-v2.15.0 arasındaki LOD yamaları 8 sayfada işe
+  yarıyordu ama ölçekte iki maliyeti ÜST ÜSTE bindiriyordu.
+  **Ölçüldü** (BRK-210'un 8 sayfası 8× kopyalanıp gerçek `build_html` ile 64
+  sayfalık viewer üretildi, headless Edge): **180 512 SVG elemanı** (toplam
+  186 338 DOM düğümü) + **132 MB LOD bitmap** + **29.05 MB HTML**; SVG'lerin
+  enjeksiyonu 4.2 s, LOD bitmap'lerinin hazır olması +11.2 s. Ana iş parçacığı
+  darboğaz DEĞİLDİ (`applyT` medyanı 0.1 ms) — v2.9.34'teki teşhis doğruydu:
+  Chromium CSS-transform edilen dev SVG katmanını her zoom adımında CPU'da
+  yeniden rasterize ediyor; Firefox/WebRender vektörü GPU'da çizdiği için
+  akıcı. Yani LOD yanlış katmandaydı: SVG ağacı bellekte DURUYOR, üstüne
+  bitmap ekleniyordu.
+  **Çözüm** PCB'de v2.12.0'da yapılanın aynısı: geometri üretimde
+  düzleştirilip (`svg_to_drawlist`) tek `<canvas>`'a çizilir; LOD makinesi
+  (`buildLods`/`lodRetune`/`updateLod`/`lod-bitmap` + toolbar toggle'ı)
+  TAMAMEN silindi. Ayrıntı: "Şematik render" bölümü.
+  **Metin seçimi KAYBOLMADI** (v2.9.22'den beri var olan "PDF gibi kopyala"):
+  PDF.js'in yöntemiyle, yalnız görünür sayfalar için saydam `<span>` katmanı
+  kurulur — mevcut sınıf tabanlı tıklama/hover kodu hiç değişmeden çalışır.
+  **Ölçülen sonuç** — aynı 64 sayfalık proje: DOM 186 338 → **877** (sayfa
+  düğümü 180 512 → **128**), LOD bitmap 132 MB → **0**, HTML 29.05 → **8.92 MB**,
+  kare çizimi **1.2 ms** (tüm sayfalar ekranda) / **0.8 ms** (tek sayfaya
+  yakın), açılış 4.2 s → 0.4 s. Gerçek BRK-210 (8 sayfa): 3.80 → **1.72 MB**,
+  sayfa DOM'u 22 596 → **16**, LOD 16 MB → 0; üretim süresi DEĞİŞMEDİ (41 s —
+  maliyet `to_svg`'de). Birleşik görünüm 8.90 → **6.80 MB**.
+  **Fidelity kanıtı** (kontrollü test — aynı sayfa, aynı piksel boyutu,
+  tarayıcının KENDİ SVG rasterizeri vs kanvas): zoom 1.0/2.0/4.0'da farklı
+  piksel **%0.31 / %0.38 / %0.35**, 8× küçültülmüşte ortalama fark 0.79/255,
+  toplam "mürekkep" 0.0654 vs 0.0663 (%1.4). Kalan fark glif antialiasing'i.
+  **Yol boyunca yakalanan iki hata**: (1) `vector-effect="non-scaling-stroke"`
+  genişliği önce `w/k` yazılmıştı; doğrusu `w*scale/k` — SVG'de kalınlık
+  viewBox→element eşlemesinden etkilenmez ama dış CSS zoom'undan etkilenirdi.
+  İnce çizilince Altium'un ayrı kısa segmentlerle çizdiği **kesikli oda
+  çerçeveleri kopuk** görünüyordu (yuvarlak uçlar boşluğu kapatamıyor).
+  (2) `smoothT()` CSS transition'la kalırsa DOM overlay animasyonla kayarken
+  kanvas anında hedefe atlıyor → 350 ms boyunca ikisi ayrı düşüyor; JS tween'e
+  çevrildi.
+  **Yan kazanç**: gömülü logo her sayfada tekrar gömülüyordu (64 sayfada
+  23.4 MB → 0.61 MB) ve altium_monkey hiç referans edilmeyen bir yedek fontu
+  (Arimo, 0.64 MB/sayfa → 64 sayfada 5.11 MB) gömüyordu — ikisi de proje
+  genelinde tekilleştirildi, font yalnız gerçekten kullanılıyorsa taşınıyor.
+  **Ayrıca düzelen**: komponent vurgu kutusu artık DOM ölçümünden değil
+  matematikten geliyor (`schBoxToCanvas`) → v2.24.0'daki "gizli panelde ölçüm
+  0" hata sınıfı yapısal olarak yok; v2.9.42'deki sayfalar arası SVG id
+  çakışması da imkânsız (clip'ler sayfa içinde Python'da çözülüyor).
+  **Doğrulama** (headless Edge + CDP): şematik 13/13 (BRK-210 8 ve 64 sayfa,
+  Smart_MCU) · özellik regresyonu 10/10 (hiyerarşi, Alt+Backspace, arama,
+  sayfa menüsü, not/kutu, localStorage, Kaydet klonu, panel katlama, seçim
+  temizleme) · kaydedilen kopya round-trip + Python not taşıma 6/6 · birleşik
+  görünüm 11/11 (çift yönlü cross-probe, net cross-probe, gizli panelde seçim,
+  3D) · `node --check` temiz · `tools/check_html_i18n.py` 239/239, ölü
+  anahtar 0 · İngilizce çıktıda görünen Türkçe metin 0.
+  **Test notu**: kanvas `#viewport` genişliğindedir, `innerWidth` DEĞİL — CDP
+  testinde `getImageData` koordinatı `(clientX - viewportRect.left) * dpr`
+  ile hesaplanmalı; `innerWidth`'e göre ölçeklenince span/glif örtüşme testi
+  yanlışlıkla 25/60 veriyordu.
 
 - **Uygulama güncellenip HTML yeniden üretilince eski notlar yeni dosyaya
   gelmiyordu (v2.26.0, kullanıcı bildirimi)**: Notlar iki yerde durur —

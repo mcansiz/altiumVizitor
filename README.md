@@ -3,7 +3,7 @@
 
 > A PyQt5 desktop application that converts Altium schematic and PCB projects into **interactive, single-file HTML viewers** — no server required.
 
-![Version](https://img.shields.io/badge/version-2.26.0-blue.svg)
+![Version](https://img.shields.io/badge/version-2.27.0-blue.svg)
 ![Python](https://img.shields.io/badge/python-3.10%2B-3776AB.svg?logo=python\&logoColor=white)
 ![GUI](https://img.shields.io/badge/GUI-PyQt5-41CD52.svg?logo=qt\&logoColor=white)
 ![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20Linux-lightgrey.svg)
@@ -52,6 +52,9 @@ No web server, no installation, no internet required. Works directly via `file:/
 
 * **Interactive Schematic Viewer**
   All pages in a single pan/zoom canvas, clickable nets and components, selectable text like PDF.
+  Sheets are rendered on one `<canvas>` from flattened geometry instead of embedded SVG DOM — on a
+  64-sheet project that is 186 338 DOM nodes and 132 MB of LOD bitmaps down to a few hundred nodes
+  and none, with ~1 ms frames while panning (Chromium used to stutter badly here).
 
 * **Schematic Hierarchy panel (KiCad-style)**
   A sheet tree in the sidebar — root schematic → sheet symbols → child sheets, with page
@@ -262,7 +265,7 @@ Give it a star ⭐ on GitHub and consider supporting:
 
 > Altium şematik ve PCB projelerini tek dosyalık, sunucu gerektirmeyen **interaktif HTML görüntüleyicilere** dönüştüren PyQt5 masaüstü uygulaması.
 
-![Version](https://img.shields.io/badge/version-2.26.0-blue.svg)
+![Version](https://img.shields.io/badge/version-2.27.0-blue.svg)
 ![Python](https://img.shields.io/badge/python-3.10%2B-3776AB.svg?logo=python&logoColor=white)
 ![GUI](https://img.shields.io/badge/GUI-PyQt5-41CD52.svg?logo=qt&logoColor=white)
 ![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20Linux-lightgrey.svg)
@@ -297,7 +300,7 @@ Projeyi seçin, bir düğmeye basın — çıktı olarak **çift tıkla açılan
 
 - **Türkçe / İngilizce arayüz** — **Ayarlar → Dil** menüsünden anında geçiş, seçim hatırlanır. Dil her yerde geçerlidir: masaüstü arayüzü, üretim log'u ve ilerleme etiketleri, **ve üretilen HTML görüntüleyiciler**. HTML dosyası üretildiği dili taşır; aynı projeden hem Türkçe hem İngilizce görüntüleyici üretip farklı kişilere verebilirsiniz.
 - **Üst menü ve klavye kısayolları** — Dosya / Üret / Görünüm / Ayarlar / Yardım. Her üretim menüden de erişilebilir (`Ctrl+1..3` görüntüleyiciler), ayrıca `Ctrl+O` proje aç, `Ctrl+B` son çıktıyı aç, `F11` tam ekran, `F1` hakkında.
-- **İnteraktif Şematik Viewer** — Tüm sayfalar tek pan/zoom kanvasında, tıklanabilir net'ler ve komponentler, PDF gibi seçilip kopyalanabilir metinler.
+- **İnteraktif Şematik Viewer** — Tüm sayfalar tek pan/zoom kanvasında, tıklanabilir net'ler ve komponentler, PDF gibi seçilip kopyalanabilir metinler. Sayfalar gömülü SVG DOM'u yerine düzleştirilmiş geometriden tek `<canvas>`'a çizilir: 64 sayfalık bir projede 186 338 DOM düğümü ve 132 MB LOD bitmap'i yerine birkaç yüz düğüm ve sıfır bitmap, gezinirken ~1 ms'lik kareler (Chromium tabanlı tarayıcılarda takılma bitti).
 - **Şematik Hiyerarşi paneli (KiCad tarzı)** — Sol panelde sayfa ağacı: kök şema → sheet symbol'ler → alt sayfalar, sayfa numaralarıyla ve açılır/kapanır dallarla. Tekrar (Repeat) kanalları ayrı örnek olarak görünür; `Alt+Backspace` ("üst sayfaya dön") her zaman doğru üst sayfaya döner. Ayrıca `Alt+Home` kök sayfa, `Alt+←/→` sayfa geçmişi.
 - **PCB Görüntüleyici (geometri / canvas)** — Altium benzeri tam ekran katman görüntüleyici; katman aç/kapa, bakır yol/net highlight, komponente tıkla → şematik ↔ PCB cross-probe. Katman SVG'leri yerine board'un ham geometrisi gömülüp canvas'a çizilir: dosya çok daha küçük, her zoom'da akıcı; döndürme/ayna ve dokunmatik dahil.
 - **Şematik + PCB + 3D tek HTML'de** — Yan yana, çift yönlü cross-probe; gerçek gömülü **STEP 3D modelleriyle** board önizlemesi.

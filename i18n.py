@@ -710,10 +710,6 @@ _EN_HTML = {
     "Bu tarayıcı sıkıştırılmış geometriyi açamıyor (DecompressionStream gerekli).":
         "This browser cannot decompress the geometry (DecompressionStream "
         "required).",
-    "LOD: uzak zoom'da ve gezinirken sayfalar bitmap çizilir (Chromium'da "
-    "akıcılık). Kapatınca her zaman canlı SVG.":
-        "LOD: sheets are drawn as bitmaps at far zoom and while navigating "
-        "(smoothness on Chromium). Turn it off for live SVG at all times.",
     "LOD: döndürme/zoom sırasında çözünürlük düşürülür (akıcılık), durunca "
     "netleşir":
         "LOD: resolution is lowered while rotating/zooming (smoothness) and "

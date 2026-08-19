@@ -581,8 +581,6 @@ _EN_HTML = {
     "Komponent / net ara...": "Search component / net...",
     "net ara... ( / )": "search net... ( / )",
     "komponent ara... ( / )": "search component... ( / )",
-    "ara... ( / )": "search... ( / )",
-    "Aramayı aç/kapat ( / )": "Open/close search ( / )",
     "Arama kutusuna git": "Go to the search box",
     "Aramada ilk sonucu seç": "Select the first result in the search",
     "eşleşen yok": "no match",
@@ -829,7 +827,6 @@ _EN_HTML = {
     "komponent": "components",
     "aramayla daralt": "narrow it down with the search",
     "Esc temizler": "Esc clears",
-    "Ara": "Search",
     "Kaydet": "Save",
     # canvas yardım tablosu — kaynakta çok satırlı, her satır ayrı anahtar
     "Değer+footprint grubuna tıkla → grubun tamamı":

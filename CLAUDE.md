@@ -5,7 +5,7 @@ Wavenumber'ın ticari "viz sch 1.0" ürününün açık-kaynak alternatifi.
 [altium_monkey](https://github.com/wavenumber-eng/altium_monkey) kütüphanesi
 (Eli Hughes / Wavenumber) üzerine kurulu.
 
-**Mevcut sürüm**: `APP_VERSION` sabiti **`viewer.py`'de** tutulur (şu an 2.27.0);
+**Mevcut sürüm**: `APP_VERSION` sabiti **`viewer.py`'de** tutulur (şu an 2.27.1);
 `gui.py` oradan import eder (v2.9.29'da taşındı — HTML çıktıları da sürümü
 gösterebilsin diye, tek kaynak). Yeni özellik/düzeltme ekleyince bu sabiti
 güncelle (semver: major.minor.patch). Sürüm pencere başlığında, alt durum
@@ -368,13 +368,16 @@ Bir değişiklik yaptıktan sonra:
   dock'lu) açılırsa veya `/` ile arama açılırsa panel otomatik açılır. Durum
   `localStorage`'da (`schviz-ui` anahtarı) hatırlanır; file:// altında storage
   kısıtlıysa try/catch ile sessizce atlanır.
-- Sol panel sekmeleri: **Nets** (power=orange, ground=green, signal=gray), **Comps**
-  ve **Hiyerarşi** (aşağıdaki bölüm)
+- Sol panel sekmeleri (v2.27.1'de sıra değişti — kullanıcı isteği):
+  **Hiyerarşi** (VARSAYILAN, aşağıdaki bölüm) · **Comps** ·
+  **Nets** (power=orange, ground=green, signal=gray)
 - **Net tipi filtre çipleri** (v2.9.25+): Nets sekmesinde Tümü/Güç/GND/Sinyal;
-  aramayla birlikte çalışır, Comps sekmesinde gizlenir.
-- **Arama katlanabilir** (v2.9.22+): "▸ Ara" başlığı altında, varsayılan KAPALI;
-  `/` açar+odaklar, `Esc` kapatır (kapatınca filtre temizlenir). **Enter** görünen
-  listedeki ilk sonucu seçer; sonuç yoksa "eşleşen yok" mesajı.
+  aramayla birlikte çalışır, diğer sekmelerde gizlenir (açılışta da gizli).
+- **Arama kutusu HER ZAMAN görünür** (v2.27.1; v2.9.22-v2.27.0 arası "▸ Ara"
+  başlığı altında katlanabilirdi — kullanıcı isteğiyle kaldırıldı). `/` odaklar
+  + içeriği seçer, `Esc` odağı bırakıp filtreyi temizler (kutu KAYBOLMAZ).
+  **Enter** görünen listedeki ilk sonucu seçer; sonuç yoksa "eşleşen yok"
+  mesajı. Placeholder aktif sekmeye göre değişir (sayfa / komponent / net).
 - **Şematik metinleri PDF gibi seçilebilir/kopyalanabilir** (v2.9.22+,
   v2.27.0'da metin katmanına taşındı): sayfa kanvasa çizilir, üstünde saydam
   `<span>`'lardan bir katman durur (`.tl span {user-select:text}`) — fare
@@ -512,7 +515,15 @@ v2.12.0'da uygulanan desenin şematik karşılığı. LOD makinesi tamamen kalkt
   `getBBox`↔`getBoundingClientRect` eşlemesine dayandığından gizli panelde
   sıfır ölçümle çöküyordu (v2.24.0 yaması); o hata sınıfı yapısal olarak yok.
 
-**İKİ İNCE NOKTA**:
+**ÜÇ İNCE NOKTA**:
+0. **Metin katmanının KABI (`.tl`) `pointer-events:none` OLMALI**, yalnız
+   `.tl span` `auto` alır. Kap sayfanın TAMAMINI kapladığından, tıklamayı o
+   yutarsa yakın zoom'da boş alana basmak da "yazıya bastı" sayılır ve
+   **fareyle pan hiç başlamaz** (v2.27.1'de kullanıcı bildirimiyle düzeltildi:
+   yaklaşınca sağa sola gidilemiyor, imleç yumruk olmuyordu; uzak zoomda ve
+   sayfalar arası boşlukta çalışıyordu çünkü orada katman yok). Aynı kural
+   `#viewport.panning` / `#viewport.anno-mode` geçici kapatmalarında da
+   SPAN'ı hedeflemeli, kabı değil. `mousedown` koruması `closest('.tl span')`.
 1. `kx`/`ky` çizimde ZOOM'U DA İÇERİR (`bw = sp.w * scale`); metin katmanında
    İÇERMEZ (span'lar `#canvas`'ın CSS transform'u altında). Aynı formülü iki
    yerde kullanırken karıştırma.
@@ -637,6 +648,32 @@ mesajına bak.
   bu API olmayabilir (graceful fallback var, "veri yok" der).
 
 ## Çözülen Sorunlar (tarihçe)
+
+- **Kanvas geçişinin ardından üç kullanıcı bildirimi (v2.27.1)**:
+  (1) **Yakın zoom'da fareyle pan çalışmıyordu** (imleç yumruk olmuyor; uzak
+  zoomda ve sayfalar arası siyah alanda çalışıyor). Kök neden: metin katmanının
+  KABI (`.tl`) sayfa gövdesinin tamamını kaplıyor ve `pointer-events` almaya
+  devam ediyordu → `mousedown`'daki "yazının üzerindeysen pan başlatma"
+  koruması sayfanın HER yerinde tetikleniyordu. Uzak zoomda katman hiç
+  kurulmadığı, sayfalar arası boşlukta da kart olmadığı için oralarda sorun
+  yoktu — kullanıcının tarifi kök nedeni birebir gösteriyordu. Çözüm: kap
+  `pointer-events:none`, yalnız `.tl span` `auto`; koruma `closest('.tl span')`
+  oldu. Doğrulama (CDP ile GERÇEK fare olayları): yakın zoomda boş alanda
+  sürükleme tam 120/60 px pan yapıyor, yazı üzerinde sürükleme pan YAPMIYOR
+  ama metni seçiyor, yazıya tıklama hâlâ net seçiyor, imleç boş alanda `grab`
+  (6/6).
+  (2) **`?` kısayol penceresi ekrana sığmıyordu** (dik ekranda üstten ve alttan
+  taşıyordu): modalın `max-height`'i yoktu. İçerik `.modal-scroll` sarmalayıcıya
+  alınıp `max-height:calc(100dvh - 40px)` + iç kaydırma verildi; "Kapat" düğmesi
+  kaydırma alanının DIŞINDA kaldığı için hep görünür. 1920×1080'den 390×844'e
+  beş boyutta sığma doğrulandı (5/5).
+  (3) **Sekme sırası + arama kutusu**: kullanıcı isteğiyle sekmeler
+  **Hiyerarşi · Comps · Nets** oldu ve açılışta **Hiyerarşi** görünüyor
+  (`hierInit()` ağacı zaten sekmeden bağımsız kuruyordu); "▸ Ara" katlama
+  düğmesi kaldırıldı, arama kutusu doğrudan görünüyor (`/` odaklar, `Esc`
+  temizler). Net tipi çipleri açılışta gizli başlıyor (Nets sekmesine
+  geçilince geliyor). Doğrulama 8/8; `check_html_i18n` 236/236, ölü anahtar 0
+  (üç anahtar silindi).
 
 - **Chromium'da şematik gezinmesi 64 sayfalık projede kullanılamaz hale
   geliyordu — SVG DOM'u bırakıldı, kanvasa geçildi (v2.27.0, kullanıcı

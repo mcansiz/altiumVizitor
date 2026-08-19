@@ -3,7 +3,7 @@
 
 > A PyQt5 desktop application that converts Altium schematic and PCB projects into **interactive, single-file HTML viewers** — no server required.
 
-![Version](https://img.shields.io/badge/version-2.27.0-blue.svg)
+![Version](https://img.shields.io/badge/version-2.27.1-blue.svg)
 ![Python](https://img.shields.io/badge/python-3.10%2B-3776AB.svg?logo=python\&logoColor=white)
 ![GUI](https://img.shields.io/badge/GUI-PyQt5-41CD52.svg?logo=qt\&logoColor=white)
 ![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20Linux-lightgrey.svg)
@@ -265,7 +265,7 @@ Give it a star ⭐ on GitHub and consider supporting:
 
 > Altium şematik ve PCB projelerini tek dosyalık, sunucu gerektirmeyen **interaktif HTML görüntüleyicilere** dönüştüren PyQt5 masaüstü uygulaması.
 
-![Version](https://img.shields.io/badge/version-2.27.0-blue.svg)
+![Version](https://img.shields.io/badge/version-2.27.1-blue.svg)
 ![Python](https://img.shields.io/badge/python-3.10%2B-3776AB.svg?logo=python&logoColor=white)
 ![GUI](https://img.shields.io/badge/GUI-PyQt5-41CD52.svg?logo=qt&logoColor=white)
 ![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20Linux-lightgrey.svg)

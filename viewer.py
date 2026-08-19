@@ -91,7 +91,7 @@ from altium_monkey.altium_schdoc import AltiumSchDoc
 
 # Uygulama sürümü — tek kaynak burası; gui.py buradan import eder.
 # HTML çıktılarında sağ üst köşedeki rozette görünür (build saati yerine).
-APP_VERSION = "2.27.0"
+APP_VERSION = "2.27.1"
 
 # Önerilen minimum altium_monkey sürümü. Bu sürümden öncesinde:
 #   · 2026.6.21 öncesi — STM32 gibi IC'lerde dikey pin adları yatay çiziliyordu.
@@ -6577,16 +6577,12 @@ def build_html(sheets, net_list, components, timestamp,
           padding:5px 8px; font-family:inherit; font-size:11px; cursor:pointer;
           border-radius:2px; text-transform:uppercase; letter-spacing:1px; }}
   .tab.active {{ background:#2a4a6a; color:{inter_color}; border-color:{inter_color}; }}
-  /* Katlanabilir arama bölümü — varsayılan KAPALI ( / kısayolu açar) */
+  /* Arama kutusu HER ZAMAN görünür (v2.27.0'da katlama kaldırıldı — kullanıcı
+     isteği: "ok ile açılmayı iptal et, kutu direkt görünsün"). `/` yine
+     odaklar, Esc odağı bırakıp filtreyi temizler. */
   #search-wrap {{ margin-bottom:6px; }}
-  #search-toggle {{ width:100%; text-align:left; background:#1a1a1a;
-                    border:1px solid #333; color:#888; padding:4px 8px;
-                    font-family:inherit; font-size:11px; cursor:pointer;
-                    border-radius:2px; }}
-  #search-toggle:hover {{ color:{inter_color}; border-color:{inter_color}; }}
-  #search-wrap.collapsed #search {{ display:none; }}
   #search {{ width:100%; padding:6px 8px; background:#111; border:1px solid #333;
-             color:#fff; border-radius:2px; margin-top:4px; font-size:12px;
+             color:#fff; border-radius:2px; font-size:12px;
              font-family:inherit; outline:none; }}
   #search:focus {{ border-color:{inter_color}; }}
   .list-container {{ flex:1; overflow-y:auto; }}
@@ -6658,7 +6654,7 @@ def build_html(sheets, net_list, components, timestamp,
      SVG elemanını hit-test edip :hover stil değişimleriyle repaint tetikliyor.
      Sınıf mousedown'da değil GERÇEK harekette eklenir (panMoved eşiği) —
      hareketsiz tıklamanın hedef elemanı değişmez. */
-  #viewport.panning .tl {{ pointer-events:none; }}
+  #viewport.panning .tl span {{ pointer-events:none; }}
   /* Sayfaların ÇİZİLDİĞİ kanvas: ekran boyutunda, #canvas'ın ALTINDA durur.
      Pan/zoom CSS transform'la DEĞİL çizim sırasında uygulanır (aynı tx/ty/
      scale) → DOM overlay'lerle (kart çerçevesi, net yayları, notlar, vurgu
@@ -6687,10 +6683,15 @@ def build_html(sheets, net_list, components, timestamp,
      projede 180 000 SVG düğümü yerine birkaç yüz span.
      Span kutusu user-birimindedir (font-size = SVG font-size) ve gövde
      px'ine `transform: matrix(...)` ile taşınır; bu yüzden left/top 0. */
+  /* KAP tıklamayı YUTMAZ (pointer-events:none) — yalnız YAZININ KENDİSİ
+     alır. Aksi halde katman sayfanın tamamını kapladığından yakın zoom'da
+     boş alana basmak da "yazıya bastı" sayılıp pan hiç başlamıyordu
+     (kullanıcı bildirimi: yaklaşınca fareyle sağa sola gidilemiyor). */
   .tl {{ position:absolute; left:0; top:0; width:100%; height:100%;
-         overflow:hidden; }}
+         overflow:hidden; pointer-events:none; }}
   .tl span {{ position:absolute; left:0; top:0; transform-origin:0 0;
               white-space:pre; line-height:1; color:transparent;
+              pointer-events:auto;
               user-select:text; -webkit-user-select:text; cursor:text; }}
   /* Seçim vurgusu YARI SAYDAM: altındaki kanvas yazısı okunmaya devam etsin
      (PDF.js'te de böyle — span'in kendi metni görünmez). */
@@ -6724,7 +6725,7 @@ def build_html(sheets, net_list, components, timestamp,
   /* Araç aktifken: crosshair imleç, şema SVG'leri ve mevcut notlar tıklamaya kapalı
      (yeni not/kutu mevcutların üstüne de konabilsin) */
   #viewport.anno-mode {{ cursor:crosshair; }}
-  #viewport.anno-mode .tl {{ pointer-events:none; }}
+  #viewport.anno-mode .tl span {{ pointer-events:none; }}
   #viewport.anno-mode #anno-layer .anno {{ pointer-events:none; }}
   /* Yerinde yazma editörü (Foxit typewriter gibi) — canvas içinde, onunla ölçeklenir.
      white-space:pre → otomatik sarma YOK (SVG render'ı ile birebir; satır = Enter).
@@ -6894,11 +6895,22 @@ def build_html(sheets, net_list, components, timestamp,
   .toolbar-sep {{ width:1px; background:#444; margin:2px 4px; align-self:stretch; }}
   /* Kısayol modal */
   #shortcut-modal {{ position:fixed; inset:0; background:rgba(0,0,0,0.75); z-index:1000;
-                     display:none; align-items:center; justify-content:center; }}
+                     display:none; align-items:center; justify-content:center;
+                     padding:20px; }}
   #shortcut-modal.open {{ display:flex; }}
-  .modal-content {{ background:#2a2a2a; color:#ddd; padding:24px 28px;
-                     border-radius:6px; min-width:380px; max-width:520px;
-                     box-shadow:0 8px 40px rgba(0,0,0,0.6); }}
+  /* Liste uzun: küçük ekranda pencereye SIĞMIYORDU (kullanıcı bildirimi).
+     İçerik kendi içinde kayar; başlık ve Kapat düğmesi sabit kalır.
+     dvh sonra yazılır → destekleyen tarayıcıda mobil adres çubuğu payı da doğru. */
+  .modal-content {{ background:#2a2a2a; color:#ddd; padding:20px 24px;
+                     border-radius:6px; min-width:380px; max-width:560px;
+                     box-shadow:0 8px 40px rgba(0,0,0,0.6);
+                     display:flex; flex-direction:column;
+                     max-height:calc(100vh - 40px);
+                     max-height:calc(100dvh - 40px); }}
+  .modal-scroll {{ overflow-y:auto; flex:1; min-height:0; margin-right:-8px;
+                   padding-right:8px; }}
+  .modal-scroll::-webkit-scrollbar {{ width:8px; }}
+  .modal-scroll::-webkit-scrollbar-thumb {{ background:#4a4a4a; border-radius:4px; }}
   .modal-content h3 {{ margin:0 0 10px; color:{inter_color}; font-size:13px;
                         text-transform:uppercase; letter-spacing:1.5px; font-weight:normal; }}
   .modal-content h3:not(:first-child) {{ margin-top:16px; }}
@@ -6908,7 +6920,8 @@ def build_html(sheets, net_list, components, timestamp,
   .modal-content kbd {{ background:#1a1a1a; padding:2px 7px; border-radius:3px;
                          border:1px solid #555; font-family:'Consolas',monospace;
                          font-size:11px; color:#fff; }}
-  .modal-close {{ margin-top:12px; padding:6px 14px; background:#1a1a1a; color:#ddd;
+  .modal-close {{ margin-top:12px; flex-shrink:0; align-self:flex-start;
+                   padding:6px 14px; background:#1a1a1a; color:#ddd;
                    border:1px solid #555; border-radius:3px; cursor:pointer;
                    font-family:inherit; }}
   .modal-close:hover {{ border-color:{inter_color}; color:{inter_color}; }}
@@ -6927,7 +6940,7 @@ def build_html(sheets, net_list, components, timestamp,
     #sheet-jump {{ max-width:120px; }}
     #shortcuts, #brand {{ display:none; }}
     #current-net {{ max-width:150px; font-size:11px; }}
-    .modal-content {{ min-width:0; width:92vw; padding:18px; }}
+    .modal-content {{ min-width:0; width:92vw; padding:14px 16px; }}
   }}
   /* Sürükleme tutamacı: dokunuşta tarayıcı kaydırması devreye girmesin */
   #popup-resize {{ touch-action:none; }}
@@ -6937,23 +6950,22 @@ def build_html(sheets, net_list, components, timestamp,
   <button id="sidebar-toggle" title="⟪Paneli gizle ( B )⟫">◂</button>
   <div class="stat">{len(sheets)} sheets · {len(net_list)} nets · {len(components)} comps</div>
   <div class="tabs">
-    <button class="tab active" data-tab="nets">Nets</button>
+    <button class="tab active" data-tab="hier" title="⟪Şematik hiyerarşi ( H )⟫">⟪Hiyerarşi⟫</button>
     <button class="tab" data-tab="components">Comps</button>
-    <button class="tab" data-tab="hier" title="⟪Şematik hiyerarşi ( H )⟫">⟪Hiyerarşi⟫</button>
+    <button class="tab" data-tab="nets">Nets</button>
   </div>
-  <div id="type-chips">
+  <div id="type-chips" class="hidden">
     <button class="chip active" data-type="">⟪Tümü⟫</button>
     <button class="chip chip-power" data-type="power">⟪Güç⟫</button>
     <button class="chip chip-ground" data-type="ground">GND</button>
     <button class="chip" data-type="signal">⟪Sinyal⟫</button>
   </div>
-  <div id="search-wrap" class="collapsed">
-    <button id="search-toggle" title="⟪Aramayı aç/kapat ( / )⟫"><span id="search-caret">▸</span> ⟪Ara⟫</button>
-    <input id="search" placeholder="⟪ara... ( / )⟫">
+  <div id="search-wrap">
+    <input id="search" placeholder="⟪sayfa ara... ( / )⟫">
   </div>
-  <div id="nets-list" class="list-container"></div>
+  <div id="nets-list" class="list-container hidden"></div>
   <div id="comps-list" class="list-container hidden"></div>
-  <div id="hier-list" class="list-container hidden">
+  <div id="hier-list" class="list-container">
     <div id="hier-bar">
       <button class="hier-btn" id="hier-up"
               title="⟪Üst sayfaya dön — hiyerarşide bir seviye yukarı ( Alt+Backspace )⟫">↰ ⟪Üst sayfa⟫</button>
@@ -7023,6 +7035,7 @@ def build_html(sheets, net_list, components, timestamp,
 
 <div id="shortcut-modal">
   <div class="modal-content">
+   <div class="modal-scroll">
     <h3>⟪Klavye⟫</h3>
     <table>
       <tr><td><kbd>Esc</kbd></td><td>⟪Seçimi temizle⟫</td></tr>
@@ -7069,6 +7082,7 @@ def build_html(sheets, net_list, components, timestamp,
     <table>
       <tr><td>⟪Toolbar'daki renkli kareler⟫</td><td>⟪Yay renklerini anlık değiştir⟫</td></tr>
     </table>
+   </div>
     <button class="modal-close" id="close-modal-btn">⟪Kapat⟫</button>
   </div>
 </div>
@@ -7531,10 +7545,10 @@ viewport.addEventListener('mousedown', e => {{
   if (gTouchActive()) return;   // dokunma jesti sürüyor (compat fare olayı)
   if (e.target.closest('.tool-btn') || e.target.closest('#detail-panel')) return;
   if (annoTool) return;   // not/kutu aracı aktif — pan yerine araç çalışır
-  // Metin katmanı span'ı üzerinde pan BAŞLATMA → tarayıcının native metin
-  // seçimi çalışsın (PDF'teki gibi sürükleyip kopyalama). Boş alanda pan aynen
-  // devam eder.
-  if (e.target.closest && e.target.closest('.tl')) return;
+  // Metin katmanı SPAN'ı üzerinde pan BAŞLATMA → tarayıcının native metin
+  // seçimi çalışsın (PDF'teki gibi sürükleyip kopyalama). Katmanın KABI
+  // pointer-events:none olduğundan boş alanda hedef span olmaz, pan çalışır.
+  if (e.target.closest && e.target.closest('.tl span')) return;
   panning = true; panMoved = false; sx = e.clientX; sy = e.clientY; stx = tx; sty = ty;
   viewport.classList.add('grabbing');
 }});
@@ -8044,22 +8058,19 @@ function setSidebarOpen(open) {{
 sidebarToggle.addEventListener('click', () =>
   setSidebarOpen(sidebarEl.classList.contains('collapsed')));
 
-// === Katlanabilir arama bölümü ===
-const searchWrap = document.getElementById('search-wrap');
+// === Arama kutusu (her zaman görünür; `/` odaklar, Esc bırakır) ===
 const searchInput = document.getElementById('search');
 function setSearchOpen(open) {{
-  if (open) setSidebarOpen(true);  // panel kapalıysa önce aç
-  searchWrap.classList.toggle('collapsed', !open);
-  document.getElementById('search-caret').textContent = open ? '▾' : '▸';
-  if (open) searchInput.focus();
-  else {{
+  if (open) {{
+    setSidebarOpen(true);          // panel kapalıysa önce aç
+    searchInput.focus();
+    searchInput.select();
+  }} else {{
     searchInput.blur();
-    // Kapatınca filtreyi de temizle — liste gizli filtreyle kafa karıştırmasın
+    // Esc filtreyi de temizler — liste yarım filtreyle kalmasın
     if (searchInput.value) {{ searchInput.value = ''; renderActive(''); }}
   }}
 }}
-document.getElementById('search-toggle').addEventListener('click', () =>
-  setSearchOpen(searchWrap.classList.contains('collapsed')));
 
 // Aramada Enter → görünen listedeki ilk sonucu seç
 searchInput.addEventListener('keydown', e => {{

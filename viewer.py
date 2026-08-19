@@ -91,7 +91,7 @@ from altium_monkey.altium_schdoc import AltiumSchDoc
 
 # Uygulama sürümü — tek kaynak burası; gui.py buradan import eder.
 # HTML çıktılarında sağ üst köşedeki rozette görünür (build saati yerine).
-APP_VERSION = "2.27.2"
+APP_VERSION = "2.27.3"
 
 # Önerilen minimum altium_monkey sürümü. Bu sürümden öncesinde:
 #   · 2026.6.21 öncesi — STM32 gibi IC'lerde dikey pin adları yatay çiziliyordu.
@@ -6749,15 +6749,10 @@ def build_html(sheets, net_list, components, timestamp,
                                  border:1px solid transparent; background:none;
                                  cursor:pointer; border-radius:3px; }}
   #anno-bar input[type=color]:hover {{ border-color:#4ec9b0; }}
-  .clickable-net {{ cursor:pointer; }}
-  .clickable-net:hover {{ fill:#ff6b35 !important; font-weight:bold; }}
-  /* Block link - .SchDoc filename'ine tıklanınca o sayfaya gider */
-  .block-link {{ cursor:pointer; }}
-  .block-link:hover {{ fill:{inter_color} !important; font-weight:bold;
-                       text-decoration:underline; }}
-  /* Komponent designator'ları - tıklayınca popup açılır */
-  .comp-designator {{ cursor:pointer; }}
-  .comp-designator:hover {{ fill:#ffeb3b !important; font-weight:bold; }}
+  /* Tıklanabilir yazıların hover rengi artık KANVASA çizilir (schHovItem →
+     dlDrawSheet): span'ı renklendirmek aynı yazıyı ikinci kez, ikinci bir
+     rasterizer'la çizerdi. Eski `fill:` kuralları SVG özelliğiydi, DOM
+     span'ına zaten etki etmiyordu. İmleç kuralları `.tl span.*`'ta. */
   /* Komponent detay popup'ı */
   /* Komponent detayı: sağda yüzen popup yerine sol sidebar'a dock edilmiş,
      katlanabilir (ok) + boyutlandırılabilir (üst tutamaç) panel. */
@@ -7184,7 +7179,14 @@ function dlPrep(d) {{
   const E = d.el;
   for (let i = 0; i < E.length; i += 5) {{
     const p = path(E[i]);
-    p.ellipse(E[i + 1], E[i + 2], Math.max(E[i + 3], 0.01), Math.max(E[i + 4], 0.01), 0, 0, 6.2832);
+    const rx = Math.max(E[i + 3], 0.01), ry = Math.max(E[i + 4], 0.01);
+    // moveTo ŞART: ellipse()/arc() açık bir alt-yol varsa son noktadan yayın
+    // başlangıcına DÜZ ÇİZGİ ekler. Elipsler aynı stildeki çizgi/dikdörtgenlerle
+    // tek Path2D'de toplandığından bu, şemayı boydan boya kesen hayalet bir
+    // çizgi olarak görünüyordu (kullanıcı bildirimi: MAX3089E'nin inversiyon
+    // baloncuklarından çıkan siyah çizgi). Açı 0 = (cx+rx, cy).
+    p.moveTo(E[i + 1] + rx, E[i + 2]);
+    p.ellipse(E[i + 1], E[i + 2], rx, ry, 0, 0, 6.2832);
   }}
   d.pg.forEach(g => {{
     const open = g[0] < 0, si = open ? -g[0] - 1 : g[0], p = path(si);
@@ -7215,7 +7217,7 @@ function dlPrep(d) {{
   return P;
 }}
 // Bir sayfayı kanvasa çiz (bx,by,bw,bh = sayfa GÖVDESİNİN ekran dikdörtgeni)
-function dlDrawSheet(g, d, bx, by, bw, bh, hlText) {{
+function dlDrawSheet(g, d, bx, by, bw, bh, hlText, hovItem, hovColor) {{
   const vb = d.vb, kx = bw / vb[2], ky = bh / vb[3], k = (kx + ky) / 2;
   const P = dlPrep(d);
   g.save();
@@ -7267,13 +7269,17 @@ function dlDrawSheet(g, d, bx, by, bw, bh, hlText) {{
       // renklendirme tam üstüne denk gelmiyor". Geometri zaten birebirdi
       // (ölçüm: genişlik oranı 1.0002, taban çizgisi farkı 0 px).
       const isHl = hlText && (it[7] || '').trim() === hlText;
+      // hover: KİMLİĞE göre (aynı adlı diğer yazılar etkilenmesin — eski
+      // :hover kuralı da yalnız imlecin altındaki <text>'i boyuyordu)
+      const isHov = !isHl && hovItem && it === hovItem;
       g.save();
-      if (isHl) {{
+      if (isHl || isHov) {{
         // font zaten kalınsa tekrar ekleme — 'bold bold …' GEÇERSİZ olur
         // ve atama sessizce yok sayılırdı.
         if (!/(^|\\s)(bold|[6-9]00)(\\s|$)/i.test(t.font)) g.font = 'bold ' + t.font;
         g.lineWidth = t.fs * 0.3; g.lineJoin = 'round';
-        g.strokeStyle = 'rgba(0,229,255,0.5)'; g.fillStyle = '#00e5ff';
+        g.strokeStyle = isHl ? 'rgba(0,229,255,0.5)' : 'rgba(255,255,255,0.85)';
+        g.fillStyle = isHl ? '#00e5ff' : hovColor;
       }}
       if (cl) {{ g.beginPath(); g.rect(cl[0], cl[1], cl[2], cl[3]); g.clip(); }}
       if (it[6] >= 0) {{ const m = d.mt[it[6]]; g.transform(m[0], m[1], m[2], m[3], m[4], m[5]); }}
@@ -7281,7 +7287,7 @@ function dlDrawSheet(g, d, bx, by, bw, bh, hlText) {{
         g.translate(it[1], it[2]); g.rotate(it[4] * Math.PI / 180);
         g.translate(-it[1], -it[2]);
       }}
-      if (isHl) g.strokeText(it[7], it[1], it[2]);
+      if (isHl || isHov) g.strokeText(it[7], it[1], it[2]);
       g.fillText(it[7], it[1], it[2]);
       g.restore();
     }}
@@ -7315,7 +7321,9 @@ function schDraw() {{
     g.fillStyle = '#ffffff'; g.fillRect(sx, by, sw, bh);
     const d = DL[id];
     if (d) dlDrawSheet(g, d, sx, by, sw, bh,
-                       (schHlDesig && id === schHlSheet) ? schHlDesig : null);
+                       (schHlDesig && id === schHlSheet) ? schHlDesig : null,
+                       (schHovItem && id === schHovSheet) ? schHovItem : null,
+                       schHovColor);
   }}
 }}
 // SVG-viewBox kutusu → KANVAS koordinatı. Eskiden bu dönüşüm designator
@@ -7360,6 +7368,8 @@ function dlTextBox(sheetId, content) {{
 const tlSheets = new Set();
 // Vurgulanan designator + sayfası — schDraw bunu kanvasa camgöbeği çizer.
 let schHlDesig = null, schHlSheet = null;
+// İmlecin altındaki tıklanabilir yazı (draw-list öğesinin KENDİSİ) + sayfası.
+let schHovItem = null, schHovSheet = null, schHovColor = '#ff6b35';
 const tlMetCache = new Map();
 const tlClsCache = {{}};
 function tlMetrics(font, fs) {{
@@ -7438,6 +7448,7 @@ function tlBuild(id) {{
     }}
     m = tlMul(m, [1, 0, 0, 1, t[1], t[2] - bl]);
     const el = document.createElement('span');
+    el.__ti = t;               // hover vurgusu bu ÖĞEYİ kanvasta boyar
     el.textContent = t[7];
     el.style.font = font;
     el.style.transform = 'matrix(' + m.map(v => +v.toFixed(4)).join(',') + ')';
@@ -7464,6 +7475,7 @@ function tlDrop(id) {{
   const l = card && card.querySelector('.tl');
   if (l) l.remove();
   tlSheets.delete(id);
+  if (schHovSheet === id) {{ schHovItem = null; schHovSheet = null; }}
 }}
 function tlDropAll() {{ Array.from(tlSheets).forEach(tlDrop); }}
 // Görünür + okunur sayfalarda katmanı kur, kalanları kaldır
@@ -8135,12 +8147,25 @@ document.addEventListener('mouseover', e => {{
       + `<br><span class="tt-hint">⟪tıkla: alt sayfaya gir⟫</span>`;
   }}
   if (html) {{ svgTip.innerHTML = html; svgTip.style.display = 'block'; moveTip(e); }}
+  // Tıklanabilir yazının hover rengi (eskiden CSS `:hover {{fill:…}}` idi;
+  // metin katmanı DOM olduğundan fill etkisiz kaldı — kanvasa çiziyoruz).
+  if (html && t.__ti) {{
+    const card = t.closest('.sheet-card');
+    schHovItem = t.__ti;
+    schHovSheet = card ? card.dataset.sheetId : null;
+    schHovColor = t.classList.contains('clickable-net') ? '#ff6b35'
+                : t.classList.contains('block-link') ? NET_COLORS[0] : '#ffeb3b';
+    schDraw();
+  }}
 }});
 document.addEventListener('mousemove', e => {{
   if (svgTip.style.display === 'block') moveTip(e);
 }});
 document.addEventListener('mouseout', e => {{
   const t = e.target;
+  if (schHovItem && t.__ti === schHovItem) {{
+    schHovItem = null; schHovSheet = null; schDraw();
+  }}
   if (t.classList && (t.classList.contains('comp-designator')
       || t.classList.contains('clickable-net') || t.classList.contains('block-link')))
     svgTip.style.display = 'none';

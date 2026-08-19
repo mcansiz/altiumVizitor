@@ -5,7 +5,7 @@ Wavenumber'ın ticari "viz sch 1.0" ürününün açık-kaynak alternatifi.
 [altium_monkey](https://github.com/wavenumber-eng/altium_monkey) kütüphanesi
 (Eli Hughes / Wavenumber) üzerine kurulu.
 
-**Mevcut sürüm**: `APP_VERSION` sabiti **`viewer.py`'de** tutulur (şu an 2.27.2);
+**Mevcut sürüm**: `APP_VERSION` sabiti **`viewer.py`'de** tutulur (şu an 2.27.3);
 `gui.py` oradan import eder (v2.9.29'da taşındı — HTML çıktıları da sürümü
 gösterebilsin diye, tek kaynak). Yeni özellik/düzeltme ekleyince bu sabiti
 güncelle (semver: major.minor.patch). Sürüm pencere başlığında, alt durum
@@ -515,7 +515,14 @@ v2.12.0'da uygulanan desenin şematik karşılığı. LOD makinesi tamamen kalkt
   `getBBox`↔`getBoundingClientRect` eşlemesine dayandığından gizli panelde
   sıfır ölçümle çöküyordu (v2.24.0 yaması); o hata sınıfı yapısal olarak yok.
 
-**ÜÇ İNCE NOKTA**:
+**DÖRT İNCE NOKTA**:
+-1. **`Path2D.ellipse()`/`arc()` ÖNCESİNDE `moveTo` ŞART.** Açık bir alt-yol
+   varsa canvas, son noktadan yayın başlangıcına DÜZ ÇİZGİ ekler. Elipsler
+   (junction noktaları, inversiyon baloncukları) aynı stildeki çizgi/
+   dikdörtgenlerle TEK Path2D'de toplandığından bu, şemayı boydan boya kesen
+   hayalet bir çizgi olarak görünüyordu (v2.27.3'te kullanıcı bildirimiyle
+   düzeltildi: MAX3089E'nin baloncuklarından çıkan siyah çizgi). Açı 0
+   noktası `(cx + rx, cy)` → oraya `moveTo` bağlantı çizgisini sıfırlar.
 0. **Metin katmanının KABI (`.tl`) `pointer-events:none` OLMALI**, yalnız
    `.tl span` `auto` alır. Kap sayfanın TAMAMINI kapladığından, tıklamayı o
    yutarsa yakın zoom'da boş alana basmak da "yazıya bastı" sayılır ve
@@ -648,6 +655,33 @@ mesajına bak.
   bu API olmayabilir (graceful fallback var, "veri yok" der).
 
 ## Çözülen Sorunlar (tarihçe)
+
+- **Şemayı boydan boya kesen hayalet çizgi + tıklanabilir yazılarda hover
+  rengi kaybı (v2.27.3, kullanıcı bildirimi)**:
+  (1) **Hayalet çizgi**: `dlPrep` aynı stildeki çizgi/dikdörtgen/poligon/elips
+  primitiflerini TEK `Path2D`'de topluyor. `Path2D.ellipse()` açık bir alt-yol
+  varsa **son noktadan yayın başlangıcına düz çizgi ekler** — klasik canvas
+  tuzağı. Şematikteki elipsler junction noktaları ve inversiyon baloncukları
+  olduğundan, bir baloncuk aynı stilde bir çizgiden SONRA yola eklenince
+  aralarına uzun bir çizgi çiziliyordu. Kullanıcı MAX3089E'nin (`B`/`Z` pinleri)
+  baloncuklarından çıkan siyah çizgiyi bildirdi; v2.26.0 ekran görüntüsünde
+  yoktu (SVG'de böyle bir şey olmaz). Çözüm: her elipsten önce
+  `p.moveTo(cx + rx, cy)`. **Kanıtlandı** (kullanıcının kendi sayfası,
+  `Launcher_Interface_RS485_ISO.SchDoc`, 2 elips; tarayıcının kendi SVG
+  rasterizeri referans): moveTo'suz kanvas ile moveTo'lu kanvas arasında
+  **417 piksel** fark, tam iki baloncuk arasındaki dikdörtgen bölgede
+  (x 627–725, y 368–654); SVG'den sapma **%0.120 → %0.090**.
+  (2) **Hover rengi**: eski görünümde tıklanabilir yazılar imleç üstüne
+  gelince turuncu/sarı oluyordu (`.clickable-net:hover {{fill:…}}`). `fill`
+  bir SVG özelliğidir; metin katmanı DOM `<span>` olduğu için kural ÖLÜ
+  kalmıştı. Renklendirmeyi span'a `color` ile vermek aynı yazıyı ikinci kez
+  çizerdi (bkz. v2.27.2 saçaklanma), bu yüzden hover da KANVASA çiziliyor:
+  `schHovItem` imlecin altındaki draw-list ÖĞESİNİN KENDİSİ'ni tutar
+  (`el.__ti`), böylece aynı adlı diğer yazılar etkilenmez — eski `:hover` de
+  yalnız imlecin altındaki `<text>`'i boyuyordu. Renkler korundu: net
+  `#ff6b35`, block `NET_COLORS[0]`, designator `#ffeb3b`.
+  Doğrulama: hover 2/2 (piksel sayımı — önce 0, hover'da >3, mouseout'ta 0)
+  + tam regresyon 67/67.
 
 - **Panel yeniden boyutlanınca kanvas güncellenmiyordu + vurgu yazısı çift
   çiziliyordu (v2.27.2, kullanıcı bildirimi: "şematikte iken Böl yapınca

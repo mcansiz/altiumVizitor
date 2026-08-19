@@ -5,7 +5,7 @@ Wavenumber'ın ticari "viz sch 1.0" ürününün açık-kaynak alternatifi.
 [altium_monkey](https://github.com/wavenumber-eng/altium_monkey) kütüphanesi
 (Eli Hughes / Wavenumber) üzerine kurulu.
 
-**Mevcut sürüm**: `APP_VERSION` sabiti **`viewer.py`'de** tutulur (şu an 2.27.1);
+**Mevcut sürüm**: `APP_VERSION` sabiti **`viewer.py`'de** tutulur (şu an 2.27.2);
 `gui.py` oradan import eder (v2.9.29'da taşındı — HTML çıktıları da sürümü
 gösterebilsin diye, tek kaynak). Yeni özellik/düzeltme ekleyince bu sabiti
 güncelle (semver: major.minor.patch). Sürüm pencere başlığında, alt durum
@@ -648,6 +648,33 @@ mesajına bak.
   bu API olmayabilir (graceful fallback var, "veri yok" der).
 
 ## Çözülen Sorunlar (tarihçe)
+
+- **Panel yeniden boyutlanınca kanvas güncellenmiyordu + vurgu yazısı çift
+  çiziliyordu (v2.27.2, kullanıcı bildirimi: "şematikte iken Böl yapınca
+  şematik görüntüsü daralıyor", "kutu içeriği doğru göstermiyor", "U11 yazısı
+  ile mavimsi renklendirme tam üstüne denk gelmiyor")**:
+  (1) Şematik `ResizeObserver`'ı yalnız `applyPendingXp` çağırıyordu —
+  **`schDraw()` YOKTU**. Kanvasın bitmap boyutu `schDraw()` içinde
+  ayarlandığından, panel daralınca tarayıcı ESKİ bitmap'i yeni CSS boyutuna
+  geriyor: şematik ezik görünüyor ve DOM overlay'ler (vurgu kutusu, metin
+  katmanı, net yayları) kanvasla örtüşmüyordu. Üç şikâyetin de görünen kısmı
+  buydu. PCB kanvasında (`observe(wrap)`) bu zaten yapılıyordu — şematiğe
+  taşınırken atlanmış. (2) Aynı gözlemcide görünümün **MERKEZİ** sabit tutulur
+  (`tx += (yeniW - eskiW)/2`): panel yarıya inince seçili komponent ekrandan
+  kaçmasın. Gizliyken (ölçü 0) referans boyut GÜNCELLENMEZ, yoksa panel geri
+  açılınca dev bir sıçrama olurdu. (3) Vurgulanan designator artık KANVASA
+  camgöbeği çizilir (`schHlDesig` + `schHlSheet` → `dlDrawSheet(..., hlText)`);
+  eskiden metin katmanının span'ı renklendiriliyordu, yani aynı yazı iki ayrı
+  rasterizer'la (DOM metni + `fillText`) üst üste çiziliyor ve ~1 px
+  saçaklanıyordu. **Geometri zaten doğruydu** — ölçüldü: span/kanvas genişlik
+  oranı medyan **1.0002**, taban çizgisi farkı medyan **0 px**; sorun çift
+  çizimin kendisiydi. `.comp-highlight` sınıfı ve `comp-pulse` animasyonu
+  silindi (kutunun kendi `hlpulse` animasyonu duruyor).
+  **Doğrulama**: yeniden boyutlanma 6/6 (Şematik→Böl→PCB→Şematik ve pencere
+  küçültme; kanvas genişliği her adımda panel genişliğine eşit, vurgu
+  kutusunun içinde komponent çizimi var, Böl modunda 40/40 span kanvas
+  yazısıyla örtüşüyor) + şematik 13/13, özellik 10/10, pan 6/6, modal 5/5,
+  panel 8/8, not 6/6, birleşik 11/11.
 
 - **Kanvas geçişinin ardından üç kullanıcı bildirimi (v2.27.1)**:
   (1) **Yakın zoom'da fareyle pan çalışmıyordu** (imleç yumruk olmuyor; uzak

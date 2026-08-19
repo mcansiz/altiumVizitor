@@ -91,7 +91,7 @@ from altium_monkey.altium_schdoc import AltiumSchDoc
 
 # Uygulama sürümü — tek kaynak burası; gui.py buradan import eder.
 # HTML çıktılarında sağ üst köşedeki rozette görünür (build saati yerine).
-APP_VERSION = "2.27.1"
+APP_VERSION = "2.27.2"
 
 # Önerilen minimum altium_monkey sürümü. Bu sürümden öncesinde:
 #   · 2026.6.21 öncesi — STM32 gibi IC'lerde dikey pin adları yatay çiziliyordu.
@@ -6811,17 +6811,6 @@ def build_html(sheets, net_list, components, timestamp,
   .popup-copy:hover {{ color:{inter_color}; }}
   .popup-copy.copied {{ color:{inter_color}; }}
   /* Komponent highlight: designator text'i camgöbeği (PCB highlight ile uyumlu) */
-  /* Metin katmanı span'ı normalde SAYDAM; vurgulanan designator burada
-     görünür camgöbeğine döner (kanvastaki yazının üstüne biner = vurgu). */
-  @keyframes comp-pulse {{
-    0%, 100% {{ color: #00e5ff; }}
-    50% {{ color: #7af6ff; }}
-  }}
-  .comp-highlight {{
-    animation: comp-pulse 1.1s ease-in-out infinite;
-    font-weight: bold !important;
-    text-shadow: 0 0 2px #00e5ff, 0 0 6px rgba(0,229,255,0.6);
-  }}
   /* Seçili komponent kutusu (PCB'deki #hl-marker ile aynı stil). Çizgi/yazı
      kalınlığı JS'te 1/scale ile ölçeklenir (CSS transform zoom'da ekran-sabit). */
   #sch-hl-overlay {{ position:absolute; top:0; left:0; pointer-events:none;
@@ -7226,7 +7215,7 @@ function dlPrep(d) {{
   return P;
 }}
 // Bir sayfayı kanvasa çiz (bx,by,bw,bh = sayfa GÖVDESİNİN ekran dikdörtgeni)
-function dlDrawSheet(g, d, bx, by, bw, bh) {{
+function dlDrawSheet(g, d, bx, by, bw, bh, hlText) {{
   const vb = d.vb, kx = bw / vb[2], ky = bh / vb[3], k = (kx + ky) / 2;
   const P = dlPrep(d);
   g.save();
@@ -7271,17 +7260,30 @@ function dlDrawSheet(g, d, bx, by, bw, bh) {{
     g.font = t.font; g.fillStyle = t.c;
     for (let j = 0; j < t.items.length; j++) {{
       const it = t.items[j], cl = it[5] >= 0 ? d.cl[it[5]] : null;
-      if (cl || it[4] || it[6] >= 0) {{
-        g.save();
-        if (cl) {{ g.beginPath(); g.rect(cl[0], cl[1], cl[2], cl[3]); g.clip(); }}
-        if (it[6] >= 0) {{ const m = d.mt[it[6]]; g.transform(m[0], m[1], m[2], m[3], m[4], m[5]); }}
-        if (it[4]) {{
-          g.translate(it[1], it[2]); g.rotate(it[4] * Math.PI / 180);
-          g.translate(-it[1], -it[2]);
-        }}
-        g.fillText(it[7], it[1], it[2]);
-        g.restore();
-      }} else g.fillText(it[7], it[1], it[2]);
+      // Vurgulanan komponentin designator'ı KANVASA çizilir (metin katmanının
+      // span'ını renklendirmek yerine): aksi halde aynı yazı iki kez, iki ayrı
+      // rasterizer'la (DOM metni + canvas fillText) çizildiğinden ~1 px
+      // saçaklanıyordu — kullanıcı bildirimi "U11 yazısı ile mavimsi
+      // renklendirme tam üstüne denk gelmiyor". Geometri zaten birebirdi
+      // (ölçüm: genişlik oranı 1.0002, taban çizgisi farkı 0 px).
+      const isHl = hlText && (it[7] || '').trim() === hlText;
+      g.save();
+      if (isHl) {{
+        // font zaten kalınsa tekrar ekleme — 'bold bold …' GEÇERSİZ olur
+        // ve atama sessizce yok sayılırdı.
+        if (!/(^|\\s)(bold|[6-9]00)(\\s|$)/i.test(t.font)) g.font = 'bold ' + t.font;
+        g.lineWidth = t.fs * 0.3; g.lineJoin = 'round';
+        g.strokeStyle = 'rgba(0,229,255,0.5)'; g.fillStyle = '#00e5ff';
+      }}
+      if (cl) {{ g.beginPath(); g.rect(cl[0], cl[1], cl[2], cl[3]); g.clip(); }}
+      if (it[6] >= 0) {{ const m = d.mt[it[6]]; g.transform(m[0], m[1], m[2], m[3], m[4], m[5]); }}
+      if (it[4]) {{
+        g.translate(it[1], it[2]); g.rotate(it[4] * Math.PI / 180);
+        g.translate(-it[1], -it[2]);
+      }}
+      if (isHl) g.strokeText(it[7], it[1], it[2]);
+      g.fillText(it[7], it[1], it[2]);
+      g.restore();
     }}
   }}
   const IM = d.im;
@@ -7312,7 +7314,8 @@ function schDraw() {{
     if (bh <= 0.5 || sw <= 0.5) continue;
     g.fillStyle = '#ffffff'; g.fillRect(sx, by, sw, bh);
     const d = DL[id];
-    if (d) dlDrawSheet(g, d, sx, by, sw, bh);
+    if (d) dlDrawSheet(g, d, sx, by, sw, bh,
+                       (schHlDesig && id === schHlSheet) ? schHlDesig : null);
   }}
 }}
 // SVG-viewBox kutusu → KANVAS koordinatı. Eskiden bu dönüşüm designator
@@ -7355,15 +7358,8 @@ function dlTextBox(sheetId, content) {{
 // sınıf tabanlı olay kodu (clickable-net / block-link / comp-designator)
 // hiç değişmeden bunlar üzerinde çalışır.
 const tlSheets = new Set();
-let schHlDesig = null;   // vurgulanan designator (katman sonradan kurulursa da işaretlenir)
-function tlMarkDesig(id) {{
-  const card = document.getElementById('sheet-' + id);
-  const l = card && card.querySelector('.tl');
-  if (!l || !schHlDesig) return;
-  l.querySelectorAll('span').forEach(s => {{
-    if ((s.textContent || '').trim() === schHlDesig) s.classList.add('comp-highlight');
-  }});
-}}
+// Vurgulanan designator + sayfası — schDraw bunu kanvasa camgöbeği çizer.
+let schHlDesig = null, schHlSheet = null;
 const tlMetCache = new Map();
 const tlClsCache = {{}};
 function tlMetrics(font, fs) {{
@@ -7462,7 +7458,6 @@ function tlBuild(id) {{
   layer.appendChild(frag);
   body.appendChild(layer);
   tlSheets.add(id);
-  if (schHlDesig) tlMarkDesig(id);
 }}
 function tlDrop(id) {{
   const card = document.getElementById('sheet-' + id);
@@ -7690,11 +7685,12 @@ document.querySelectorAll('.sheet-card').forEach(card => {{
 let compHighlightTimeout = null;
 
 function clearCompHighlight() {{
-  document.querySelectorAll('.comp-highlight').forEach(el => el.classList.remove('comp-highlight'));
-  schHlDesig = null;
+  const had = schHlDesig;
+  schHlDesig = null; schHlSheet = null;
   schHlOverlay.innerHTML = '';
   schMarkerBox = null;
   if (compHighlightTimeout) {{ clearTimeout(compHighlightTimeout); compHighlightTimeout = null; }}
+  if (had) schDraw();          // camgöbeği designator yazısını kanvastan kaldır
 }}
 
 // Kutu artık DOM ÖLÇÜMÜNDEN türetilmiyor (bkz. schBoxToCanvas) — sayfa gizli
@@ -7710,18 +7706,17 @@ function highlightComponent(designator, sheetId, focus = true) {{
   let cbox = fullBox ? schBoxToCanvas(sheetId, fullBox) : null;
   if (!cbox) cbox = dlTextBox(sheetId, designator);           // yedek: yazı kutusu
   if (!cbox) {{ if (focus) fitToSheet(sheetId); return; }}
-  schHlDesig = designator;
-  tlSheets.forEach(tlMarkDesig);      // kurulu metin katmanlarında yazıyı da vurgula
+  schHlDesig = designator; schHlSheet = sheetId;
   const pad = Math.max(cbox.w, cbox.h) * 0.12 + 5;
   schMarkerBox = {{ x: cbox.x - pad, y: cbox.y - pad,
                     w: cbox.w + 2 * pad, h: cbox.h + 2 * pad, label: designator }};
   // focus=false: kullanıcı zaten komponentin üstünde (şematikte tıkladı) —
   // görünümü ortalayıp uzaklaştırma, sadece kutuyu çiz.
   if (focus) focusCanvasBox(schMarkerBox.x, schMarkerBox.y, schMarkerBox.w, schMarkerBox.h);
+  else schDraw();              // vurgulanan yazı kanvasa çizilsin (görünüm kaymadan)
   drawSchMarker();
   compHighlightTimeout = setTimeout(() => {{
-    schHlDesig = null;
-    document.querySelectorAll('.comp-highlight').forEach(el => el.classList.remove('comp-highlight'));
+    schHlDesig = null; schHlSheet = null; schDraw();
   }}, 6000);
 }}
 
@@ -9231,7 +9226,6 @@ function annoBuildHtml() {{
     clone.querySelectorAll('.tl').forEach(el => el.remove());
     clone.querySelectorAll('#sch-hl-overlay, #anno-layer, #anno-editor, #anno-bar')
       .forEach(el => el.remove());
-    clone.querySelectorAll('.comp-highlight').forEach(el => el.classList.remove('comp-highlight'));
     clone.querySelectorAll('.sheet-card').forEach(c =>
       c.classList.remove('hit', 'hit-1', 'hit-2', 'hit-3'));
     const cv = clone.querySelector('#canvas');
@@ -9370,7 +9364,23 @@ function applyPendingXp(tries) {{
   const p = pendingXpComp; pendingXpComp = null;
   applyXpComp(p.comp, p.sid);
 }}
-new ResizeObserver(() => applyPendingXp(0)).observe(viewport);
+// Panel/pencere yeniden boyutlanınca kanvası YENİDEN ÇİZ. Kanvasın bitmap
+// boyutu schDraw() içinde ayarlanır; çizmezsek tarayıcı ESKİ bitmap'i yeni CSS
+// boyutuna gerer → şematik ezilmiş/kaymış görünür ve DOM overlay'ler (vurgu
+// kutusu, metin katmanı, net yayları) kanvasla örtüşmez. Birleşik görünümde
+// Şematik → Böl geçişinde bildirildi. (PCB kanvasında bu zaten yapılıyordu.)
+// Ayrıca görünümün MERKEZİ sabit tutulur (üst-sol köşe değil): panel daralınca
+// o an incelenen / seçili bölge ekrandan kaçmasın.
+let vpW = 0, vpH = 0;
+new ResizeObserver(() => {{
+  const r = viewport.getBoundingClientRect();
+  if (r.width && r.height) {{
+    if (vpW && vpH) {{ tx += (r.width - vpW) / 2; ty += (r.height - vpH) / 2; }}
+    vpW = r.width; vpH = r.height;   // gizliyken (0) güncelleme YAPMA
+  }}
+  applyT();                          // schDraw + metin katmanı + overlay metrikleri
+  applyPendingXp(0);
+}}).observe(viewport);
 
 // Parent'tan "şu komponenti / net'i göster" mesajı
 window.addEventListener('message', ev => {{

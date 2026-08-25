@@ -5,7 +5,7 @@ Wavenumber'ın ticari "viz sch 1.0" ürününün açık-kaynak alternatifi.
 [altium_monkey](https://github.com/wavenumber-eng/altium_monkey) kütüphanesi
 (Eli Hughes / Wavenumber) üzerine kurulu.
 
-**Mevcut sürüm**: `APP_VERSION` sabiti **`viewer.py`'de** tutulur (şu an 2.27.3);
+**Mevcut sürüm**: `APP_VERSION` sabiti **`viewer.py`'de** tutulur (şu an 2.27.6);
 `gui.py` oradan import eder (v2.9.29'da taşındı — HTML çıktıları da sürümü
 gösterebilsin diye, tek kaynak). Yeni özellik/düzeltme ekleyince bu sabiti
 güncelle (semver: major.minor.patch). Sürüm pencere başlığında, alt durum
@@ -502,6 +502,12 @@ v2.12.0'da uygulanan desenin şematik karşılığı. LOD makinesi tamamen kalkt
   kopyalama / tıklama / hover için **yalnız görünür sayfalarda ve okunur
   zoom'da** (`TL_MIN_SCALE`, en çok `TL_MAX_SHEETS` sayfa) saydam `<span>`
   katmanı kurulur (`tlBuild`/`tlUpdate`, hareket durunca 140 ms sonra).
+  Span süzgeci kanvasın çizim eşiğinin AYNISI (`TEXT_MIN_PX`) → ekranda
+  görünen her yazının span'ı vardır. Eşik O ANKİ zoom'a bağlı olduğundan
+  katman, yakınlaşma yeni span gerektirdiğinde (`tlWant(id)` > kurulmuş span
+  sayısı) YENİDEN kurulur; kapasite aşılırsa **ekran merkezine en yakın**
+  sayfalar seçilir (v2.27.4 — ikisi de olmadan sayfalar seçilemez hale
+  geliyordu, bkz. Çözülen Sorunlar).
   Span'lar `clickable-net` / `block-link` / `comp-designator` sınıflarını
   taşır → mevcut sınıf tabanlı tıklama/hover kodu HİÇ değişmeden çalışır.
   Sınıflandırma `tlClasses(id)` ile draw-list üzerinden yapılır (eski
@@ -585,6 +591,42 @@ board (levha + bakır/silkscreen dokusu) incelenir. İki kritik detay:
 - Cross-probe ile seçim gelirse (`message` handler) parçalar otomatik geri
   açılır (`compBtn.onclick()`), seçim boşluğa düşmez. Gizlerken `setSel(null)`.
 
+### 3D STEP gövde yerleşimi: kesin veri + iki oraklelli denetim (v2.27.5/6)
+
+Yerleşim v2.9.31'den beri Altium'un kesin verisinden gelir (bkz. o kayıt):
+dünya = R·v + (cx, cy, ±(th/2 + dz)); **R = Rz(rotz)·Ry(roty)·Rx(rotx)**,
+konum = `model_2d` anchor'ı, dikey = `model_3d_dz`, alt katmanda anchor'dan geçen
+X ekseni etrafında 180° proper rotation. Ölçülen board'larda gövdelerin
+%99+'ında birebir doğru.
+
+Üstüne `_fix_body_orientation()` denetimi kondu: bazı kütüphane modellerinde
+rotasyon alanları modeli **baş aşağı** veriyor (board ALTINA monte panel-montaj /
+bükük-bacaklı SSR'ler board'un üstünde çıkıyordu). İki **bağımsız orakel**, ikisi
+de Altium'un kendi verisi:
+
+1. **2D gövde outline'ı** (v2.27.5) — Altium mekanik katmana çizdiği dikdörtgeni
+   modelin yerleştirilmiş XY izdüşümünden üretir (boyut mikron mertebesinde tutar).
+   İzdüşüm outline'a oturmuyorsa yönelim yanlıştır. **Kör noktası**: model kutusu
+   anchor'a göre simetrikse çevirme kutu merkezini oynatmaz.
+2. **Delikli pad'ler** (v2.27.6) — delikten geçen bacak pad deliğinin ekseninde
+   OLMAK ZORUNDA. Yalnız mevcut yönelim HİÇBİR deliği tutturamıyorken devreye
+   girer; tek bir çevirme TÜM delikleri tutturuyorsa kazanır.
+
+Kazanan çevirme yerleşime `fx`/`fy` bayrağı olarak eklenir (JS `buildModels`
+dünya uzayında premultiply eder). Dikey konum `dz` yerine `STANDOFFHEIGHT` /
+`OVERALLHEIGHT`'tan yeniden türetilir (çevirme Z'yi de ters çevirdiği için `dz`
+geçersizleşir), sonra **fiziksel oturma denetiminden** geçer (v2.27.6): `standoff`
+Altium'da KULLANICININ GİRDİĞİ alandır ve yanlış yönelime göre ayarlanmıştır, o
+yüzden parçayı board'un içinde bırakabiliyor. Ana gövde (XY ayak izi en büyük
+parça) board dilimine giriyorsa gövdenin üstü board'un ALT yüzüne yaslanır —
+yalnız AŞAĞI, asla yukarı, ve ancak bacaklar board'u boydan boya kesmeye devam
+ediyorsa.
+
+**Belirsizse hiçbir şey yapılmaz**: outline'ın boyutu tutmuyorsa (elle çizilmiş),
+iki çevirme de eşit iyiyse, standoff/overall birbirini tutmuyorsa ya da yeniden
+oturtma bacakları board dışına çıkarıyorsa düzeltme iptal edilir. Ayrıntı ve
+ölçüm: Çözülen Sorunlar → v2.27.5/6.
+
 ## JSON Çıktısı Yapısı
 
 ```json
@@ -655,6 +697,174 @@ mesajına bak.
   bu API olmayabilir (graceful fallback var, "veri yok" der).
 
 ## Çözülen Sorunlar (tarihçe)
+
+- **Aynı hata sınıfı ikinci board'da SSR5'te sürüyordu — outline orakeli SİMETRİK
+  gövdede kör (v2.27.6, kullanıcı bildirimi: "SSR5 komponenti 3d görünümü benzer
+  şekilde yanlış konumlamış, bu komponentin sorununu daha önce çözmüştük ama
+  görünüyor ki genel anlamda çözüme kavuşmamış")**: v2.27.5'in 2D-outline orakeli
+  BRK-213-2600009'da SSR2/SSR3/SSR6'yı yakaladı (`ISOPLUS-264-4L-BUKUMLU`, merkez
+  hatası 21.77 mm → 0.00) ama **SSR5'i kaçırdı**: `Bukum-CPC40055ST` modelinin XY
+  kutusu anchor'a göre SİMETRİK olduğundan 180° çevirme kutu merkezini HİÇ
+  oynatmıyor (her iki yönelimde de hata 0.00). Orakelin yapısal kör noktası bu.
+  **İkinci orakel — delikli pad'ler**: delikten geçen bacak pad deliğinin ekseninde
+  olmak zorunda. Ölçüm kesin: mevcut yönelimde 4 deliğin **hiçbirinde** model
+  malzemesi yok (bacak blade'leri her pad'den 1.27 mm dışarıda, en yakın vertis
+  2.03 mm); çevrilmiş yönelimde **dördünde de 88'er vertis** var ve blade
+  merkezleri pad sıralarına (−15.24 / −5.08 / 7.62 / 12.70 mm) BİREBİR oturuyor.
+  Orakel yalnız mevcut yönelim HİÇBİR deliği tutturamıyorken çalışır (aksi halde
+  yönelim zaten doğrudur) ve tek bir çevirmenin TÜM delikleri tutturmasını arar —
+  ikisi de tutturuyorsa belirsiz sayılıp dokunulmaz. SMD parçalarda (delik yok)
+  hiç devreye girmez, bu yüzden SSR1 (CPC1907B) ve SSR4 (G3VM, alt katman) doğru
+  şekilde ELLENMEZ.
+  **İkinci bulgu — `standoff` çevirmeden sonra parçayı board'un İÇİNDE bırakıyor**:
+  SSR5 çevrilip standoff'tan konumlandırılınca 3.81 mm'lik gövde board'u
+  (1.6 mm) boydan boya kesiyordu (gövde −2.05 … +1.76, board −1.6 … 0). Sebep:
+  Altium'da `STANDOFFHEIGHT` **kullanıcının girdiği** bir alandır ve tasarımcı onu
+  Altium'un YANLIŞ yönelimine bakarak ayarlamıştır (o yönelimde gövde board'un
+  0.51 mm üstünde düzgün oturuyordu) → çevirmeden sonra geçerliliğini yitiriyor.
+  **Fiziksel oturma denetimi**: ana gövde (XY ayak izi EN BÜYÜK parça) board
+  dilimine giriyorsa gövdenin üstü board'un ALT yüzüne yaslanır. Yalnız AŞAĞI
+  (asla yukarı) ve ancak bacaklar board'u boydan boya kesmeye devam ediyorsa;
+  aksi halde standoff değeri korunur. SSR5: dz −0.337 → **−3.696**, gövde üstü tam
+  board alt yüzünde (−0.80), bacaklar board'un 0.96 mm üstüne çıkıyor — v2.9.28'de
+  aynı parça için elle bulunan sonucun aynısı, ama artık sezgisel `pins_up`
+  tespitiyle değil ölçülebilir bir kısıtla.
+  **Ana gövde neden PARÇA bazında bulunuyor**: tessellate edilmiş bir prizmanın
+  vertisleri yalnız iki uçtadır → z-dilimlemesiyle kesit çıkarılamaz. `_model_vertices`
+  bu yüzden parçaları birleştirmeden döndürür.
+  **SSR2/3/6'ya DOKUNULMADI**: gövdeleri zaten board'un 8.9 mm altında (bacaklar
+  16.4 mm; muhtemelen soğutucu üstünde), board dilimine girmiyorlar → standoff
+  korundu. Aynı denetim önceki projedeki Sensata SSR1_1/2/3'ü de 1.43 mm aşağı
+  indirdi (dz −4.707 → −6.133): gövde üstü −0.18'den (board diliminin İÇİ) tam
+  board alt yüzüne (−0.80) oturdu ve saplamaların delik içindeki malzemesi artık
+  board'u boydan boya kesiyor (önceden −0.50'de kalıyordu, yani board'un alt
+  yüzeyine ulaşmıyordu).
+  **Regresyon kanıtı**: `Smart_MCU` (75 gövde) ve repodaki eski BRK-213 (274 gövde)
+  `_extract_3d` çıktısı v2.27.3'e göre **bit bit AYNI**; BRK-213-2600009'da 691
+  yerleşimin **4'ü** (SSR2/3/5/6), BRK-213-2600007'de 364'ün **3'ü** (SSR1_1/2/3)
+  değişti, diğer alanlar (outline, kalınlık, delikler, extrude gövdeler) aynı.
+  Maliyet: `_extract_3d` +%10 (BRK-213-2600009'da 88.6 → 97.1 s; STEP tessellation
+  yanında önemsiz).
+  **Doğrulama** (headless Edge + CDP, SwiftShader ile gerçek WebGL sahnesi):
+  BRK-213-2600009 **9/9** (SSR2/3/5/6 için bacaklar dört delikte de board düzlemini
+  kesiyor, ana gövdeler board'un altında, 0 JS hatası) · BRK-213-2600007 **13/13**
+  (üç Sensata için gövde board altında, saplamalar 22.1 mm yukarı, pad deliklerine
+  ≤0.33 mm oturma) · üretilen iki HTML'in 6'şar satır-içi script'i `node --check`
+  ile temiz · `tools/check_html_i18n.py` 236/236, ölü anahtar 0.
+
+- **Panel-montaj SSR'ler 3D'de board'un ÜSTÜNDE çıkıyordu, oysa board'un ALTINA
+  monte (v2.27.5, kullanıcı bildirimi: "SSR1_1, SSR1_2, SSR1_3 3D görünümünde üst
+  tarafta görünüyor ama KiCad'de alt tarafta; komponentin alt vida yeri de
+  oturmuyor")**: Yerleşim v2.9.31'de kesin Altium verisine bağlanmıştı —
+  R = Rz(rotz)·Ry(roty)·Rx(rotx), konum = `model_2d` anchor'ı, dikey =
+  `model_3d_dz`. Bu **hâlâ doğru**: kullanıcının board'undaki (BRK-213-2600007)
+  373 STEP gövdesinin **370'i** bu formülle Altium'un kendi kayıtlarına birebir
+  oturuyor. Ama Sensata HDC panel-montaj SSR modelinde (`MODEL.3D.ROTX = −90`,
+  board'un TEK negatif açılı kaydı) rotasyon alanları modelin GERÇEK yönelimini
+  vermiyor: gövde 180° ters geliyordu. Etkisi büyüktü — 73×104 mm'lik üç SSR
+  kasası board'un üstünde durup kartın yarısını örtüyor, Ø9.5 mm bakır terminal
+  saplamaları da aşağı sarkıyordu.
+  **Kök nedenin kanıtı — Altium'un KENDİ 2D gövde outline'ı orakel**: Altium
+  mekanik katmana çizdiği gövde dikdörtgenini modelin yerleştirilmiş halinin XY
+  izdüşümünden üretir (boyut mikron mertebesinde tutar). Formülün izdüşümü bu
+  outline'a göre **8.43 mm kayıktı**; ek bir 180° dünya-X çevirmesi kaymayı
+  **0.00 mm**'ye indiriyor. **Fiziksel doğrulama**: SSR'nin iki terminali
+  board'daki Ø13 mm kaplamalı deliklerden geçer — düzeltmesiz saplama merkezleri
+  pad'lerden 8.43 mm uzakta (delik yarıçapı 6.5 mm; yani saplamalar deliğe hiç
+  girmiyordu), düzeltmeyle 0.01 mm. Ayrıca SSR gövde ayak izinin ALTINDA üst
+  katmanda gerçek SMD komponentler var (C/R/U…), yani kasa board'un üstünde
+  olamaz.
+  **Çözüm** — `_fix_body_orientation()` (viewer.py): her STEP gövdesi için
+  formülün ürettiği XY bbox'ı Altium'un outline bbox'ıyla karşılaştırır.
+  (1) Outline'ın BOYUTU modelin döndürülmüş bbox'ıyla tutmuyorsa outline elle
+  çizilmiştir → orakel sayılmaz, dokunulmaz (bu board'da 12 Molex konnektörü
+  böyle: tessellation toleransından 0.46 mm sapma, merkez zaten 0.00).
+  (2) Boyut tutuyor ve merkez hatası > 1 mm ise iki 180° çevirme (dünya X ve Y)
+  denenir; biri hatayı ≤ 0.3 mm'ye indirip diğeri açıkça indirmiyorsa (belirsizse
+  DOKUNULMAZ) düzeltme uygulanır. (3) Çevirme modeli Z'de de ters çevirdiğinden
+  `model_3d_dz` geçersizleşir; dikey konum yönelimden BAĞIMSIZ alanlardan
+  (`STANDOFFHEIGHT` / `OVERALLHEIGHT`) yeniden türetilir ve ikisi birbirini
+  tutmazsa düzeltme İPTAL edilir. Yerleşime `fx`/`fy` bayrağı eklenir, JS
+  `buildModels` bunu dünya uzayında premultiply eder (alt katmanın Rx(180)'iyle
+  birlikte; ikisi de köşegen matris olduğundan sıra önemsiz).
+  **Neden dz DEĞİL standoff**: `z0 = standoff − minz` ilişkisi bu board'un
+  gövdelerinde genel olarak geçerli (üst katman; altta `z0 = standoff + maxz` —
+  C15 ile doğrulandı) ama `dz` ile HER ZAMAN örtüşmüyor, o yüzden yalnız çevirme
+  uygulanan gövdede standoff'a geçilir; kalan gövdeler `dz` kullanmayı sürdürür
+  (regresyon yok).
+  **NOT — standoff/overall çevirmeyi AYIRT EDEMEZ**: çevirme min/max'ı yer
+  değiştirip işaret değiştirdiğinden her iki yönelim de aynı zarfı (bu parçada
+  −20.42 … +22.71 mm) verir; ayrımı yalnız XY outline yapar. Bu yüzden orakel
+  outline'dır, standoff yalnız zarfı konumlandırır.
+  **Regresyon kanıtı**: iki referans board'da (`Smart_MCU` 75 gövde,
+  `altium_prj` BRK-213 274 gövde) `_extract_3d` çıktısı **bit bit AYNI**
+  (JSON karşılaştırması); kullanıcının board'unda 364 yerleşimin yalnız **3'ü**
+  (SSR1_1/2/3) değişti, diğer alanlar (outline, kalınlık, delikler, extrude
+  gövdeler) aynı.
+  **Doğrulama** (headless Edge + CDP, SwiftShader ile gerçek WebGL sahnesi):
+  **13/13** — üç SSR için ana gövde (7641 mm² taban) board üst yüzeyinin ALTINDA
+  (+0.63 ≤ +0.80), bakır saplamalar board'un 22.7 mm ÜSTÜNE çıkıyor, bakır
+  board'u kesiyor, saplama merkezleri pad deliklerine oturuyor (≤ 0.33 mm — bu
+  kalıntı seyrek vertis örneklemesinden; tam bbox ölçümü 0.00), konsolda JS
+  hatası yok. Üretilen HTML'in 6 satır-içi script'i `node --check` ile temiz
+  (3D olanı `TD_GZ#1`), `tools/check_html_i18n.py` 236/236 ve ölü anahtar 0.
+  **Test notu**: CDP istemcisinin `cmd()` döngüsü, kendi id'sini beklerken gelen
+  OLAY mesajlarını atıyorsa `Runtime.executionContextCreated` olayları kaybolur
+  ve iframe bağlamı "hiç yok" görünür — olaylar bir tampona alınmalı (memory'deki
+  edge-cdp-harness notuna eklendi). Ayrıca saplama merkezlerini beklenen pad'lerle
+  eşlerken **y'ye göre** sırala: x'ler mikron mertebesinde farklı olduğundan
+  tuple sıralaması yanlış eşleştirip 63.98 mm gibi sahte bir sapma üretiyor.
+
+- **Şematikte bazı sayfalarda yol/komponent SEÇİLEMİYORDU; uzaklaşıp başka
+  sayfaya gidince o sayfa düzeliyordu (v2.27.4, kullanıcı bildirimi: "bazen
+  yolları ve componentleri seçemiyorum, uzaklaşıp başka sayfadaki componenti
+  seçince seçilemeyen sayfadakiler düzeliyor … deterministik değil gibi")**:
+  Kullanıcının tarifi kök nedeni birebir gösteriyordu. Metin katmanı (v2.27.0)
+  sayfa başına BİR kez kuruluyor ve span süzgeci `fs * ky * scale < 4` ile
+  **kurulduğu andaki zoom'a** bakıyordu; `tlUpdate` ise yalnız görünürlüğe
+  bakıp var olan katmanı hiç YENİLEMİYORDU. Yani katman uzak bir zoom'da
+  kurulduysa yakınlaşınca da seyrek kalıyor, kanvas yazıyı çizdiği halde
+  altında span olmadığından o sayfada hiçbir şey seçilemiyordu. Katman ancak
+  DÜŞÜP yeniden kurulunca (zoom < `TL_MIN_SCALE` ya da sayfa görünümden
+  çıkınca) toparlanıyordu — kullanıcının bulduğu "uzaklaş, başka sayfaya git,
+  geri dön" çözümü tam olarak budur. Deterministik olmaması da buradan:
+  140 ms'lik debounce'un hangi zoom'da tetiklendiğine, yani gezinme yoluna
+  bağlı. **Ölçüldü** (BRK-210, headless Edge + CDP): `06 - MCU` sayfası
+  scale 0.9'da kurulunca 814 yazının **10'u** span alıyor ve scale 4'e
+  çıkılınca da **10** kalıyor (%1.2); görünürde tıklanabilir tek net yok.
+  **İKİNCİ, bağımsız hata aynı fonksiyonda**: `TL_MAX_SHEETS` (6) sınırı
+  `for (const id in sheetPos)` sırasında ilk 6 görünür sayfayı alıp `break`
+  ediyordu — yani KAYIT SIRASI kazanıyordu, kullanıcının baktığı yer değil.
+  8 sayfa birden görünürken ekranın tam ortasındaki iki sayfa (kayıtta son
+  ikisi) **0 span** alıyor, kenardaki altı sayfa katman alıyordu.
+  **Çözüm**: (1) süzgeç kanvasın çizim eşiğiyle aynı sabite (`TEXT_MIN_PX`)
+  bağlandı → "görüyorsam seçebilirim"; (2) `tlBuild` kurduğu span sayısını
+  saklar, `tlUpdate` o anki zoom'da gereken sayıyı (`tlWant`) hesaplayıp
+  **arttıysa** katmanı yeniler — oran/heuristik değil kesin sayım olduğundan
+  gereksiz yeniden kurulum olmaz (ölçüldü: 4.0→1.0→4.0→8.0 gidiş-dönüşünde
+  ek kurulum **0**, yalnız yeni görünür sayfalar için 5 kurulum); (3) sınır
+  aşılırsa sayfalar **ekran merkezine uzaklığa** göre sıralanır; (4) fontlar
+  geç yüklenince (`document.fonts.ready`) artık katman da yeniden kurulur —
+  taban çizgisi `tlMetrics`'ten geliyor, eskiden yalnız kanvas yeniden
+  çiziliyordu.
+  **Maliyet ölçüldü**: kare süresi değişmedi (canvas'a bağlı; 4.2 → 5.0 ms
+  en kötü durumda), DOM 1582 → 3287 düğüm (SVG döneminin 22 596'sının çok
+  altında), katman kurulumu ayarlanma başına 22.9 ms (140 ms debounce sonrası
+  bir kez, kare başına DEĞİL).
+  **Doğrulama** (headless Edge + CDP): düzeltme ÖNCESİ derlemede hata birebir
+  üretildi (5/815 ve 10/814 span) · şematik etkileşim **10/10** (yakın zoomda
+  net tıklama → seçim + yaylar, designator tıklama → vurgu, boş alanda pan tam
+  120/60 px, metin seçimi, üç ayrı uzaklaş→yakınlaş döngüsünde 814/814 span,
+  0 JS hatası) · özellik regresyonu **12/12** (hiyerarşi ağacı, Alt+Backspace,
+  arama, sayfa menüsü, not + localStorage, panel katlama, seçim temizleme,
+  fit sonrası tam katman) · iki proje (BRK-210, Smart_MCU) **5/5 + 5/5**
+  (span'ların %98-100'ü hit-test'te en üstte) · birleşik görünüm **8/8**
+  (iframe içinde 764 → 814/814, net tıklama, cross-probe, Böl moduna geçiş) ·
+  `node --check` temiz · `tools/check_html_i18n.py` 236/236, ölü anahtar 0.
+  **Test notu**: CDP'de `Runtime.executionContextCreated` olayları yalnız bir
+  `recv` döngüsü sırasında toplanır — `sleep` boyunca gelenler sokette bekler;
+  iframe'in yürütme bağlamını aramadan önce zararsız bir çağrıyla soketi
+  boşaltmak gerekir, yoksa "iframe bağlamı yok" gibi yanıltıcı bir sonuç çıkar.
 
 - **Şemayı boydan boya kesen hayalet çizgi + tıklanabilir yazılarda hover
   rengi kaybı (v2.27.3, kullanıcı bildirimi)**:

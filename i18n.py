@@ -429,6 +429,10 @@ _EN_LOG = {
     "  ✓ 3D STEP: {a0} model tessellate edildi (~{a1} üçgen)":
         "  ✓ 3D STEP: {a0} models tessellated (~{a1} triangles)",
     "  · 3D çıkarılamadı: {a0}": "  · 3D could not be extracted: {a0}",
+    "  · 3D: {a0} gövdenin yönelimi Altium'un gövde outline'ı / pad delikleriyle "
+    "düzeltildi (model baş aşağı geliyordu)":
+        "  · 3D: orientation of {a0} bodies corrected against Altium's own body "
+        "outline / pad holes (the model came in upside down)",
     "  · 3D: {a0} gövde Altium'da tam saydam (opacity 0) — çizilmedi "
     "(mekanik hacim/gabari)":
         "  · 3D: {a0} bodies are fully transparent in Altium (opacity 0) — not drawn "

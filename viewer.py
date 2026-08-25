@@ -91,7 +91,7 @@ from altium_monkey.altium_schdoc import AltiumSchDoc
 
 # Uygulama sürümü — tek kaynak burası; gui.py buradan import eder.
 # HTML çıktılarında sağ üst köşedeki rozette görünür (build saati yerine).
-APP_VERSION = "2.27.3"
+APP_VERSION = "2.27.6"
 
 # Önerilen minimum altium_monkey sürümü. Bu sürümden öncesinde:
 #   · 2026.6.21 öncesi — STM32 gibi IC'lerde dikey pin adları yatay çiziliyordu.
@@ -2249,6 +2249,210 @@ def _extract_step_models(pcb, log=print):
     return out
 
 
+# --- STEP gövde yönelimi: Altium'un KENDİ 2D outline'ıyla doğrulama (v2.27.5) ---
+# Yerleşim v2.9.31'de kesin Altium verisine bağlandı: R = Rz(rotz)·Ry(roty)·Rx(rotx),
+# konum = model_2d anchor'ı, dikey = model_3d_dz. Bu, ölçülen her board'da gövdelerin
+# neredeyse tamamında doğru (BRK-213/2026: 373 gövdenin 370'i). Ama Altium bazı
+# kütüphane modellerinde gövdeyi baş aşağı çiziyor: rotasyon alanları modelin GERÇEK
+# yönelimini vermiyor. Bunu yakalayacak bir ORAKEL elimizde var — Altium'un mekanik
+# katmana çizdiği 2D gövde outline'ı: bu dikdörtgen, modelin yerleştirilmiş halinin
+# XY izdüşümünden üretilir (boyutu modelin döndürülmüş bbox'ıyla mikron mertebesinde
+# tutar). Rotasyondan gelen izdüşüm outline'la ÖRTÜŞMÜYORSA yönelim yanlıştır.
+def _rot_zyx(rx, ry, rz):
+    """@brief Altium 3D gövde dönme matrisi: R = Rz(rz)·Ry(ry)·Rx(rx) (açılar derece).
+
+    @param rx X ekseni dönmesi (derece)
+    @param ry Y ekseni dönmesi (derece)
+    @param rz Z ekseni dönmesi (derece)
+    @return 3×3 numpy dönme matrisi
+    """
+    import numpy as np
+    ax, ay, az = math.radians(rx), math.radians(ry), math.radians(rz)
+    cx, sx = math.cos(ax), math.sin(ax)
+    cy, sy = math.cos(ay), math.sin(ay)
+    cz, sz = math.cos(az), math.sin(az)
+    Rx = np.array([[1, 0, 0], [0, cx, -sx], [0, sx, cx]])
+    Ry = np.array([[cy, 0, sy], [0, 1, 0], [-sy, 0, cy]])
+    Rz = np.array([[cz, -sz, 0], [sz, cz, 0], [0, 0, 1]])
+    return Rz @ Ry @ Rx
+
+
+def _model_vertices(models, mid, cache):
+    """@brief Bir STEP modelinin vertislerini PARÇA PARÇA ver (önbellekli).
+
+    Parçalar ayrı tutulur çünkü yönelim denetimi "ana gövde" ile "bacak"ları
+    ayırmak zorunda (bkz. `_fix_body_orientation`): tessellate edilmiş bir prizmanın
+    vertisleri yalnız iki uçtadır, o yüzden z-dilimlemesiyle kesit çıkarılamaz —
+    ayrım parça bazında yapılır.
+
+    @param models `_extract_step_models` çıktısı
+    @param mid Model GUID'i
+    @param cache Çağrı boyunca paylaşılan sözlük (mid → parça dizileri)
+    @return [(Ni,3) float ndarray, …], model yok/boşsa None
+    """
+    if mid in cache:
+        return cache[mid]
+    import numpy as np
+    arrs = []
+    for pt in (models.get(mid) or {}).get("parts", []):
+        v = pt.get("v")
+        if v and len(v) >= 9:
+            arrs.append(np.asarray(v, dtype=float).reshape(-1, 3))
+    out = arrs or None
+    cache[mid] = out
+    return out
+
+
+def _fix_body_orientation(parts, rx, ry, rz, bottom, anchor, obox, standoff, overall,
+                          dz, holes=(), th=1.6):
+    """@brief STEP gövdesinin yönelimini Altium'un KENDİ kayıtlarına karşı doğrula/düzelt.
+
+    Rotasyon alanları bazı kütüphane modellerinde modeli baş aşağı veriyor (board
+    ALTINA monte edilen bükük-bacaklı / panel-montaj parçalar). İki bağımsız orakel
+    kullanılır; ikisi de Altium'un kendi verisidir, sezgisel değildir:
+
+    1. **2D gövde outline'ı** — Altium mekanik katmana çizdiği dikdörtgeni modelin
+       yerleştirilmiş XY izdüşümünden üretir. İzdüşüm outline'a oturmuyorsa yönelim
+       yanlıştır. KÖR NOKTASI: model kutusu anchor'a göre simetrikse çevirme kutu
+       merkezini OYNATMAZ (BRK-213-2600009 SSR5) → tek başına yetmez.
+    2. **Delikli pad'ler** — delikten geçen bacak, pad deliğinin ekseninde OLMAK
+       ZORUNDA. Doğru yönelimde her deliğin içinde model malzemesi vardır, yanlış
+       yönelimde hiçbirinde yoktur. Bu orakel yalnız mevcut yönelim HİÇBİR deliği
+       tutturamıyorken devreye girer (aksi halde zaten doğrudur ve çevirme denenmez).
+
+    Çevirme modeli Z'de de ters çevirdiğinden `model_3d_dz` geçersizleşir; dikey konum
+    yönelimden BAĞIMSIZ alanlardan (standoff/overall height) yeniden türetilir ve ikisi
+    birbirini tutmazsa düzeltme İPTAL edilir. Her adımda belirsizlik = dokunma.
+
+    Yönelim düzeltilen gövdede dikey konum ayrıca FİZİKSEL olarak denetlenir: delikten
+    geçen bacak board'u boydan boya kesmeli, ana gövde board diliminin İÇİNE girmemeli.
+    Girmişse gövdenin üstü board'un alt yüzüne yaslanır (aşağı doğru; asla yukarı).
+    `standoff` Altium'da kullanıcının GİRDİĞİ bir alandır ve yanlış yönelime göre
+    ayarlanmıştır, o yüzden çevirmeden sonra tek başına yeterli olmayabilir.
+
+    @param parts Modelin parça bazında vertis dizileri [(Ni,3), …] (model uzayı)
+    @param rx,ry,rz Altium model_3d_rot* açıları (derece)
+    @param bottom Komponent alt katmanda mı (True → Rx(180) zaten uygulanır)
+    @param anchor (ax, ay) model_2d anchor'ı, board merkezine göre mm
+    @param obox Altium gövde outline'ının bbox'ı (minx, maxx, miny, maxy), board merkezine göre mm
+    @param standoff Altium STANDOFFHEIGHT (mm)
+    @param overall Altium OVERALLHEIGHT (mm)
+    @param dz model_3d_dz (mm) — düzeltme yoksa aynen döner
+    @param holes Komponentin delikli pad'leri: [(x, y, r), …] board merkezine göre mm
+    @param th Board kalınlığı (mm) — board dilimi board üst yüzeyine göre [-th, 0]
+    @return (fx, fy, dz) — fx/fy ek 180° çevirme bayrakları, dz düzeltilmiş dikey ofset
+    """
+    NONE = (0, 0, dz)
+    if not parts:
+        return NONE
+    try:
+        import numpy as np
+        V = np.vstack(parts)
+        if len(V) < 3:
+            return NONE
+        R = _rot_zyx(rx, ry, rz)
+        if bottom:
+            R = np.diag([1.0, -1.0, -1.0]) @ R      # alt katman: Rx(180)
+        FX = np.diag([1.0, -1.0, -1.0])             # dünya-X ekseni etrafında 180°
+        FY = np.diag([-1.0, 1.0, -1.0])             # dünya-Y ekseni etrafında 180°
+        # Outline modelden üretilmemişse (boyut tutmuyor) merkez orakel DEĞİLDİR;
+        # pad orakeli yine kullanılabilir (o outline'a bakmaz).
+        ow, oh_ = obox[1] - obox[0], obox[3] - obox[2]
+        ocx, ocy = (obox[0] + obox[1]) / 2, (obox[2] + obox[3]) / 2
+
+        def probe(M):
+            """(outline merkez hatası | None, delikleri tutturan pad sayısı, (zmin, zmax))"""
+            W = V @ M.T
+            x0, x1 = W[:, 0].min(), W[:, 0].max()
+            y0, y1 = W[:, 1].min(), W[:, 1].max()
+            oe = None
+            if abs((x1 - x0) - ow) <= 0.25 and abs((y1 - y0) - oh_) <= 0.25:
+                oe = math.hypot((x0 + x1) / 2 + anchor[0] - ocx,
+                                (y0 + y1) / 2 + anchor[1] - ocy)
+            hit = 0
+            for (hx, hy, hr) in holes:
+                dx = W[:, 0] + anchor[0] - hx
+                dy = W[:, 1] + anchor[1] - hy
+                if bool(np.any(dx * dx + dy * dy < hr * hr)):
+                    hit += 1
+            return oe, hit, (W[:, 2].min(), W[:, 2].max())
+
+        oe0, hit0, _z0 = probe(R)
+        win = None
+        # --- Orakel 2: delikli pad'ler (mevcut yönelim HİÇBİR deliği tutturamıyorsa) ---
+        if len(holes) >= 2 and hit0 == 0:
+            got = []
+            for fx, fy, F in ((1, 0, FX), (0, 1, FY)):
+                oe, hit, zz = probe(F @ R)
+                if hit == len(holes):
+                    got.append((fx, fy, oe, zz))
+            # Tek bir çevirme TÜM delikleri tutturmalı; ikisi de tutturuyorsa belirsiz.
+            if len(got) == 1:
+                fx, fy, oe, zz = got[0]
+                # Outline orakeli varsa çelişmemeli (çevirme kutuyu kaçırmamalı).
+                if oe is None or oe0 is None or oe <= max(1.0, oe0) + 0.3:
+                    win = (fx, fy, zz)
+        # --- Orakel 1: 2D gövde outline'ı (merkez açıkça kaçıyorsa) ---
+        if win is None and oe0 is not None and oe0 > 1.0:
+            cands = []
+            for fx, fy, F in ((1, 0, FX), (0, 1, FY)):
+                oe, hit, zz = probe(F @ R)
+                cands.append((oe if oe is not None else 1e9, fx, fy, zz))
+            cands.sort()
+            (e1, fx, fy, zz), (e2, _, _, _) = cands[0], cands[1]
+            # Kazanan outline'a otursun, kaybeden AÇIKÇA oturmasın (belirsizse dokunma).
+            if e1 <= 0.3 and e1 * 3 <= oe0 and e2 > 1.0:
+                win = (fx, fy, zz)
+        if win is None:
+            return NONE
+        fx, fy, zz = win
+        # Çevirme Z'yi de ters çevirdi → dz geçersiz. Dikey konumu yönelimden bağımsız
+        # alanlardan kur: üst katmanda standoff modelin EN ALT, altta EN ÜST noktasıdır.
+        if bottom:
+            z0 = standoff + zz[1]
+            chk = z0 - zz[0]
+        else:
+            z0 = standoff - zz[0]
+            chk = z0 + zz[1]
+        if abs(chk - overall) > 0.15:
+            return NONE                              # standoff/overall tutmuyor → güvenme
+        # --- Fiziksel oturma denetimi -------------------------------------------------
+        # `standoff` Altium'da kullanıcının GİRDİĞİ alandır ve YANLIŞ yönelime göre
+        # ayarlanmıştır; çevirmeden sonra parçayı board'un içinde bırakabiliyor
+        # (BRK-213-2600009 SSR5: 3.8 mm'lik gövde 1.6 mm'lik board'u boydan boya
+        # kesiyordu). Ana gövde board dilimine giriyorsa gövdenin üstü board'un ALT
+        # yüzüne yaslanır. Ana gövde = XY ayak izi en büyük parça (bacaklar ince ve
+        # küçüktür); tessellate edilmiş prizmada vertis yalnız iki uçta olduğundan
+        # kesit z-dilimlemesiyle değil PARÇA bazında bulunur.
+        F = FX if fx else (FY if fy else np.eye(3))
+        M = F @ R
+        big, big_a = None, -1.0
+        for pv in parts:
+            Wp = pv @ M.T
+            a = ((Wp[:, 0].max() - Wp[:, 0].min()) * (Wp[:, 1].max() - Wp[:, 1].min()))
+            if a > big_a:
+                big_a, big = a, Wp[:, 2].max()
+        if big is not None and z0 + big > -th:
+            z0b = -th - big                          # gövde üstü ↔ board alt yüzü
+            if z0b < z0:                             # YALNIZ aşağı; asla yukarı kaldırma
+                W = V @ M.T
+                ok = True
+                for (hx, hy, hr) in holes:
+                    dx = W[:, 0] + anchor[0] - hx
+                    dy = W[:, 1] + anchor[1] - hy
+                    m = dx * dx + dy * dy < hr * hr
+                    # Delikteki bacak board'u BOYDAN BOYA kesmeli.
+                    if not (bool(np.any(m)) and W[m][:, 2].min() + z0b <= -th
+                            and W[m][:, 2].max() + z0b >= 0):
+                        ok = False
+                        break
+                if ok:
+                    z0 = z0b
+        return (fx, fy, round(float(z0), 3))
+    except Exception:
+        return NONE
+
+
 def _extract_3d(pcb, log=print):
     """@brief PCB'den 3D görünüm verisi çıkar: board dış hattı + kalınlık + komponent
     
@@ -2290,6 +2494,23 @@ def _extract_3d(pcb, log=print):
         # Gömülü STEP modelleri (varsa) — model olan gövde gerçek mesh ile,
         # olmayan extrude prizma ile çizilir.
         models = _extract_step_models(pcb, log)
+        _mv_cache = {}     # model GUID → vertis dizisi (yönelim denetimi için)
+        n_fixed = 0        # yönelimi düzeltilen gövde sayısı
+        # Komponent → delikli pad'leri (board merkezine göre mm). Yönelim denetiminin
+        # ikinci orakeli: delikten geçen bacak pad deliğinin ekseninde olmak zorunda.
+        _pad_holes = {}
+        if models:
+            for pd in pcb.pads:
+                try:
+                    hs = float(getattr(pd, "hole_size_mils", 0) or 0) * MIL2MM
+                    pci = getattr(pd, "component_index", None)
+                    if hs <= 0 or not isinstance(pci, int):
+                        continue
+                    _pad_holes.setdefault(pci, []).append(
+                        (float(pd.x_mils) * MIL2MM - cx,
+                         float(pd.y_mils) * MIL2MM - cy, hs / 2))
+                except Exception:
+                    continue
         comps = pcb.components
         bodies = []        # modelsiz gövdeler (extrude fallback)
         placements = []    # STEP modelli gövdeler
@@ -2333,7 +2554,8 @@ def _extract_3d(pcb, log=print):
             if isinstance(ci, int) and 0 <= ci < len(comps):
                 desig = comps[ci].designator
                 layer = "bottom" if str(comps[ci].layer).upper().startswith("B") else "top"
-            h = (b.overall_height_mils or 0) * MIL2MM
+            oh_raw = (b.overall_height_mils or 0) * MIL2MM   # ham (extrude yedeği için kırpılmadan)
+            h = oh_raw
             if h <= 0.001:
                 h = 0.4
             so = (b.standoff_height_mils or 0) * MIL2MM
@@ -2364,11 +2586,29 @@ def _extract_3d(pcb, log=print):
                 else:
                     ax = m2x * U2MM - cx
                     ay = m2y * U2MM - cy
-                placements.append({
+                # Yönelimi Altium'un kendi kayıtlarına karşı doğrula (v2.27.5/6):
+                # bazı kütüphane modellerinde rotasyon alanları gövdeyi baş aşağı
+                # veriyor (board ALTINA monte panel-montaj / bükük-bacaklı SSR'ler
+                # board'un üstünde çıkıyordu). Orakeller: 2D gövde outline'ı +
+                # delikli pad'ler (bkz. _fix_body_orientation).
+                fx, fy, dzv = _fix_body_orientation(
+                    _model_vertices(models, mid, _mv_cache), rxv, ryv, rzv,
+                    layer == "bottom", (ax, ay),
+                    (min(p[0] for p in poly), max(p[0] for p in poly),
+                     min(p[1] for p in poly), max(p[1] for p in poly)),
+                    so, oh_raw, dzv, _pad_holes.get(ci) or (), th_mm)
+                rec = {
                     "m": mid, "d": desig, "layer": layer,
                     "cx": round(ax, 3), "cy": round(ay, 3), "dz": round(dzv, 3),
                     "rx": rxv, "ry": ryv, "rz": rzv,
-                })
+                }
+                if fx or fy:
+                    n_fixed += 1
+                    if fx:
+                        rec["fx"] = 1       # ek 180° dünya-X çevirmesi
+                    if fy:
+                        rec["fy"] = 1       # ek 180° dünya-Y çevirmesi
+                placements.append(rec)
             else:
                 col = int(b.body_color_3d or 0x808080)
                 if col in (0x808080, 0x7F7F7F, 0):
@@ -2433,6 +2673,8 @@ def _extract_3d(pcb, log=print):
         log(tr('  ✓ 3D: board {a0:.0f}×{a1:.0f}mm · {a2:.2f}mm · {a3} STEP + {a4} extrude gövde · {a5} gerçek delik').format(a0=maxx - minx, a1=maxy - miny, a2=th_mm, a3=len(placements), a4=len(bodies), a5=len(drills)))
         if n_skipped:
             log(tr("  · 3D: {a0} gövde Altium'da tam saydam (opacity 0) — çizilmedi (mekanik hacim/gabari)").format(a0=n_skipped))
+        if n_fixed:
+            log(tr("  · 3D: {a0} gövdenin yönelimi Altium'un gövde outline'ı / pad delikleriyle düzeltildi (model baş aşağı geliyordu)").format(a0=n_fixed))
         return {"available": True, "thickness": round(th_mm, 3),
                 "outline": outline, "bodies": bodies,
                 "models": models, "placements": placements, "drills": drills,
@@ -3495,6 +3737,12 @@ function buildModels(){
     } else {
       inner.position.set(pl.cx, pl.cy, th/2 + (pl.dz||0));
     }
+    // Yönelim düzeltmesi (v2.27.5): Altium'un 2D gövde outline'ı modelin baş aşağı
+    // geldiğini gösteriyorsa Python ek 180° çevirme bayrağı koyar (bkz.
+    // _fix_body_orientation). Dünya uzayında premultiply edilir; iki bayrak da
+    // köşegen matris olduğundan sıra önemsiz. dz Python'da zaten yeniden türetildi.
+    if(pl.fx) q.premultiply(new THREE.Quaternion().setFromAxisAngle(AX, Math.PI));
+    if(pl.fy) q.premultiply(new THREE.Quaternion().setFromAxisAngle(AY, Math.PI));
     inner.quaternion.copy(q);
     scene.add(inner);
     inner.children.forEach(m=>registerMesh(m, pl.d));
@@ -7366,6 +7614,10 @@ function dlTextBox(sheetId, content) {{
 // sınıf tabanlı olay kodu (clickable-net / block-link / comp-designator)
 // hiç değişmeden bunlar üzerinde çalışır.
 const tlSheets = new Set();
+// Sayfa katmanında KURULMUŞ span sayısı (id -> n). Süzgeç o anki zoom'a bağlı
+// olduğundan yakınlaşınca katman yenilenmeli; ölçüt oran DEĞİL kesin sayı
+// (tlWant) — böylece yalnız gerçekten yeni span gerektiğinde kurulum yapılır.
+const tlBuilt = new Map();
 // Vurgulanan designator + sayfası — schDraw bunu kanvasa camgöbeği çizer.
 let schHlDesig = null, schHlSheet = null;
 // İmlecin altındaki tıklanabilir yazı (draw-list öğesinin KENDİSİ) + sayfası.
@@ -7432,9 +7684,13 @@ function tlBuild(id) {{
   const layer = document.createElement('div');
   layer.className = 'tl';
   const frag = document.createDocumentFragment();
+  let n = 0;
   for (let i = 0; i < d.tx.length; i++) {{
     const t = d.tx[i], st = d.ts[t[0]], fs = t[3];
-    if (fs * ky * scale < 4) continue;          // ekranda okunmayacak kadar küçük
+    // Kanvasın çizim eşiğiyle AYNI (dlDrawSheet): ekranda görünen her yazının
+    // span'ı da olur → "görüyorsam seçebilirim". Eşik o ANKİ zoom'a bağlı;
+    // yakınlaşınca katman tlUpdate'te yeniden kurulur.
+    if (fs * ky * scale < TEXT_MIN_PX) continue;
     const font = dlFont(st, fs), met = tlMetrics(font, fs);
     // line-height:1 satır kutusunun ÜSTÜ ile taban çizgisi arası
     const bl = fs * ((1 - (met.asc + met.desc)) / 2 + met.asc);
@@ -7465,36 +7721,67 @@ function tlBuild(id) {{
       }}
     }}
     frag.appendChild(el);
+    n++;
   }}
   layer.appendChild(frag);
   body.appendChild(layer);
   tlSheets.add(id);
+  tlBuilt.set(id, n);
+}}
+// O anki zoom'da span'ı OLMASI GEREKEN yazı sayısı (tlBuild'in süzgeciyle aynı)
+function tlWant(id) {{
+  const d = DL && DL[id], sp = sheetPos[id];
+  if (!d || !sp) return 0;
+  const ky = (sp.h - TITLE_H) / d.vb[3];
+  let n = 0;
+  for (let i = 0; i < d.tx.length; i++) if (d.tx[i][3] * ky * scale >= TEXT_MIN_PX) n++;
+  return n;
 }}
 function tlDrop(id) {{
   const card = document.getElementById('sheet-' + id);
   const l = card && card.querySelector('.tl');
   if (l) l.remove();
   tlSheets.delete(id);
+  tlBuilt.delete(id);
   if (schHovSheet === id) {{ schHovItem = null; schHovSheet = null; }}
 }}
 function tlDropAll() {{ Array.from(tlSheets).forEach(tlDrop); }}
-// Görünür + okunur sayfalarda katmanı kur, kalanları kaldır
+// Görünür + okunur sayfalarda katmanı kur, kalanları kaldır.
+// İKİ İNCE NOKTA (v2.27.4, kullanıcı bildirimi — bkz. Çözülen Sorunlar):
+// (1) Span süzgeci (TEXT_MIN_PX) O ANKİ zoom'a bağlı olduğundan yakınlaşınca
+//     katman yeniden kurulmalı (ölçüt: tlWant > kurulmuş span sayısı); yoksa
+//     uzakta kurulan seyrek katman yakınlaşınca da seyrek kalır ve sayfanın
+//     yazıları hiç seçilemez.
+// (2) Görünür sayfa sayısı sınırı aşarsa EKRAN MERKEZİNE en yakınlar seçilir
+//     (eskiden kayıt sırasındaki ilk TL_MAX_SHEETS sayfa alınıyordu → bakılan
+//     sayfa listeye hiç giremeyebiliyordu).
 function tlUpdate() {{
   if (!DL) return;
-  const keep = [];
+  let keep = [];
   if (scale >= TL_MIN_SCALE) {{
     const r = viewport.getBoundingClientRect();
+    const vcx = r.width / 2, vcy = r.height / 2, cand = [];
     for (const id in sheetPos) {{
       const sp = sheetPos[id];
       const sx = sp.x * scale + tx, sy = sp.y * scale + ty;
       const sw = sp.w * scale, sh = sp.h * scale;
       if (sx > r.width + 150 || sy > r.height + 150 || sx + sw < -150 || sy + sh < -150) continue;
-      keep.push(id);
-      if (keep.length >= TL_MAX_SHEETS) break;
+      const dx = sx + sw / 2 - vcx, dy = sy + sh / 2 - vcy;
+      cand.push({{ id: id, d: dx * dx + dy * dy }});
     }}
+    cand.sort((a, b) => a.d - b.d);
+    keep = cand.slice(0, TL_MAX_SHEETS).map(o => o.id);
   }}
   Array.from(tlSheets).forEach(id => {{ if (keep.indexOf(id) < 0) tlDrop(id); }});
-  keep.forEach(id => {{ if (!tlSheets.has(id)) tlBuild(id); }});
+  keep.forEach(id => {{
+    // Yakınlaşma yeni span gerektiriyorsa (süzgeç eşiğini geçen yazı sayısı
+    // arttıysa) katman yeniden kurulur. Uzaklaşmada kurulum YAPILMAZ: fazla
+    // span zararsız (konumu zoom'dan bağımsız matrisle veriliyor) ve sayfa
+    // görünümden çıkınca zaten düşer.
+    const have = tlBuilt.get(id);
+    if (have !== undefined && tlWant(id) > have) tlDrop(id);
+    if (!tlSheets.has(id)) tlBuild(id);
+  }});
 }}
 let tlTimer = null;
 function tlSchedule() {{
@@ -9484,7 +9771,11 @@ window.addEventListener('message', ev => {{
   applyT();
   tlUpdate();
   if (document.fonts && document.fonts.ready) {{
-    document.fonts.ready.then(() => {{ tlMetCache.clear(); schDraw(); }});
+    // Font metrikleri değişti: kanvas yeniden çizilir, metin katmanı da
+    // yeniden kurulur (span taban çizgisi tlMetrics'ten geliyor).
+    document.fonts.ready.then(() => {{
+      tlMetCache.clear(); schDraw(); tlDropAll(); tlUpdate();
+    }});
   }}
 }})();
 </script>

@@ -3,10 +3,12 @@
 # Kurulum (Linux):    python3 -m pip install -r requirements.txt
 #
 # LINUX NOTU: altium-monkey'nin bağımlılığı wn-geometer yalnızca
-# manylinux_2_39 wheel'i dağıtıyor -> glibc >= 2.39 gerekir
-# (Ubuntu 24.04+ / Debian 13+). Ubuntu 22.04 ve öncesinde pip
-# "ResolutionImpossible: wn-geometer==2026.6.10" hatası verir.
-# Python >= 3.10 da şart.
+# manylinux_2_35 wheel'i dağıtıyor -> glibc >= 2.35 gerekir
+# (Ubuntu 22.04+ / Debian 12+). Daha eski dağıtımda pip
+# "ResolutionImpossible: wn-geometer==2026.8.21" hatası verir.
+# (2026.8.21 öncesi wn-geometer manylinux_2_39 idi = Ubuntu 24.04+;
+#  altium-monkey yükseltmesi Linux eşiğini İKİ LTS geriye çekti.)
+# Python >= 3.12 şart (altium-monkey: >=3.12,<3.15).
 #
 # DENETİM: aynı liste deps.py'de (Dep tablosu) tutulur ve uygulama HER
 # açılışta oradan denetlenir — paketlerden biri eksikse Schematic Viz
@@ -16,9 +18,12 @@
 
 # --- Çekirdek (GUI + üretim) ---
 PyQt5>=5.15.11
-altium-monkey>=2026.8.11   # UTF-8 metin kurtarma + anotasyonsuz komponent kimliği
-                           # düzeltmeleri bu sürümde (bkz. CLAUDE.md sürüm notu).
-                           # Bu sürüm pillow'u 12.3.0'a pinler (otomatik yükselir).
+altium-monkey>=2026.8.21   # PCB parametre Unicode'u (UNICODE__<ALAN> sideband'i),
+                           # uzantısız sheet-symbol referansı, Altium paint order
+                           # ve multichannel numaralandırma düzeltmeleri bu
+                           # sürümde (bkz. CLAUDE.md sürüm notu).
+                           # pillow'u 12.3.0'a, wn-geometer'ı 2026.8.21'e pinler
+                           # (otomatik yükselir); msgspec + jsonschema-rs ekler.
 openpyxl>=3.1              # Excel çıktıları (IC haritası, MCU pin listesi)
 
 # --- 3D STEP modelleri (birleşik Şematik+PCB+3D görünüm için ZORUNLU) ---
@@ -33,6 +38,11 @@ numpy>=2.0
 #   freetype-py, lxml, lz4,       → altium-monkey
 #   pillow, uharfbuzz, wn-geometer
 #   et-xmlfile                    → openpyxl
+#
+# pip AYRICA msgspec + jsonschema-rs kuruyor (altium-monkey 2026.8.21'in
+# `pcb_manufacturing` / IPC-2581 alt paketi için). Bizim kod yolumuz o paketi
+# hiç import etmiyor, bu yüzden deps.py'nin denetim listesinde BİLEREK yoklar —
+# eklenirse paketlenmiş exe açılmaz olur (gerekçe: deps.py, tablo sonu).
 
 # --- Paketleme (opsiyonel, exe üretimi için) ---
 # pyinstaller>=6.21

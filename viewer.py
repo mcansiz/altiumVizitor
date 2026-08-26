@@ -91,7 +91,7 @@ from altium_monkey.altium_schdoc import AltiumSchDoc
 
 # Uygulama sürümü — tek kaynak burası; gui.py buradan import eder.
 # HTML çıktılarında sağ üst köşedeki rozette görünür (build saati yerine).
-APP_VERSION = "2.27.6"
+APP_VERSION = "2.27.7"
 
 # Önerilen minimum altium_monkey sürümü. Bu sürümden öncesinde:
 #   · 2026.6.21 öncesi — STM32 gibi IC'lerde dikey pin adları yatay çiziliyordu.
@@ -99,7 +99,11 @@ APP_VERSION = "2.27.6"
 #     düşürüyordu (bizim patch_altium_text_decoding yamamız bunu kurtarıyor).
 #   · 2026.8.11.post1 öncesi — anotasyonsuz/aynı designator'lı komponentlerde
 #     derlenmiş şematik kimliği hatalıydı (BRK-210'da IC12'nin 4 SPI pini eksikti).
-MIN_RECOMMENDED_AM = "2026.8.11"
+#   · 2026.8.21 öncesi — PCB komponent parametrelerindeki ° ± µ gibi ASCII dışı
+#     karakterler mojibake oluyordu (`UNICODE__<ALAN>` UTF-16 sideband'i
+#     okunmuyordu); uzantısız sheet-symbol referansı (`Power` ↔ `Power.SchDoc`)
+#     çözülemiyordu; SVG paint order Altium'unkiyle hizalı değildi.
+MIN_RECOMMENDED_AM = "2026.8.21"
 
 # --- Altium metin çözümlemesi: cp1252'ye sığmayan içerik yüzünden sayfa kaybı --
 # altium_monkey, `%UTF8%` öneki YOKSA kaydı KATI cp1252 ile çözer. Altium'da

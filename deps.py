@@ -7,7 +7,8 @@ Uygulamanın kullandığı TÜM üçüncü-parti kütüphaneler tek kaynak olara
 listelenir: doğrudan import edilenler (PyQt5, altium-monkey, openpyxl, cascadio,
 trimesh, numpy) ve bunların çalışma zamanında gerçekten gereken alt bağımlılıkları
 (freetype-py, lxml, lz4, pillow, uharfbuzz, wn-geometer, et-xmlfile, PyQt5-sip,
-PyQt5-Qt5).
+PyQt5-Qt5). pip'in kurduğu ama BİZİM kullanmadığımız paketler (msgspec,
+jsonschema-rs) bilerek listede DEĞİL — gerekçe DEPENDENCIES tablosunun sonunda.
 
 `gui.py` ve `viewer.py` import edilir edilmez bu modülü çağırır:
 - gui.py  → `enforce(gui=True)`  : eksik varsa konsola + hata diyaloğuna yazar, çıkar.
@@ -82,7 +83,7 @@ DEPENDENCIES = (
     # --- Doğrudan import edilenler (gui.py / viewer.py) ---
     Dep("PyQt5", "PyQt5", "5.15.11",
         "Masaüstü arayüz (gui.py + gui.ui)", True),
-    Dep("altium-monkey", "altium_monkey", "2026.8.11",
+    Dep("altium-monkey", "altium_monkey", "2026.8.21",
         "Altium SchDoc/PcbDoc okuma, SVG render, netlist derleme", True),
     Dep("openpyxl", "openpyxl", "3.1",
         "Excel çıktıları (IC bağlantı haritası, MCU pin listesi)", True),
@@ -109,9 +110,24 @@ DEPENDENCIES = (
     Dep("uharfbuzz", "uharfbuzz", None,
         "altium_monkey: metin şekillendirme", False),
     Dep("wn-geometer", "geometer", None,
-        "altium_monkey: geometri (Linux'ta glibc >= 2.39 gerektirir)", False),
+        "altium_monkey: geometri (Linux'ta glibc >= 2.35 gerektirir)", False),
     Dep("et-xmlfile", "et_xmlfile", None,
         "openpyxl: XML akış yazımı", False),
+    # --- BİLEREK LİSTEDE DEĞİL: msgspec + jsonschema-rs (v2.27.7) ---
+    # altium-monkey 2026.8.21 bunları `Requires-Dist` olarak bildiriyor
+    # (yeni `pcb_manufacturing` / IPC-2581 alt paketi için), yani pip HER ZAMAN
+    # kuruyor. Ama bu tablo "olmazsa uygulama çöker" listesidir ve bu ikisi o
+    # ölçüte UYMUYOR: kod yolumuz `pcb_manufacturing`'i hiç import etmiyor
+    # (ölçüldü — ikisi de `sys.meta_path`'ten bloklanınca kullandığımız 10
+    # modülün hepsi sorunsuz açılıyor).
+    # Listeye eklemek FROZEN EXE'Yİ AÇILMAZ YAPIYOR: `pcb_manufacturing`
+    # kütüphanenin BİLDİRMEDİĞİ `shapely`'yi de istediğinden PyInstaller onu
+    # import edemiyor ("Failed to collect submodules … No module named
+    # 'shapely'"), alt modülleri toplayamıyor ve msgspec/jsonschema_rs exe'ye
+    # HİÇ girmiyor → denetim "KURULU DEĞİL" deyip SystemExit(1) veriyor
+    # (bir kez yaşandı ve exe açılmadı). Kullanmadığımız bir paketi yalnız
+    # denetimi susturmak için exe'ye gömmek de doğru değil.
+    # Kayıt olarak requirements.txt'in alt bağımlılık notunda duruyorlar.
 )
 
 ## @brief Denetimi atlamak için ayarlanabilecek ortam değişkeni.

@@ -5,7 +5,7 @@ Wavenumber'ın ticari "viz sch 1.0" ürününün açık-kaynak alternatifi.
 [altium_monkey](https://github.com/wavenumber-eng/altium_monkey) kütüphanesi
 (Eli Hughes / Wavenumber) üzerine kurulu.
 
-**Mevcut sürüm**: `APP_VERSION` sabiti **`viewer.py`'de** tutulur (şu an 2.27.6);
+**Mevcut sürüm**: `APP_VERSION` sabiti **`viewer.py`'de** tutulur (şu an 2.27.7);
 `gui.py` oradan import eder (v2.9.29'da taşındı — HTML çıktıları da sürümü
 gösterebilsin diye, tek kaynak). Yeni özellik/düzeltme ekleyince bu sabiti
 güncelle (semver: major.minor.patch). Sürüm pencere başlığında, alt durum
@@ -220,10 +220,19 @@ kaynak olarak tutulur (dist adı, import adı, minimum sürüm, ne için gerekti
 doğrudan mı/alt bağımlılık mı). `requirements.txt` bu tabloyla eşleşir
 (`py -3.12 deps.py --requirements` ile karşılaştırılabilir).
 
-- **Doğrudan**: PyQt5, altium-monkey (>= **2026.8.11**, bkz. sürüm notu),
+- **Doğrudan**: PyQt5, altium-monkey (>= **2026.8.21**, bkz. sürüm notu),
   openpyxl, cascadio, trimesh, numpy
 - **Alt bağımlılık** (olmazsa yine çöker): PyQt5-Qt5, PyQt5-sip, freetype-py,
   lxml, lz4, pillow, uharfbuzz, wn-geometer, et-xmlfile
+- **pip kuruyor ama tabloda BİLEREK YOK**: msgspec, jsonschema-rs — 2026.8.21
+  ile geldiler, altium_monkey'in `pcb_manufacturing` (IPC-2581) alt paketine
+  ait. Kod yolumuz o paketi hiç import etmiyor (ölçüldü: ikisi de
+  `sys.meta_path`'ten bloklanınca kullandığımız 10 modül sorunsuz açılıyor),
+  yani "olmazsa çöker" ölçütünü karşılamıyorlar. **Tabloya eklemek frozen
+  exe'yi açılmaz yapıyor**: `pcb_manufacturing` kütüphanenin BİLDİRMEDİĞİ
+  `shapely`'yi de istediğinden PyInstaller alt modülleri toplayamıyor ve bu
+  ikisi exe'ye hiç girmiyor → denetim "KURULU DEĞİL" deyip `SystemExit(1)`
+  veriyor (v2.27.7'de bir kez yaşandı). Gerekçe `deps.py`'de tablo sonunda.
 
 **Kapı nerede kurulu**: `gui.py` HİÇBİR üçüncü-parti import'tan ÖNCE (PyQt5
 dahil) `deps.enforce(gui=True)` çağırır → eksik varsa konsola + hata diyaloğuna
@@ -258,9 +267,11 @@ Listeyi görmek için: `py -3.12 deps.py` (tablo + eksik varsa çıkış kodu 1)
 ```bash
 # Bağımlılıklar (Python 3.12) — requirements.txt tüm listeyi içerir
 # (PyQt5, altium-monkey, openpyxl + 3D için zorunlu cascadio/trimesh/numpy)
-# LINUX: wn-geometer (altium-monkey bağımlılığı) manylinux_2_39 wheel'i
-# dağıttığından glibc >= 2.39 gerekir (Ubuntu 24.04+); eski dağıtımda
-# pip ResolutionImpossible verir. Python >= 3.10 şart.
+# LINUX: wn-geometer (altium-monkey bağımlılığı) manylinux_2_35 wheel'i
+# dağıttığından glibc >= 2.35 gerekir (Ubuntu 22.04+); eski dağıtımda
+# pip ResolutionImpossible verir. Python >= 3.12 şart (am: >=3.12,<3.15).
+# (v2.27.7 öncesi eşik glibc 2.39 / Ubuntu 24.04+ idi — altium-monkey
+#  2026.8.21 yükseltmesi wn-geometer'ı 2.35'e indirdi.)
 py -3.12 -m pip install -r requirements.txt
 
 # Çalıştır
@@ -697,6 +708,79 @@ mesajına bak.
   bu API olmayabilir (graceful fallback var, "veri yok" der).
 
 ## Çözülen Sorunlar (tarihçe)
+
+- **altium_monkey 2026.8.11.post1 → 2026.8.21 yükseltmesi (v2.27.7, kullanıcı
+  sorusu: "sürüm çıkmış, yenilik var mı, problem olabilir mi")**: Yükseltmeden
+  ÖNCE yeni sürüm scratchpad'e ayrı kurulup eski/yeni yan yana ölçüldü
+  (v2.19.1'deki yöntemin aynısı).
+  **API kırılması YOK**: kullandığımız 10 modülün public yüzeyinde kaldırılan
+  sembol 0; değişen 4 imzanın hepsi *yazıcı* fonksiyonlara eklenen keyword-only
+  argüman (`encode_altium_record(..., *, utf8_sidecars=True)`) — biz yalnız
+  okuyoruz. Eklenen 39 sembol tamamen yeni (`AltiumPcbEmbeddedBoard`,
+  `ChannelRoomNamingStyle`, `resolve_pcb_unicode_field`).
+  **Bizim için kazanç**: (1) **PCB parametre Unicode'u** — `UNICODE__<ALAN>`
+  UTF-16 sideband'i artık düz alandan önce okunuyor → `°`/`±`/`µ` içeren
+  komponent parametrelerindeki mojibake gidiyor. (2) **Uzantısız sheet-symbol
+  referansı** (`Power` ↔ `Power.SchDoc`) çözülüyor — `_resolve_schdoc_paths`
+  fallback'imizin derleyici tarafındaki karşılığı. (3) **Linux eşiği İKİ LTS
+  geriye düştü**: `wn-geometer` wheel etiketi `manylinux_2_39` →
+  **`manylinux_2_35`**, yani Ubuntu 24.04+ değil **22.04+** yetiyor.
+  (4) **Üretim ~%30 hızlandı**: BRK-210 şematik HTML 61.5 → **41.6 s**, JSON
+  61.5 → **42.0 s** (çıktı boyutu 1.73 → 1.72 MB).
+  **Multichannel düzeltmeleri bizi ETKİLEMİYOR**: release notundaki
+  `$ChannelIndex`/`$ChannelAlpha` sıralaması ve kanal ad düzeltmeleri yalnız
+  **varsayılan olmayan `[Design]` proje ayarları** içindir; BRK-210 (3 kanallı
+  diffI2C, varsayılan ayar) JSON çıktısı **bit bit AYNI**.
+  **ASIL DEĞİŞİKLİK — SVG paint order Altium'a hizalandı, ama kanvasta
+  GÖRÜNMÜYOR**: Ölçüldü — her sayfada SVG **eleman kümesi ve metin içeriği
+  birebir aynı, yalnız SIRA değişti** (buna bağlı olarak `ClipRect` numaraları
+  da; `namespace_svg_ids` sayfa içinde tutarlı olduğundan etkilenmiyor). Somut
+  etki RS485-IO sayfasında: Blanket poligonu (`fill-opacity=0.49`) eskiden 45.
+  sıradaydı, artık **454.** — yani içindeki 119 yazının TAMAMININ üstünde. Ham
+  SVG rasterize edilse blanket içindeki her şey %49 beyazla solardı (en koyu
+  piksel 0 → 125; tarayıcı rasterizeriyle doğrulandı: kesitte 51 843 koyu
+  piksel → 0). **Ama v2.27.0'dan beri kanvasa çiziyoruz ve `dlPrep`/
+  `dlDrawSheet` sırayı belge sırasına göre DEĞİL stil kovasına göre kuruyor:
+  fills → strokes → paths → **texts en son**.** Blanket bir fill olduğundan
+  yazının hep altında kalıyor. Gerçek ölçüm (aynı sayfa, 2.4× zoom):
+  **1 425 000 pikselde 4 piksel** fark, en büyük kanal farkı 1.
+  **Regresyon kanıtı** (BRK-210 + Smart_MCU): JSON BRK-210 **bit bit AYNI**;
+  Smart_MCU'da 154 KB'de **1 karakter** (`µ` U+00B5 → `μ` U+03BC, bir komponent
+  açıklamasında — sideband'in yetkili değeri) · PCB geometrisi (19025 iz /
+  1153 pad / 557 via / 18 katman) ve `_extract_3d` (49 model / 274 yerleşim /
+  192 delik) **md5 AYNI** · kanvas render fitAll %0.23, MCU %0.026, RS485 @2.4×
+  %0.0003 — medyan kanal farkı **1–2/255**, yani antialiasing gürültüsü ·
+  metin katmanı **8/8 sayfa** aynı (span / clickable-net / comp-designator /
+  block-link sayıları) · birleşik görünüm sorunsuz üretildi (6.80 MB) ·
+  **0 JS hatası**.
+  **İKİ YENİ ALT BAĞIMLILIK — ve `deps.py`'ye EKLENMEMELERİ gerektiği**:
+  `msgspec==0.21.1` + `jsonschema-rs>=0.48.1,<0.49`, altium_monkey'in yeni
+  `pcb_manufacturing` (IPC-2581) alt paketi için. **Bizim kod yolumuz onlara
+  ihtiyaç duymuyor**: ikisi de `sys.meta_path`'ten bloklanınca kullandığımız
+  10 modül (`altium_prjpcb`, `altium_schdoc`, `altium_pcbdoc`, `altium_design`,
+  `altium_netlist_compilation`, …) sorunsuz import edildi. Önce refleksle
+  `DEPENDENCIES` tablosuna eklendiler ve **paketlenen exe AÇILMAZ oldu**:
+  PyInstaller `Failed to collect submodules for 'altium_monkey.pcb_manufacturing'
+  … No module named 'shapely'` uyarısı veriyor — alt paket, kütüphanenin
+  `Requires-Dist`'te BİLDİRMEDİĞİ `shapely`'yi de istiyor → import edilemiyor →
+  alt modülleri toplanamıyor → msgspec/jsonschema_rs exe'ye **hiç girmiyor**
+  (exe içinde geçiş sayısı ölçüldü: 0/0, `altium_monkey` 451, `geometer` 16).
+  Denetim de haklı olarak "KURULU DEĞİL" deyip `SystemExit(1)` veriyordu.
+  Kullanmadığımız paketi yalnız denetimi susturmak için exe'ye gömmek yanlış
+  olacağından ikisi de tablodan ÇIKARILDI; gerekçe `deps.py`'de tablo sonunda
+  yorum olarak, kayıt `requirements.txt`'in alt bağımlılık notunda duruyor.
+  **Ders**: `DEPENDENCIES` "pip ne kuruyorsa" listesi DEĞİL, "olmazsa çöker"
+  listesidir — yeni bir alt bağımlılık eklemeden önce onsuz gerçekten çöküyor
+  mu ölçülmeli ve exe yeniden paketlenip AÇILDIĞI görülmeli.
+  **exe yeniden paketlendi** (72.1 MB) — `wn-geometer` ve `altium_monkey`
+  ikilileri değişti.
+  **Test notu**: büyük SVG'leri (1 MB+) headless Edge'de rasterize ederken
+  `websocket-client` varsayılan timeout'u yetmiyor (`Page.captureScreenshot`
+  zaman aşımına düşüp "CDP koptu" gibi görünüyor) → `create_connection`
+  timeout'u 300 s yapılmalı. Ayrıca metin katmanı span sayısını sayfa sayfa
+  ölçerken sorgu `#sheet-<id> .tl` ile SINIRLANMALI: belgedeki tüm `.tl span`
+  sayılırsa `TL_MAX_SHEETS` (6) sınırı yüzünden ziyaret sırasına göre değişen
+  kümülatif bir sayı çıkıyor ve sahte "FARKLI" veriyor.
 
 - **Aynı hata sınıfı ikinci board'da SSR5'te sürüyordu — outline orakeli SİMETRİK
   gövdede kör (v2.27.6, kullanıcı bildirimi: "SSR5 komponenti 3d görünümü benzer

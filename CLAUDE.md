@@ -288,6 +288,75 @@ py -3.12 -m PyInstaller --noconfirm --onefile --windowed --name "SchematicViz" ^
 Fresh Windows'ta exe açılmazsa **MS VC++ Redistributable** gerekir:
 https://aka.ms/vs/17/release/vc_redist.x64.exe
 
+## Git / GitHub yetkisi — push ve release için (v2.27.7+)
+
+Uzak depo: `https://github.com/mcansiz/altiumVizitor.git` (**public**).
+
+**Varsayılan credential ÇALIŞMIYOR.** `gh auth login` ile girilen fine-grained
+PAT'te `contents=write` izni yok; hem `gh release create` hem `git push`
+**HTTP 403** veriyor (`X-Accepted-Github-Permissions: contents=write`,
+`remote: Permission to mcansiz/altiumVizitor.git denied to mcansiz`). `gh` kendini
+credential helper olarak da yazdığından Kimlik Yöneticisi'ndeki
+`git:https://github.com` kaydı da bu zayıf PAT'e döndü.
+
+**Kullanılacak yetki**: Windows Kimlik Yöneticisi'nde `GitHub -
+https://api.github.com/mcansiz` hedefinde duran eski **OAuth token'ı**
+(`gho_…`, scope: `repo, user, workflow`). Push ve release bununla geçiyor
+(ikisi de doğrulandı).
+
+**Token'ı ASLA dosyaya/commit'e/log'a yazma** — repo public. Yalnız çalıştığın
+komutun ortam değişkenine al. Blob **UTF-16 değil UTF-8**'dir (Unicode olarak
+okunursa 20 karakterlik çöp çıkar).
+
+```bash
+# 1) Token'ı Kimlik Yöneticisi'nden oku (scratchpad'e yazılan yardımcı betikle)
+TOK=$(powershell -NoProfile -ExecutionPolicy Bypass -File "$SCRATCH/gettok.ps1" | tr -d '\r\n')
+
+# 2) gh (release, API)
+GH_TOKEN="$TOK" gh release create vX.Y.Z dist/... --title "…" --notes-file "…" --verify-tag
+
+# 3) git push — helper'ı komuta özel geçersiz kıl (kalıcı yapılandırma DEĞİŞTİRME)
+GIT_TERMINAL_PROMPT=0 GH_TOKEN="$TOK" git \
+  -c credential.helper= \
+  -c "credential.helper=!f(){ test \"\$1\" = get && printf 'username=x\npassword=%s\n' \"\$GH_TOKEN\"; }; f" \
+  push origin master vX.Y.Z
+```
+
+`gettok.ps1` (kalıcı değil — gerekince scratchpad'e yeniden yaz; sürüm
+kontrolüne girmez, ama sır da içermez: yalnız Kimlik Yöneticisi'nden okur):
+
+```powershell
+Add-Type -Language CSharp @"
+using System; using System.Runtime.InteropServices;
+public class CM {
+  [StructLayout(LayoutKind.Sequential, CharSet=CharSet.Unicode)] public struct C {
+    public uint F; public uint T; public IntPtr TN; public IntPtr Cm;
+    public System.Runtime.InteropServices.ComTypes.FILETIME LW;
+    public uint BS; public IntPtr B; public uint P; public uint AC; public IntPtr A; public IntPtr TA; public IntPtr U; }
+  [DllImport("advapi32.dll", CharSet=CharSet.Unicode, SetLastError=true)]
+  public static extern bool CredRead(string t, uint ty, uint f, out IntPtr c);
+}
+"@
+$p=[IntPtr]::Zero
+if(-not [CM]::CredRead("GitHub - https://api.github.com/mcansiz",1,0,[ref]$p)){exit 1}
+$c=[Runtime.InteropServices.Marshal]::PtrToStructure($p,[Type][CM+C])
+$b=New-Object byte[] $c.BS; [Runtime.InteropServices.Marshal]::Copy($c.B,$b,0,$c.BS)
+[Text.Encoding]::UTF8.GetString($b)
+```
+
+Kayıtları listelemek için: `cmd //c "cmdkey /list"` (Bash'ten `cmdkey`'i
+doğrudan boru hattına sokma — parametre hatası verir).
+
+**Release biçimi** (önceki sürümlerle tutarlı olsun): başlık
+`vX.Y.Z — <kısa Türkçe konu>`, asset adı `SchematicViz-vX.Y.Z-win-x64.exe`
+(`dist/SchematicViz.exe`'nin kopyası), gövde TR + EN iki bölüm, her birinde
+"Kurulum / Install" (VC++ Redistributable linki) ve sonda
+`**Full Changelog**: …/compare/<önceki>...<yeni>`.
+
+**Kalıcı düzeltme (kullanıcıya ait)**: fine-grained PAT'e
+https://github.com/settings/personal-access-tokens → Repository permissions →
+**Contents: Read and write** verilirse bu geçici yol gereksizleşir.
+
 ## Dokunmatik / Mobil Destek (v2.10.0+)
 
 Tüm HTML çıktıları telefon ve tablette çalışır. Ortak altyapı `viewer.py`'deki

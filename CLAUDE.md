@@ -5,7 +5,7 @@ Wavenumber'ın ticari "viz sch 1.0" ürününün açık-kaynak alternatifi.
 [altium_monkey](https://github.com/wavenumber-eng/altium_monkey) kütüphanesi
 (Eli Hughes / Wavenumber) üzerine kurulu.
 
-**Mevcut sürüm**: `APP_VERSION` sabiti **`viewer.py`'de** tutulur (şu an 2.27.7);
+**Mevcut sürüm**: `APP_VERSION` sabiti **`viewer.py`'de** tutulur (şu an 2.28.0);
 `gui.py` oradan import eder (v2.9.29'da taşındı — HTML çıktıları da sürümü
 gösterebilsin diye, tek kaynak). Yeni özellik/düzeltme ekleyince bu sabiti
 güncelle (semver: major.minor.patch). Sürüm pencere başlığında, alt durum
@@ -356,6 +356,54 @@ doğrudan boru hattına sokma — parametre hatası verir).
 **Kalıcı düzeltme (kullanıcıya ait)**: fine-grained PAT'e
 https://github.com/settings/personal-access-tokens → Repository permissions →
 **Contents: Read and write** verilirse bu geçici yol gereksizleşir.
+
+## Antet / firma logosu gizleme (v2.28.0+)
+
+GUI'de **"Antet / firma logosunu gizle"** onay kutusu (Görüntüleyiciler
+grubu; seçim `QSettings`'te `hideTitleBlock` anahtarıyla kalıcı,
+**varsayılan KAPALI** — mevcut davranış korunur). İşaretliyken şematik
+sayfaların alt bandındaki antet (firma logosu, gizlilik metni,
+DWN/CHK/ENG/REV/SHEET tablosu) üretilen HTML'e girmez. Yalnız şematik render
+eden modları ilgilendirir: `generate_viewer` ve `generate_combined_viewer`
+(`hide_title_block=` parametresi → `_collect_data`).
+
+**Antet İKİ ayrı yerden gelir**, ikisi de `_hide_title_block(schdoc)` ile
+`to_svg()`'den **ÖNCE** kapatılır:
+
+1. **Özel şablon** (`.SchDot`) — Altium şablonun grafiklerini SchDoc'a
+   **şablona ait alt kayıt** olarak KOPYALAR; şablon YOLU yalnız referans
+   olarak durur (`sheet.template_filename`, ör.
+   `C:\Users\Public\Documents\Altium\AD19\Templates\BARKO A3_R3.SchDot`).
+   Yani şablon dosyası elde olmasa da antet SchDoc'un içindedir.
+   Anahtar: `sheet.show_template_graphics`.
+2. **Standart Altium anteti** — sayfa kaydının kendisi çizer
+   (Title / Size / Number / Revision / Date / File / Drawn By / Sheet of).
+   Anahtar: `sheet.title_block_on`.
+
+Bunlar Altium'un kendi *Show Template Graphics* / *Title Block* seçeneklerinin
+karşılığıdır: **sayfa boyutu (viewBox) ve şema içeriğinin koordinatları
+DEĞİŞMEZ**, yalnız antet çizilmez — bu yüzden `SCH_BOXES` (komponent vurgu
+kutuları), `SHEET_TREE`, net/komponent verisi ve cross-probe hiç etkilenmez.
+
+**ÜÇ İNCE NOKTA**:
+1. **Görseller körüne silinemez.** Sayfada şablona ait OLMAYAN görsel de
+   bulunabilir (Smart_MCU'da bir kristalin datasheet fotoğrafı, BRK-210'un
+   PWR_IN sayfasında bir görsel). Ayrımı kütüphane yapıyor:
+   `show_template_graphics=False` iken yalnız şablona ait görseller render'dan
+   düşer. Ölçüldü (BRK-210): 9 görsel yerleşimi → **1** (8 logo düştü,
+   kullanıcı görseli kaldı), proje geneli görsel tablosu 2 → 1.
+2. **Kapatma render'dan ÖNCE olmalı**: `to_svg()` sayfanın o anki ayarlarını
+   okur. `_collect_data`'da `AltiumSchDoc(...)` ile `to_svg()` arasına konur;
+   aynı `schdoc` nesnesi netlist derlemesinde de kullanıldığı için **bağlantı
+   verisi etkilenmez** (antet elektriksel değil, grafiktir).
+3. **Standart antet yan kazancı**: o antet `File:` alanında **mutlak yerel
+   dosya yolunu** basıyor (`D:\pythonProjeler\...\MCU.SchDoc`). Gizleme bu yol
+   sızıntısını da kaldırır.
+
+**Ölçülen etki** (BRK-210, 8 sayfa): ham SVG toplamı 5.56 → 2.85 MB (%48.8
+az), üretilen şematik HTML 1.64 → 1.43 MB, sayfa yazısı 3082 → 2850, birleşik
+görünüm 6.80 → 6.28 MB. Üretim log'unda `· Antet / firma logosu gizlendi
+(N sayfa).` satırı görünür; hiç antet yoksa "bulunamadı" der (sessiz kalmaz).
 
 ## Dokunmatik / Mobil Destek (v2.10.0+)
 
@@ -777,6 +825,39 @@ mesajına bak.
   bu API olmayabilir (graceful fallback var, "veri yok" der).
 
 ## Çözülen Sorunlar (tarihçe)
+
+- **Şematikteki firma anteti / logosu çıktıya giriyordu, kapatma yolu yoktu
+  (v2.28.0, kullanıcı isteği: "şematiğin sağ alt tarafında firma bilgileri
+  oluyor, bunları vizitöre koymak istemiyorum")**: Antetin nerede saklandığı
+  ölçümle bulundu — şablon dosyasının YOLU yalnız referanstır
+  (`sheet.template_filename`), grafiklerin KENDİSİ SchDoc'a şablona ait alt
+  kayıt olarak kopyalanmıştır: BRK-210'un her sayfasında **42 şablon çocuğu**
+  (25 `AltiumSchLabel` + 15 `AltiumSchPolyline` + 1 `AltiumSchTextFrame`
+  gizlilik metni + 1 `AltiumSchImage` logo). Polyline'ların hepsi y=100..900
+  mil bandında, yani sayfanın ALT ŞERİDİ (sayfa yüksekliği 11100 mil) —
+  kullanıcının tarif ettiği yer. İkinci bir kaynak daha var: şablon
+  kullanmayan projelerde (Smart_MCU) antet **standart Altium anteti**dir ve
+  sayfa kaydının kendisi çizer.
+  **Çözüm kütüphanenin kendi anahtarları**: `sheet.show_template_graphics` +
+  `sheet.title_block_on` → `_hide_title_block()` ikisini de `to_svg()`'den
+  önce kapatır (bkz. "Antet / firma logosu gizleme" bölümü).
+  **Reddedilen iki yaklaşım**: (a) üretilen SVG / draw-list üzerinde metin
+  filtresi — hangi yazının antete ait olduğunu TAHMİN etmek gerekirdi ve
+  çalışma-anı verisiyle (net adı, designator, komponent değeri) çakışırdı;
+  (b) tüm `<image>`'ları atmak — sayfada şablona ait OLMAYAN kullanıcı
+  görselleri de var (Smart_MCU'da bir kristalin datasheet fotoğrafı) ve onlar
+  kaybolurdu. Kütüphanenin sahiplik (ownership) ayrımı ikisini de gereksiz
+  kılıyor.
+  **Doğrulama**: offscreen Qt **15/15** (onay kutusu, varsayılan KAPALI,
+  TR→EN→TR gidiş-dönüşü, eksik çeviri yok, `QSettings` kalıcılığı, thread'e
+  doğru değerin geçmesi) · BRK-210 şematik çıktısında antet metinleri
+  (BARKO / APPROVAL / PROSES NO / BA-SB-P-014_R02 / DWN / REV.) **düştü**,
+  `SCH_BOXES` ve `SHEET_TREE` **birebir aynı**, sayfa viewBox'ları
+  **değişmedi**, görsel 9 → 1 (kullanıcı görseli KORUNDU) · Smart_MCU'da
+  standart antet yolu da çalışıyor (Title/Size/Number/Revision/Date/File/
+  Drawn By + **mutlak dosya yolu** düştü; kullanıcı görseli 1 → 1 kaldı) ·
+  birleşik görünümün iç şematik iframe'i de antetsiz, PCB ve 3D panelleri
+  sağlam · `tools/check_html_i18n.py` 236/236, ölü anahtar 0.
 
 - **altium_monkey 2026.8.11.post1 → 2026.8.21 yükseltmesi (v2.27.7, kullanıcı
   sorusu: "sürüm çıkmış, yenilik var mı, problem olabilir mi")**: Yükseltmeden

@@ -301,6 +301,16 @@
              </widget>
             </item>
             <item>
+             <widget class="QCheckBox" name="hideTitleBlockChk">
+              <property name="toolTip">
+               <string>Sayfa antetini (firma logosu, gizlilik metni, DWN/CHK/REV/SHEET tablosu) üretilen HTML'e koyma. Altium'un Show Template Graphics / Title Block seçeneğini kapatmakla aynı şey: sayfa boyutu ve şema içeriği değişmez, sayfaya elle konmuş görseller (datasheet fotoğrafı vb.) korunur.</string>
+              </property>
+              <property name="text">
+               <string>Antet / firma logosunu gizle</string>
+              </property>
+             </widget>
+            </item>
+            <item>
              <widget class="QGroupBox" name="colorsGroup">
               <property name="title">
                <string>Şematik bağlantı renkleri</string>

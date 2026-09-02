@@ -126,6 +126,17 @@ _EN = {
     "Şematik bağlantı renkleri": "Schematic connection colors",
     "Sayfalar arası:": "Between sheets:",
     "Sayfa içi:": "Within sheet:",
+    "Antet / firma logosunu gizle": "Hide title block / company logo",
+    "Sayfa antetini (firma logosu, gizlilik metni, DWN/CHK/REV/SHEET tablosu) "
+    "üretilen HTML'e koyma. Altium'un Show Template Graphics / Title Block "
+    "seçeneğini kapatmakla aynı şey: sayfa boyutu ve şema içeriği "
+    "değişmez, sayfaya elle konmuş görseller (datasheet fotoğrafı vb.) "
+    "korunur.":
+        "Keep the sheet title block (company logo, confidentiality note, "
+        "DWN/CHK/REV/SHEET table) out of the generated HTML. Same as turning off "
+        "Show Template Graphics / Title Block in Altium: sheet size and schematic "
+        "content are unchanged, and images placed by hand on the sheet "
+        "(datasheet photos etc.) are kept.",
 
     # --- Menü çubuğu ------------------------------------------------------
     "&Dosya": "&File",
@@ -262,6 +273,10 @@ _EN_LOG = {
     # --- genel akış / özet ------------------------------------------------
     "Proje: {a0}": "Project: {a0}",
     "{a0} şema bulundu.\n": "{a0} schematic(s) found.\n",
+    "\n· Antet / firma logosu gizlendi ({a0} sayfa).":
+        "\n· Title block / company logo hidden ({a0} sheet(s)).",
+    "\n· Antet gizleme istendi ama sayfalarda antet bulunamadı.":
+        "\n· Title block hiding was requested but no title block was found.",
     "Pass 1: SchDoc yükleme + SVG render...":
         "Pass 1: loading SchDoc + rendering SVG...",
     "\nPass 2: Pozisyon çıkarımı (block pinleri dahil)...":

@@ -108,7 +108,7 @@ class GeneratorThread(QtCore.QThread):
     def __init__(self, mode, project_path, output_path,
                  inter_color="#4ec9b0", intra_color="#ff9800",
                  main_designators=None, min_pins=4, exclude_prefixes=None,
-                 parent=None):
+                 hide_title_block=False, parent=None):
         """@brief __init__()
 
         @param mode Üretim modu (html/json/bom/pnp/icmap/mcupin/pcbgeo/combined)
@@ -119,6 +119,7 @@ class GeneratorThread(QtCore.QThread):
         @param main_designators Ana işlemci designator listesi
         @param min_pins Minimum pin sayısı eşiği
         @param exclude_prefixes IC haritasından hariç tutulacak designator önekleri ("J,P,TP")
+        @param hide_title_block Şematik sayfa anteti / firma logosu gizlensin mi
         @param parent
         """
         super().__init__(parent)
@@ -130,6 +131,7 @@ class GeneratorThread(QtCore.QThread):
         self.main_designators = main_designators
         self.min_pins = min_pins
         self.exclude_prefixes = exclude_prefixes
+        self.hide_title_block = hide_title_block
 
     def run(self):
         # İlerleme callback'i: üretici fonksiyonlara verilir, sinyale çevirir.
@@ -215,6 +217,7 @@ class GeneratorThread(QtCore.QThread):
                     intra_sheet_color=self.intra_color,
                     log=lambda msg: self.log_signal.emit(msg),
                     progress=emit_progress,
+                    hide_title_block=self.hide_title_block,
                 )
                 if not ok:
                     self.done_signal.emit(
@@ -228,6 +231,7 @@ class GeneratorThread(QtCore.QThread):
                     intra_sheet_color=self.intra_color,
                     log=lambda msg: self.log_signal.emit(msg),
                     progress=emit_progress,
+                    hide_title_block=self.hide_title_block,
                 )
             # Çıktı yolunu mod'a göre düzelt (CSV/XLSX uzantısı)
             final_out = self.output_path
@@ -401,6 +405,13 @@ class MainWindow(QtWidgets.QMainWindow):
 
         # Üst menü çubuğu (butonlarla aynı eylemler + klavye kısayolları + dil)
         self._build_menu()
+
+        # Antet/logo gizleme tercihi kalıcıdır (üretimden üretime taşınsın).
+        chk = getattr(self, "hideTitleBlockChk", None)
+        if chk is not None:
+            chk.setChecked(self.settings.value("hideTitleBlock", False, type=bool))
+            chk.toggled.connect(
+                lambda on: self.settings.setValue("hideTitleBlock", bool(on)))
 
         # Kayıtlı dili uygula (yoksa kaynak dil: Türkçe → mevcut davranış)
         saved_lang = self.settings.value("language", i18n.SOURCE_LANGUAGE, type=str)
@@ -1018,6 +1029,11 @@ class MainWindow(QtWidgets.QMainWindow):
         excl_edit = getattr(self, "excludePrefixEdit", None)
         exclude_prefixes = excl_edit.text().strip() if excl_edit else ""
 
+        # Şematik anteti / firma logosu üretilen HTML'e konsun mu (yalnız
+        # Şematik render eden modları ilgilendirir: html / combined).
+        htb_chk = getattr(self, "hideTitleBlockChk", None)
+        hide_title_block = bool(htb_chk.isChecked()) if htb_chk else False
+
         # Çıktı uzantısını mod'a göre otomatik ayarla
         if mode == "json":
             output_path = str(Path(output_path).with_suffix(".json"))
@@ -1071,6 +1087,7 @@ class MainWindow(QtWidgets.QMainWindow):
             inter_color=self.inter_color, intra_color=self.intra_color,
             main_designators=main_desigs or None, min_pins=min_pins,
             exclude_prefixes=exclude_prefixes or None,
+            hide_title_block=hide_title_block,
         )
         self.worker.log_signal.connect(self.log)
         self.worker.progress_signal.connect(self.on_progress)

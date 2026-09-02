@@ -91,7 +91,7 @@ from altium_monkey.altium_schdoc import AltiumSchDoc
 
 # Uygulama sürümü — tek kaynak burası; gui.py buradan import eder.
 # HTML çıktılarında sağ üst köşedeki rozette görünür (build saati yerine).
-APP_VERSION = "2.27.7"
+APP_VERSION = "2.28.0"
 
 # Önerilen minimum altium_monkey sürümü. Bu sürümden öncesinde:
 #   · 2026.6.21 öncesi — STM32 gibi IC'lerde dikey pin adları yatay çiziliyordu.
@@ -1354,7 +1354,42 @@ def _pick_pcbdoc(project_path, log):
     return (best, best_doc)
 
 
-def _collect_data(project_path: str, log, with_pcb=False, progress=None):
+def _hide_title_block(schdoc) -> bool:
+    """@brief Sayfanın antet/çerçeve grafiklerini render'dan düşürür.
+
+    @details Altium'da şematiğin alt bandındaki antet (firma logosu, gizlilik
+    metni, DWN/CHK/REV/SHEET etiketleri, tablo çizgileri) İKİ ayrı yerden
+    gelebilir:
+
+    1. **Özel şablon** (`.SchDot`) — grafikler SchDoc'a şablona ait ALT KAYIT
+       olarak kopyalanmıştır; anahtarı `sheet.show_template_graphics`.
+    2. **Standart Altium anteti** — sayfa kaydının kendisi çizer; anahtarı
+       `sheet.title_block_on`.
+
+    İkisi de kapatılır. Bu, Altium'un kendi "Show Template Graphics" /
+    "Title Block" seçeneklerinin karşılığıdır: sayfa BOYUTU (viewBox) ve
+    şema içeriğinin koordinatları DEĞİŞMEZ, yalnız antet çizilmez. Sayfaya
+    kullanıcı tarafından konmuş görseller (ör. datasheet fotoğrafı) şablona
+    ait olmadığından KORUNUR.
+
+    @param schdoc AltiumSchDoc örneği
+    @return Sayfada gizlenecek antet var mıydı (bool)
+    """
+    sheet = getattr(schdoc, "sheet", None)
+    if sheet is None:
+        return False
+    hidden = False
+    if getattr(sheet, "show_template_graphics", False):
+        sheet.show_template_graphics = False
+        hidden = True
+    if getattr(sheet, "title_block_on", False):
+        sheet.title_block_on = False
+        hidden = True
+    return hidden
+
+
+def _collect_data(project_path: str, log, with_pcb=False, progress=None,
+                  hide_title_block=False):
     """@brief Projeyi yükle, tüm sayfa/net/komponent verilerini topla.
     
     Hem generate_viewer hem generate_json bunu kullanır.
@@ -1366,6 +1401,8 @@ def _collect_data(project_path: str, log, with_pcb=False, progress=None):
     @param log Log mesajı callback'i (str alır)
     @param with_pcb PCB dahil mi (bool)
     @param progress İlerleme callback'i (yüzde:int, etiket:str)
+    @param hide_title_block Antet/firma logosu render edilmesin mi (bkz.
+                            _hide_title_block)
     @return Üretilen sonuç.
     """
     patch_altium_text_decoding()   # cp1252'ye sığmayan metin sayfayı düşürmesin
@@ -1380,6 +1417,7 @@ def _collect_data(project_path: str, log, with_pcb=False, progress=None):
     sheets_raw = []
     components = []
     all_net_names = set()
+    n_title_hidden = 0   # antet gizlenen sayfa sayısı (log özeti için)
     loaded_schdocs = []  # netlist derlemesi için SchDoc objeleri
 
     # Sheet adı → id eşleştirmesi (block hedeflerini çözmek için)
@@ -1399,6 +1437,10 @@ def _collect_data(project_path: str, log, with_pcb=False, progress=None):
         try:
             schdoc = AltiumSchDoc(sch_path)
             loaded_schdocs.append(schdoc)
+            # Antet/logo gizleme render'dan ÖNCE uygulanmalı (to_svg sayfanın
+            # o anki ayarlarını okur). Netlist/komponent verisi etkilenmez.
+            if hide_title_block and _hide_title_block(schdoc):
+                n_title_hidden += 1
             try:
                 svg = schdoc.to_svg()
             except TypeError:
@@ -1487,6 +1529,12 @@ def _collect_data(project_path: str, log, with_pcb=False, progress=None):
 
         except Exception as e:
             log(tr('  ERR {a0}: {a1}').format(a0=sheet_name, a1=e))
+
+    if hide_title_block:
+        if n_title_hidden:
+            log(tr('\n· Antet / firma logosu gizlendi ({a0} sayfa).').format(a0=n_title_hidden))
+        else:
+            log(tr('\n· Antet gizleme istendi ama sayfalarda antet bulunamadı.'))
 
     log(tr('\nToplam {a0} farklı net adı toplandı (tüm sayfalar).').format(a0=len(all_net_names)))
 
@@ -3301,6 +3349,7 @@ def generate_viewer(
     intra_sheet_color: str = "#ff9800",
     log: Callable[[str], None] = print,
     progress: Callable[[int, str], None] = None,
+    hide_title_block: bool = False,
 ):
     """@brief Tam interaktif HTML viewer üret (gömülü SVG'lerle, büyük dosya).
     
@@ -3310,12 +3359,15 @@ def generate_viewer(
     @param intra_sheet_color Sayfa içi bağlantı rengi (hex)
     @param log Log mesajı callback'i (str alır)
     @param progress İlerleme callback'i (yüzde:int, etiket:str)
+    @param hide_title_block Sayfa anteti / firma logosu (özel şablon grafikleri
+                            + standart antet) çizilmesin mi
     """
     prog = progress or (lambda percent, label: None)
     prog(2, tr('Şematik verisi toplanıyor'))
     data = _collect_data(
         project_path, log, with_pcb=True,
         progress=lambda frac, label: prog(2 + int(frac * 88), label),
+        hide_title_block=hide_title_block,
     )
     prog(92, tr('HTML oluşturuluyor'))
     timestamp = datetime.datetime.now().strftime("%H:%M:%S")
@@ -3340,6 +3392,7 @@ def generate_combined_viewer(
     intra_sheet_color: str = "#ff9800",
     log: Callable[[str], None] = print,
     progress: Callable[[int, str], None] = None,
+    hide_title_block: bool = False,
 ):
     """@brief Şematik + PCB tek HTML'de yan yana, çift yönlü cross-probe.
 
@@ -3361,6 +3414,8 @@ def generate_combined_viewer(
     @param intra_sheet_color Sayfa içi bağlantı rengi (hex)
     @param log Log mesajı callback'i (str alır)
     @param progress İlerleme callback'i (yüzde:int, etiket:str)
+    @param hide_title_block Sayfa anteti / firma logosu (özel şablon grafikleri
+                            + standart antet) çizilmesin mi
     @return Üretilen sonuç.
     """
     prog = progress or (lambda percent, label: None)
@@ -3385,6 +3440,7 @@ def generate_combined_viewer(
     data = _collect_data(
         project_path, log, with_pcb=True,
         progress=lambda frac, label: prog(2 + int(frac * 48), label),
+        hide_title_block=hide_title_block,
     )
     timestamp = datetime.datetime.now().strftime("%H:%M:%S")
 

@@ -91,7 +91,7 @@ from altium_monkey.altium_schdoc import AltiumSchDoc
 
 # Uygulama sürümü — tek kaynak burası; gui.py buradan import eder.
 # HTML çıktılarında sağ üst köşedeki rozette görünür (build saati yerine).
-APP_VERSION = "2.28.0"
+APP_VERSION = "2.29.0"
 
 # Önerilen minimum altium_monkey sürümü. Bu sürümden öncesinde:
 #   · 2026.6.21 öncesi — STM32 gibi IC'lerde dikey pin adları yatay çiziliyordu.
@@ -7301,9 +7301,9 @@ def build_html(sheets, net_list, components, timestamp,
     </label>
     <div class="toolbar-sep"></div>
     <button class="tool-btn" id="anno-note"
-            title="⟪Not ekle: butona bas, şemada istediğin yere tıkla ve DOĞRUDAN yaz (dışına tıkla = bitir, Enter = yeni satır). Sonradan: çift tık düzenle · sürükle taşı · seç + Del sil · A−/A+ yazı boyutu⟫">⟪Not⟫</button>
+            title="⟪Not ekle: butona bas, şemada istediğin yere tıkla ve DOĞRUDAN yaz (dışına tıkla = bitir, Enter = yeni satır). Sonradan: çift tık düzenle · sürükle taşı · seç + Del sil · A−/A+ yazı boyutu · Ctrl+C / Ctrl+V kopyala-yapıştır⟫">⟪Not⟫</button>
     <button class="tool-btn" id="anno-box"
-            title="⟪Kutu içine al: butona bas, sürükleyerek çerçeve çiz (Esc iptal). Sonradan: kenarına tıkla seç → sürükle taşı · köşe tutamaçlarıyla boyutlandır · Del sil · −/+ kenar kalınlığı⟫">⟪Kutu⟫</button>
+            title="⟪Kutu içine al: butona bas, sürükleyerek çerçeve çiz (Esc iptal). Sonradan: kenarına tıkla seç → sürükle taşı · köşe tutamaçlarıyla boyutlandır · Del sil · −/+ kenar kalınlığı · Ctrl+C / Ctrl+V kopyala-yapıştır⟫">⟪Kutu⟫</button>
     <button class="tool-btn" id="anno-save"
             title="⟪Not ve kutuları HTML dosyasının içine göm ve kaydet. Chromium'da AÇIK DOSYANIN ÜSTÜNE yazabilir (ilk kayıtta dosyayı seç; aynı oturumda sonrakiler sessiz). Firefox'ta kopya indirir. Paylaşınca/başka bilgisayarda da görünür⟫">⟪Kaydet⟫</button>
     <button class="tool-btn" id="anno-exp"
@@ -7337,6 +7337,7 @@ def build_html(sheets, net_list, components, timestamp,
       <tr><td><kbd>0</kbd></td><td>⟪Görünümü sıfırla⟫</td></tr>
       <tr><td><kbd>F</kbd></td><td>⟪Son sayfaya fit zoom⟫</td></tr>
       <tr><td><kbd>+</kbd> / <kbd>-</kbd></td><td>Zoom in / out</td></tr>
+      <tr><td><kbd>Ctrl</kbd> + <kbd>C</kbd> / <kbd>V</kbd></td><td>⟪Seçili notu / kutuyu kopyala · fare konumuna yapıştır⟫</td></tr>
       <tr><td><kbd>?</kbd></td><td>⟪Bu pencereyi aç / kapat⟫</td></tr>
     </table>
     <h3>⟪Şematik Hiyerarşi⟫</h3>
@@ -9033,6 +9034,25 @@ document.addEventListener('keydown', e => {{
     if (e.key === 'ArrowLeft') {{ e.preventDefault(); navGo(-1); return; }}
     if (e.key === 'ArrowRight') {{ e.preventDefault(); navGo(1); return; }}
   }}
+  // Not/kutu kopyala-yapıştır. Kopyalamada tarayıcının kendi kopyalaması
+  // BASTIRILIR (preventDefault) — ama yalnız şemadan METİN SEÇİLMEMİŞKEN:
+  // seçili metin varsa Ctrl+C onu kopyalamayı sürdürür (PDF gibi).
+  // Yapıştırmada preventDefault YOKTUR: tarayıcının 'paste' olayı pano
+  // içeriğini izin istemeden verdiğinden asıl işi o handler yapar.
+  if ((e.ctrlKey || e.metaKey) && !e.altKey && !annoInEditable()) {{
+    const ck = (e.key || '').toLowerCase();
+    if (ck === 'c') {{
+      if (annoSel != null && !annoTextSelected()) {{
+        e.preventDefault(); annoCopySel(); return;
+      }}
+      annoClip = null;      // kullanıcı BAŞKA bir şey kopyaladı → pano bayatlamasın
+    }} else if (ck === 'v') {{
+      annoPasteSeen = false;
+      setTimeout(() => {{   // 'paste' olayı hiç gelmediyse sayfa içi panoya düş
+        if (!annoPasteSeen && annoClip) annoPasteItems(annoClip);
+      }}, 150);
+    }}
+  }}
   // Not/kutu aracı aktifken Esc yalnız araçtan çıkar; değilse önce seçimi bırakır
   if (e.key === 'Escape' && (annoTool || annoDrag)) {{ setAnnoTool(null); return; }}
   if (e.key === 'Escape' && annoSel != null) {{ annoSetSel(null); return; }}
@@ -9201,8 +9221,8 @@ function annoRender() {{
     g.setAttribute('data-id', String(a.id));
     const tip = document.createElementNS(ANNO_NS, 'title');
     tip.textContent = a.k === 'note'
-      ? '⟪Sürükle: taşı · Çift tık: düzenle · Seç + Del: sil⟫'
-      : '⟪Kenardan sürükle: taşı · Köşe tutamacı: boyutlandır · Del: sil⟫';
+      ? '⟪Sürükle: taşı · Çift tık: düzenle · Seç + Del: sil · Ctrl+C kopyala⟫'
+      : '⟪Kenardan sürükle: taşı · Köşe tutamacı: boyutlandır · Del: sil · Ctrl+C kopyala⟫';
     g.appendChild(tip);
     if (a.k === 'box') {{
       const r = annoRectEl(a.x, a.y, a.w, a.h);
@@ -9431,8 +9451,10 @@ window.addEventListener('mouseup', () => {{
   // Ekranda >6px sürüklendiyse gerçek kutu (kazara tık değil)
   if (b.w * scale > 6 && b.h * scale > 6) {{
     const nid = annoId();
+    // Yeni kutu EN İNCE kenarla gelir (kullanıcı isteği); mini bardaki
+    // − / + ile 0.5–8 arasında ayarlanır, eski kayıtlar 1.5 varsayılanını korur.
     annotations.push({{ k: 'box', id: nid, x: b.x, y: b.y,
-                        w: b.w, h: b.h, sw: 1.5 }});
+                        w: b.w, h: b.h, sw: 0.5 }});
     annoStore();
     annoSel = nid;   // yeni kutu seçili gelsin (hemen taşı/boyutlandır/sil)
     annoRender();
@@ -9583,6 +9605,91 @@ document.getElementById('anno-file').onchange = e => {{
   rd.readAsText(f);
   e.target.value = '';
 }};
+
+// === Not / kutu kopyala-yapıştır (Ctrl+C / Ctrl+V) =======================
+// Kopyalanan öğe İKİ yerde tutulur: sayfa içi pano (annoClip) ve sistem
+// panosuna yazılan JSON. Sistem panosu sayesinde başka sekmedeki / başka
+// projedeki viewer'a da yapıştırılabilir; yazma izin verilmezse (eski tarayıcı,
+// izin reddi) sayfa içi pano devreye girer, yani aynı sayfada her koşulda
+// çalışır. Yapıştırma metni annoParseImport ile çözülür → panoya kopyalanmış
+// bir _notlar.json içeriği de doğrudan yapıştırılabilir.
+let annoClip = null;        // sayfa içi pano: annotation dizisi (kopya)
+let annoPtrPos = null;      // son fare konumu (client px) — yapıştırma çapası
+let annoPasteSeen = false;  // 'paste' olayı geldi mi (fallback zamanlayıcısı)
+
+viewport.addEventListener('mousemove', e => {{
+  annoPtrPos = {{ x: e.clientX, y: e.clientY }};   // client px saklanır: pan/zoom
+}});                                              // sonrası çapa güncel kalsın
+viewport.addEventListener('mouseleave', () => {{ annoPtrPos = null; }});
+
+// Odak bir yazı alanındaysa pano olayları TARAYICIYA aittir (not editörü,
+// arama kutusu) — kopyala/yapıştır oraya çalışsın diye karışmayız.
+function annoInEditable() {{
+  const ae = document.activeElement;
+  return !!(ae && (ae.tagName === 'INPUT' || ae.tagName === 'TEXTAREA'
+                   || ae.tagName === 'SELECT' || ae.isContentEditable));
+}}
+function annoTextSelected() {{
+  try {{ return !!String(window.getSelection() || '').trim(); }}
+  catch (e) {{ return false; }}
+}}
+// Yapıştırma çapası: fare kanvasın üzerindeyse oraya, değilse görünüm merkezi
+function annoPasteAnchor() {{
+  const r = viewport.getBoundingClientRect();
+  const p = annoPtrPos;
+  const inside = p && p.x >= r.left && p.x <= r.right
+                   && p.y >= r.top && p.y <= r.bottom;
+  const cx = inside ? p.x - r.left : r.width / 2;
+  const cy = inside ? p.y - r.top : r.height / 2;
+  return {{ x: (cx - tx) / scale, y: (cy - ty) / scale }};
+}}
+function annoCopySel() {{
+  const a = annotations.find(x => x.id === annoSel);
+  if (!a) return false;
+  annoClip = [JSON.parse(JSON.stringify(a))];
+  const txt = JSON.stringify({{ schviz: 'anno', project: PROJECT_NAME,
+                                ts: Date.now(), items: annoClip }});
+  try {{
+    if (navigator.clipboard && navigator.clipboard.writeText)
+      navigator.clipboard.writeText(txt).catch(() => {{}});
+  }} catch (err) {{}}   // izin yok / eski tarayıcı: sayfa içi pano yeter
+  hierToast(a.k === 'note' ? '⟪Not kopyalandı — Ctrl+V ile yapıştır⟫'
+                           : '⟪Kutu kopyalandı — Ctrl+V ile yapıştır⟫');
+  return true;
+}}
+// Öğeleri kanvasa ekler: her birine YENİ kimlik verilir (çakışma olmasın),
+// grubun sol-üst köşesi çapaya taşınır → çoklu öğede birbirine göre konumlar
+// korunur, tek öğede kopya farenin altına düşer.
+function annoPasteItems(items) {{
+  if (!items || !items.length) return false;
+  const an = annoPasteAnchor();
+  let mx = Infinity, my = Infinity;
+  items.forEach(a => {{ mx = Math.min(mx, a.x); my = Math.min(my, a.y); }});
+  const dx = an.x - mx, dy = an.y - my;
+  let last = null;
+  items.forEach(a => {{
+    const c = JSON.parse(JSON.stringify(a));
+    c.id = annoId(); c.x = a.x + dx; c.y = a.y + dy;
+    annotations.push(c); last = c.id;
+  }});
+  annoSel = last;              // yapıştırılan hemen taşınabilsin/silinebilsin
+  annoStore(); annoRender();
+  hierToast(items.length + ' ⟪öğe yapıştırıldı⟫');
+  return true;
+}}
+// Sistem panosu: 'paste' olayı içeriği İZİN İSTEMEDEN verir (navigator.
+// clipboard.readText izin ister — kullanılmaz). İçerik bizim JSON'umuz
+// değilse (başka uygulamadan gelen metin) sayfa içi panoya düşülür.
+document.addEventListener('paste', e => {{
+  if (annoInEditable()) return;          // not editörü / arama kutusu
+  annoPasteSeen = true;
+  let txt = '';
+  try {{ txt = ((e.clipboardData || window.clipboardData).getData('text') || ''); }}
+  catch (err) {{}}
+  const items = txt ? annoParseImport(txt) : null;
+  if (items && items.length) {{ e.preventDefault(); annoPasteItems(items); }}
+  else if (annoClip) {{ e.preventDefault(); annoPasteItems(annoClip); }}
+}});
 
 // Kaydet: notlar gömülü HTML. Chromium'da File System Access API ile mevcut
 // dosyanın ÜSTÜNE yazılabilir (ilk kayıtta dosya seçtirir — tarayıcı güvenliği

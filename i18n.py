@@ -742,17 +742,17 @@ _EN_HTML = {
         "Type directly where you click / box in an area (Esc cancels)",
     "Not ekle: butona bas, şemada istediğin yere tıkla ve DOĞRUDAN yaz (dışına "
     "tıkla = bitir, Enter = yeni satır). Sonradan: çift tık düzenle · sürükle "
-    "taşı · seç + Del sil · A−/A+ yazı boyutu":
+    "taşı · seç + Del sil · A−/A+ yazı boyutu · Ctrl+C / Ctrl+V kopyala-yapıştır":
         "Add a note: press the button, click anywhere on the schematic and type "
         "DIRECTLY (click outside = finish, Enter = new line). Afterwards: "
         "double-click to edit · drag to move · select + Del to delete · A−/A+ "
-        "font size",
+        "font size · Ctrl+C / Ctrl+V copy-paste",
     "Kutu içine al: butona bas, sürükleyerek çerçeve çiz (Esc iptal). Sonradan: "
     "kenarına tıkla seç → sürükle taşı · köşe tutamaçlarıyla boyutlandır · Del "
-    "sil · −/+ kenar kalınlığı":
+    "sil · −/+ kenar kalınlığı · Ctrl+C / Ctrl+V kopyala-yapıştır":
         "Box in: press the button and drag to draw a frame (Esc cancels). "
         "Afterwards: click its edge to select → drag to move · resize with the "
-        "corner handles · Del to delete · −/+ border width",
+        "corner handles · Del to delete · −/+ border width · Ctrl+C / Ctrl+V copy-paste",
     "Not ve kutuları HTML dosyasının içine göm ve kaydet. Chromium'da AÇIK "
     "DOSYANIN ÜSTÜNE yazabilir (ilk kayıtta dosyayı seç; aynı oturumda "
     "sonrakiler sessiz). Firefox'ta kopya indirir. Paylaşınca/başka bilgisayarda "
@@ -768,10 +768,10 @@ _EN_HTML = {
     "Yerinde düzenle (boş bırak = sil)": "Edit in place (leave empty = delete)",
     "Seçiliyken Del · mini bar −/+": "Del while selected · mini bar −/+",
     "Sil · yazı boyutu / kenar kalınlığı": "Delete · font size / border width",
-    "Kenardan sürükle: taşı · Köşe tutamacı: boyutlandır · Del: sil":
-        "Drag the edge: move · Corner handle: resize · Del: delete",
-    "Sürükle: taşı · Çift tık: düzenle · Seç + Del: sil":
-        "Drag: move · Double-click: edit · Select + Del: delete",
+    "Kenardan sürükle: taşı · Köşe tutamacı: boyutlandır · Del: sil · Ctrl+C kopyala":
+        "Drag the edge: move · Corner handle: resize · Del: delete · Ctrl+C copy",
+    "Sürükle: taşı · Çift tık: düzenle · Seç + Del: sil · Ctrl+C kopyala":
+        "Drag: move · Double-click: edit · Select + Del: delete · Ctrl+C copy",
     "Parmakla da çalışır (yaz, çiz, taşı, boyutlandır)":
         "Works with touch too (type, draw, move, resize)",
     "Yazı boyutu / kenar kalınlığı artır": "Increase font size / border width",
@@ -869,6 +869,13 @@ _EN_HTML = {
     "Dosyada not bulunamadı": "No notes found in the file",
     "not yüklendi — kalıcı olması için Kaydet":
         "notes loaded — press Save to make it permanent",
+
+    # --- şematik: not/kutu kopyala-yapıştır (Ctrl+C / Ctrl+V) -------------
+    "Seçili notu / kutuyu kopyala · fare konumuna yapıştır":
+        "Copy the selected note / box · paste at the mouse position",
+    "Not kopyalandı — Ctrl+V ile yapıştır": "Note copied — paste with Ctrl+V",
+    "Kutu kopyalandı — Ctrl+V ile yapıştır": "Box copied — paste with Ctrl+V",
+    "öğe yapıştırıldı": "item(s) pasted",
 }
 
 _EN.update(_EN_HTML)

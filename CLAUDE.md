@@ -5,7 +5,7 @@ Wavenumber'ın ticari "viz sch 1.0" ürününün açık-kaynak alternatifi.
 [altium_monkey](https://github.com/wavenumber-eng/altium_monkey) kütüphanesi
 (Eli Hughes / Wavenumber) üzerine kurulu.
 
-**Mevcut sürüm**: `APP_VERSION` sabiti **`viewer.py`'de** tutulur (şu an 2.28.0);
+**Mevcut sürüm**: `APP_VERSION` sabiti **`viewer.py`'de** tutulur (şu an 2.29.0);
 `gui.py` oradan import eder (v2.9.29'da taşındı — HTML çıktıları da sürümü
 gösterebilsin diye, tek kaynak). Yeni özellik/düzeltme ekleyince bu sabiti
 güncelle (semver: major.minor.patch). Sürüm pencere başlığında, alt durum
@@ -470,7 +470,9 @@ Bir değişiklik yaptıktan sonra:
 - **Not / kutu (annotation) araçları** (v2.9.38+, v2.9.39'da Foxit tarzına
   revize): toolbar'da **Not / Kutu / Kaydet**. Not: butona bas + tıkladığın
   yerde DOĞRUDAN yaz (typewriter, prompt yok; Enter = yeni satır, dışına
-  tıkla = bitir, boş = eklenmez). Kutu: sürükleyerek ince (1.5) amber çerçeve.
+  tıkla = bitir, boş = eklenmez). Kutu: sürükleyerek **en ince**
+  (0.5, v2.29.0 kullanıcı isteği; mini bardan 0.5–8 arası ayarlanır, eski
+  kayıtlar 1.5 varsayılanını korur) amber çerçeve.
   Tüm öğeler tıkla-SEÇ → sürükle-taşı; kutular köşe tutamaçlarından
   boyutlandırılır; seçiliyken **Del** siler; seçimde mini bar (−/+/renk/×)
   notta yazı boyutu (4–48), kutuda kenar kalınlığı (0.5–8) ve RENK (not
@@ -482,6 +484,19 @@ Bir değişiklik yaptıktan sonra:
   kayıtta dosya seçtirir, handle oturumda saklanır → sonrakiler sessiz ✓;
   v2.9.41). Firefox/engelli ortamda `{proje}_notlu.html` kopyası indirir.
   Yüklemede localStorage ile gömülü veriden `ts`'i yeni olan kazanır.
+- **Not/kutu kopyala-yapıştır** (v2.29.0): seçili öğe **Ctrl+C**, **Ctrl+V**
+  ile **farenin altına** yapıştırılır (fare kanvasın dışındaysa görünüm
+  merkezine); kopya YENİ kimlik alır, orijinalden bağımsızdır. Kopyalanan öğe
+  hem sayfa içi panoda (`annoClip`) hem **sistem panosunda JSON** olarak durur
+  → başka sekmedeki / başka projedeki viewer'a da yapıştırılabilir (ölçüldü:
+  bir HTML'de Ctrl+C, DİĞER HTML'de Ctrl+V çalışıyor). Panoya kopyalanmış bir
+  `_notlar.json` metni de doğrudan yapıştırılabilir (`annoParseImport` ortak).
+  **Üç kural**: (1) şemadan METİN seçiliyse Ctrl+C ona dokunmaz (PDF gibi
+  kopyalama korunur) ve sayfa içi pano temizlenir; (2) odak bir yazı alanındaysa
+  (not editörü, arama kutusu) pano olayları tarayıcıya bırakılır; (3) Ctrl+V'de
+  `preventDefault` YOKTUR — pano içeriğini izin istemeden veren `paste` olayı
+  gelsin diye (`navigator.clipboard.readText` izin isterdi); olay hiç gelmezse
+  150 ms sonra sayfa içi panoya düşülür.
 - **Notları taşıma — Dışa / İçe** (v2.26.0): toolbar'da iki düğme daha.
   **Dışa** notları `{proje}_notlar.json` olarak indirir; **İçe** bir dosyadan
   yükler ve o dosya `_notlar.json` DA olabilir, notları gömülü eski bir HTML de
@@ -542,7 +557,7 @@ Bir değişiklik yaptıktan sonra:
 - Klavye: `?` modal aç, `/` arama aç+focus, `Enter` (aramada) ilk sonucu seç,
   `B` sol paneli gizle/göster, `H` hiyerarşi sekmesi, `Alt+Backspace` üst sayfa,
   `Alt+Home` kök sayfa, `Alt+←/→` sayfa geçmişi, `0` reset view, `F` fit last,
-  `Esc` clear
+  `Ctrl+C`/`Ctrl+V` seçili notu/kutuyu kopyala-yapıştır, `Esc` clear
 - PyInstaller paketi için gui.ui dosyası `sys._MEIPASS` üzerinden bulunur
   (gui.py'de fonksiyonla)
 
@@ -825,6 +840,50 @@ mesajına bak.
   bu API olmayabilir (graceful fallback var, "veri yok" der).
 
 ## Çözülen Sorunlar (tarihçe)
+
+- **Not/kutu kopyala-yapıştır yoktu; yeni kutu kalın kenarla geliyordu
+  (v2.29.0, kullanıcı isteği: "eklenenleri kopyala yapıştır özelliğide
+  koyarmısın ctrl+v ctrl+c" + "yeni kutu eklemelerinde default kalınlık en
+  küçük olsun")**: Aynı notu/kutuyu ikinci kez kurmanın tek yolu elle yeniden
+  çizmekti. Eklenen akış: seçili öğe `Ctrl+C` → `Ctrl+V` farenin altına
+  (bkz. "Not / kutu kopyala-yapıştır" bölümü).
+  **Neden pano olayı, neden `navigator.clipboard.readText` değil**: readText
+  izin ister (Chromium'da kullanıcıya soru sorar) ve `file://` altında
+  reddedilebilir; tarayıcının `paste` OLAYI ise pano metnini İZİNSİZ verir.
+  Bu yüzden Ctrl+V'de `preventDefault` YAPILMAZ — yapılsaydı olay hiç
+  doğmazdı. Yazma tarafında tersi: Ctrl+C'de `preventDefault` yapılır (boş
+  seçimle native kopyalama panoyu ezmesin) ve JSON `clipboard.writeText` ile
+  yazılır. **Ölçüldü**: `file://` sayfası `isSecureContext=true` olduğundan
+  writeText çalışıyor; bir HTML'de Ctrl+C, BAŞKA bir HTML'de gerçek Ctrl+V
+  tuşuyla kutuyu (w/h/sw dahil) yapıştırdı — yani belgeler arası kopyalama
+  gerçekten çalışıyor.
+  **İki katmanlı pano**: sistem panosu + sayfa içi `annoClip`. Pano metni bizim
+  JSON'umuz değilse (başka uygulamadan gelen metin) sayfa içi panoya düşülür;
+  kullanıcı sayfa içinde BAŞKA bir şey kopyalarsa (metin seçiliyken Ctrl+C)
+  `annoClip` temizlenir ki bayat kopya yapışmasın.
+  **Çözümleme `annoParseImport` ile ortak** (v2.26.0'ın İçe aktarma parser'ı):
+  panoya kopyalanmış bir `_notlar.json` içeriği de yapıştırılabiliyor; çoklu
+  öğede grubun sol-üst köşesi çapaya oturur, öğelerin birbirine göre konumu
+  KORUNUR.
+  **Yeni kutu `sw=0.5`**: yalnız YENİ kutuda; `a.sw || 1.5` fallback'leri eski
+  kayıtlar için duruyor. Sürükleme sırasındaki kesikli önizleme bilerek 1.5
+  kalınlığında (çizim kılavuzu görünür olsun).
+  **Doğrulama** (headless Edge + CDP, gerçek klavye/fare olayları): şematik
+  **33/33** (Ctrl+C sayfa içi panoya yazdı, toast, fare konumuna yapıştırma
+  0.0 sapmayla, yeni kimlik, kopyanın orijinalden bağımsızlığı, çoklu öğede
+  göreli konum, localStorage, metin seçimi varken kopyalamama + seçim bitince
+  yine çalışma, arama kutusuna yapıştırmanın not üretmemesi, gerçek Ctrl+V
+  tuşu, sürükleyerek çizilen kutunun `sw=0.5` + SVG `stroke-width=0.5`, Del/B
+  regresyonu, 0 JS hatası) · EN çıktı + birleşik görünüm **18/18** (⟪⟫
+  kalıntısı 0, İngilizce toast'lar, iframe içinde kopyala-yapıştır) · sistem
+  panosu **3/3** (belgeler arası) · `write/read_annotations` round-trip'i
+  `sw=0.5` ile sağlam · `node --check` temiz · `tools/check_html_i18n.py`
+  240/240, ölü anahtar 0.
+  **Test notu**: headless pencere ODAKLI OLMADIĞINDAN `Selection.toString()`
+  `rangeCount=1` olsa bile BOŞ döner → gerçek DOM seçimiyle "metin seçiliyken
+  kopyalama" testi kurulamaz, `window.getSelection` taklit edilmeli. Ayrıca
+  800px'lik headless pencerede mobil düzen devreye girip sol panel kanvasın
+  ÜSTÜNE bindiğinden fare testleri kanvasın sağ yarısında yapılmalı.
 
 - **Şematikteki firma anteti / logosu çıktıya giriyordu, kapatma yolu yoktu
   (v2.28.0, kullanıcı isteği: "şematiğin sağ alt tarafında firma bilgileri

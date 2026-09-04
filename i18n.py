@@ -681,7 +681,6 @@ _EN_HTML = {
 
     # --- şematik görüntüleyici --------------------------------------------
     "Şematik": "Schematic",
-    "Şematik + PCB": "Schematic + PCB",
     "Şematik + PCB ·": "Schematic + PCB ·",
     "Böl": "Split",
     "Sadece şematik ( 1 )": "Schematic only ( 1 )",
@@ -742,17 +741,19 @@ _EN_HTML = {
         "Type directly where you click / box in an area (Esc cancels)",
     "Not ekle: butona bas, şemada istediğin yere tıkla ve DOĞRUDAN yaz (dışına "
     "tıkla = bitir, Enter = yeni satır). Sonradan: çift tık düzenle · sürükle "
-    "taşı · seç + Del sil · A−/A+ yazı boyutu · Ctrl+C / Ctrl+V kopyala-yapıştır":
+    "taşı · KÖŞE TUTAMACIYLA ya da A−/A+ ile yazı boyutu · seç + Del sil · Ctrl+C / Ctrl+V kopyala-yapıştır":
         "Add a note: press the button, click anywhere on the schematic and type "
         "DIRECTLY (click outside = finish, Enter = new line). Afterwards: "
-        "double-click to edit · drag to move · select + Del to delete · A−/A+ "
-        "font size · Ctrl+C / Ctrl+V copy-paste",
+        "double-click to edit · drag to move · font size with the CORNER "
+        "HANDLE or A−/A+ · select + Del to delete · Ctrl+C / Ctrl+V copy-paste",
     "Kutu içine al: butona bas, sürükleyerek çerçeve çiz (Esc iptal). Sonradan: "
     "kenarına tıkla seç → sürükle taşı · köşe tutamaçlarıyla boyutlandır · Del "
-    "sil · −/+ kenar kalınlığı · Ctrl+C / Ctrl+V kopyala-yapıştır":
+    "sil · −/+ kenar kalınlığı · Ctrl+C / Ctrl+V kopyala-yapıştır. İÇİNE YAZI: kutuya çift tık ya da mini bardaki T (yazı kutuyla gruplanır)":
         "Box in: press the button and drag to draw a frame (Esc cancels). "
         "Afterwards: click its edge to select → drag to move · resize with the "
-        "corner handles · Del to delete · −/+ border width · Ctrl+C / Ctrl+V copy-paste",
+        "corner handles · Del to delete · −/+ border width · Ctrl+C / Ctrl+V "
+        "copy-paste. TEXT INSIDE: double-click the box or press T on the mini "
+        "bar (the text is grouped with the box)",
     "Not ve kutuları HTML dosyasının içine göm ve kaydet. Chromium'da AÇIK "
     "DOSYANIN ÜSTÜNE yazabilir (ilk kayıtta dosyayı seç; aynı oturumda "
     "sonrakiler sessiz). Firefox'ta kopya indirir. Paylaşınca/başka bilgisayarda "
@@ -767,11 +768,12 @@ _EN_HTML = {
     "Nota çift tık": "Double-click a note",
     "Yerinde düzenle (boş bırak = sil)": "Edit in place (leave empty = delete)",
     "Seçiliyken Del · mini bar −/+": "Del while selected · mini bar −/+",
-    "Sil · yazı boyutu / kenar kalınlığı": "Delete · font size / border width",
+    "Sil · yazı boyutu / kenar kalınlığı (seçili hepsine)":
+        "Delete · font size / border width (applies to all selected)",
     "Kenardan sürükle: taşı · Köşe tutamacı: boyutlandır · Del: sil · Ctrl+C kopyala":
         "Drag the edge: move · Corner handle: resize · Del: delete · Ctrl+C copy",
-    "Sürükle: taşı · Çift tık: düzenle · Seç + Del: sil · Ctrl+C kopyala":
-        "Drag: move · Double-click: edit · Select + Del: delete · Ctrl+C copy",
+    "Sürükle: taşı · Çift tık: düzenle · Köşe tutamacı: yazı boyutu · Del: sil · Ctrl+C kopyala":
+        "Drag: move · Double-click: edit · Corner handle: font size · Del: delete · Ctrl+C copy",
     "Parmakla da çalışır (yaz, çiz, taşı, boyutlandır)":
         "Works with touch too (type, draw, move, resize)",
     "Yazı boyutu / kenar kalınlığı artır": "Increase font size / border width",
@@ -871,11 +873,62 @@ _EN_HTML = {
         "notes loaded — press Save to make it permanent",
 
     # --- şematik: not/kutu kopyala-yapıştır (Ctrl+C / Ctrl+V) -------------
-    "Seçili notu / kutuyu kopyala · fare konumuna yapıştır":
-        "Copy the selected note / box · paste at the mouse position",
+    "Seçili not / kutuları kopyala · fare konumuna yapıştır":
+        "Copy the selected notes / boxes · paste at the mouse position",
     "Not kopyalandı — Ctrl+V ile yapıştır": "Note copied — paste with Ctrl+V",
     "Kutu kopyalandı — Ctrl+V ile yapıştır": "Box copied — paste with Ctrl+V",
     "öğe yapıştırıldı": "item(s) pasted",
+
+    # --- şematik: dikdörtgen (kement) çoklu seçim + gruplama --------------
+    "Seç": "Select",
+    "Dikdörtgen seçim: butona bas, sürükleyerek birden çok not/kutuyu birlikte "
+    "seç (soldan sağa: yalnız tamamen içeride kalanlar · sağdan sola: dokunan "
+    "her şey). Seçim bitince araç kapanır. Aynısı her an Shift + sürükle ile de "
+    "yapılır. Sonra hepsi birlikte taşınır, Ctrl+C ile kopyalanır, Del ile "
+    "silinir, Ctrl+G ile gruplanır":
+        "Rectangle select: press the button and drag to select several notes / "
+        "boxes at once (left to right: only fully enclosed items · right to "
+        "left: anything touched). The tool closes when the selection is done. "
+        "The same is always available with Shift + drag. The selection then "
+        "moves together, copies with Ctrl+C, deletes with Del and groups with "
+        "Ctrl+G",
+    "Shift + sürükle (ya da Seç aracı)": "Shift + drag (or the Select tool)",
+    "Dikdörtgenle çoklu seçim — soldan sağa: tamamen içeridekiler, sağdan sola: "
+    "dokunan her şey":
+        "Multi-select with a rectangle — left to right: fully enclosed items, "
+        "right to left: anything touched",
+    "Shift + nota / kutuya tık": "Shift + click a note / box",
+    "Seçime ekle / seçimden çıkar": "Add to / remove from the selection",
+    "Çoklu seçimde sürükle": "Drag within a multi-selection",
+    "Seçili tüm not ve kutuları birlikte taşı":
+        "Move every selected note and box together",
+    "Tüm not ve kutuları seç": "Select every note and box",
+    "öğe": "items",
+    "öğe seçildi": "items selected",
+    "öğe silindi": "items deleted",
+    "öğe kopyalandı — Ctrl+V ile yapıştır": "items copied — paste with Ctrl+V",
+    "Dikdörtgende öğe yok": "Nothing inside the rectangle",
+    "Grupla (Ctrl+G) / Grubu çöz (Ctrl+Shift+G)":
+        "Group (Ctrl+G) / Ungroup (Ctrl+Shift+G)",
+    "Seçili not ve kutuları grupla (birlikte seçilip taşınırlar)":
+        "Group the selected notes and boxes (they are then selected and moved "
+        "together)",
+    "Grubu çöz": "Ungroup",
+    "Grup çözüldü": "Group dissolved",
+    "öğe gruplandı": "items grouped",
+    "Gruplamak için en az iki öğe seçin": "Select at least two items to group",
+    "Seçimde grup yok": "No group in the selection",
+    "Gruptaki bir öğeye tık": "Click one item of a group",
+    "Kutunun içine yazı ekle (kutuya çift tık ile de olur)":
+        "Add text inside the box (double-clicking the box does it too)",
+    "Kutuya çift tık (ya da mini barda T)":
+        "Double-click a box (or press T on the mini bar)",
+    "Kutunun içine yazı ekle — yazı kutuyla gruplanır, birlikte taşınır":
+        "Add text inside the box — the text is grouped with the box and "
+        "they move together",
+    "Grubun tamamı seçilir — mini bardaki zincir düğmesi grubu çözer":
+        "The whole group is selected — the group button on the mini bar "
+        "dissolves it",
 }
 
 _EN.update(_EN_HTML)

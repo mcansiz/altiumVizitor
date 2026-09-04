@@ -5,7 +5,7 @@ Wavenumber'ın ticari "viz sch 1.0" ürününün açık-kaynak alternatifi.
 [altium_monkey](https://github.com/wavenumber-eng/altium_monkey) kütüphanesi
 (Eli Hughes / Wavenumber) üzerine kurulu.
 
-**Mevcut sürüm**: `APP_VERSION` sabiti **`viewer.py`'de** tutulur (şu an 2.29.0);
+**Mevcut sürüm**: `APP_VERSION` sabiti **`viewer.py`'de** tutulur (şu an 2.30.0);
 `gui.py` oradan import eder (v2.9.29'da taşındı — HTML çıktıları da sürümü
 gösterebilsin diye, tek kaynak). Yeni özellik/düzeltme ekleyince bu sabiti
 güncelle (semver: major.minor.patch). Sürüm pencere başlığında, alt durum
@@ -473,8 +473,9 @@ Bir değişiklik yaptıktan sonra:
   tıkla = bitir, boş = eklenmez). Kutu: sürükleyerek **en ince**
   (0.5, v2.29.0 kullanıcı isteği; mini bardan 0.5–8 arası ayarlanır, eski
   kayıtlar 1.5 varsayılanını korur) amber çerçeve.
-  Tüm öğeler tıkla-SEÇ → sürükle-taşı; kutular köşe tutamaçlarından
-  boyutlandırılır; seçiliyken **Del** siler; seçimde mini bar (−/+/renk/×)
+  Tüm öğeler tıkla-SEÇ → sürükle-taşı; **kutular VE notlar köşe
+  tutamaçlarından fareyle boyutlandırılır** (notta tutamaç yazı boyutunu
+  ölçekler, karşı köşe yerinde kalır — v2.30.0); seçiliyken **Del** siler; seçimde mini bar (−/+/renk/×)
   notta yazı boyutu (4–48), kutuda kenar kalınlığı (0.5–8) ve RENK (not
   yazısı / kutu kenarı — v2.9.40) ayarlar. Not KUTUSUZ çıplak yazıdır
   (v2.9.40; varsayılan koyu kırmızı #c62828). Nota çift tık = yerinde
@@ -484,6 +485,42 @@ Bir değişiklik yaptıktan sonra:
   kayıtta dosya seçtirir, handle oturumda saklanır → sonrakiler sessiz ✓;
   v2.9.41). Firefox/engelli ortamda `{proje}_notlu.html` kopyası indirir.
   Yüklemede localStorage ile gömülü veriden `ts`'i yeni olan kazanır.
+- **Çoklu seçim — dikdörtgen (kement)** (v2.30.0): toolbar'daki **Seç** aracı
+  (basılıyken sol sürükle) ya da her an geçerli **Shift + sürükle**. **Yön
+  duyarlı** (AutoCAD/Altium): soldan sağa = PENCERE (yalnız tamamen içeride
+  kalanlar, mavi düz çerçeve), sağdan sola = KESİŞEN (dokunan her şey, yeşil
+  kesikli). **Sol sürükle = pan davranışı DEĞİŞMEDİ** — pan handler'ı yalnız
+  Shift'te ve araç açıkken kendini devre dışı bırakır. Seçim bitince Seç aracı
+  kendiliğinden kapanır. Seçili öğeler birlikte taşınır (herhangi birini
+  sürükle), `Ctrl+C` ile hepsi kopyalanır, `Del` ile hepsi silinir, mini bardaki
+  −/+ ve renk **hepsine** uygulanır. `Shift+tık` öğeyi seçime ekler/çıkarır,
+  `Ctrl+A` tümünü seçer. Boyutlandırma tutamaçları yalnız TEK kutu seçiliyken
+  (grup boyutlandırma bilerek yok). Seçim `annoSelIds` dizisinde tutulur.
+- **Kutunun İÇİNE yazı** (v2.30.0): kutuya **çift tık** ya da tek kutu
+  seçiliyken mini bardaki **T** → typewriter editörü kutunun sol-üst köşesinde
+  açılır, yazı bitince oluşan not kutuyla **otomatik gruplanır** (kutunun grubu
+  varsa ona katılır). Ayrı bir "kutu metni" alanı EKLENMEDİ: mevcut not nesnesi
+  kullanıldığından yazı boyutu (tutamaç / A−A+), rengi ve yerinde düzenleme
+  akışı hiç değişmeden çalışır, ikisi tek nesne gibi taşınır/kopyalanır/silinir.
+- **Not/kutu gruplama** (v2.30.0): seçili öğeler `Ctrl+G` ile **tek nesne** gibi
+  davranan bir gruba alınır (`a.g` = grup kimliği), `Ctrl+Shift+G` çözer; mini
+  bardaki **⊞ / ⊟** düğmesi bağlama göre grupla/çöz yapar. Gruptaki BİR öğeye
+  tıklamak (ya da kementle dokunmak) grubun TAMAMINI seçer — genişletme tek
+  merkezde (`annoExpand`, `annoSetSelMany` içinde) yapıldığından tık, kement,
+  `Ctrl+A` ve Shift+tık yollarının hepsi grubu birlikte alır. Seçili grubun
+  ortak sınırı camgöbeği kesikli çerçeveyle gösterilir; **grup seçiliyken
+  öğe-başına mavi çerçeve ÇİZİLMEZ** (kullanıcı isteği: grup tek seçim alanı
+  gibi görünsün). Seçim/grup çerçevelerinin dolgusu ekran-sabittir (`pd/scale`,
+  ölçüler `data-b*` attribute'larında; `__annoUi` her karede uygular). **Kopyalama/içe
+  aktarmada grup kimlikleri YENİDEN üretilir** (`gmap`): yapıştırılan kopya
+  kendi grubunu kurar, orijinal grupla birleşip onu da taşınır/silinir hale
+  getirmez. Grup alanı localStorage'a, gömülü nota, dışa aktarılan JSON'a ve
+  panoya olduğu gibi taşınır.
+- **Birleşik görünüm üst çubuğu** (v2.30.0, kullanıcı isteği): SOLDA artık
+  Altium **proje adı** yazar (eskiden sabit "Şematik + PCB"), SAĞDAKİ rozette
+  **`Schematic Viz Generator · v{APP_VERSION}`** durur (eskiden proje adı +
+  sürüm). Sekme başlığı değişmedi. 820px altında ikisi de mobil düzende gizli
+  kalmayı sürdürür.
 - **Not/kutu kopyala-yapıştır** (v2.29.0): seçili öğe **Ctrl+C**, **Ctrl+V**
   ile **farenin altına** yapıştırılır (fare kanvasın dışındaysa görünüm
   merkezine); kopya YENİ kimlik alır, orijinalden bağımsızdır. Kopyalanan öğe
@@ -557,7 +594,8 @@ Bir değişiklik yaptıktan sonra:
 - Klavye: `?` modal aç, `/` arama aç+focus, `Enter` (aramada) ilk sonucu seç,
   `B` sol paneli gizle/göster, `H` hiyerarşi sekmesi, `Alt+Backspace` üst sayfa,
   `Alt+Home` kök sayfa, `Alt+←/→` sayfa geçmişi, `0` reset view, `F` fit last,
-  `Ctrl+C`/`Ctrl+V` seçili notu/kutuyu kopyala-yapıştır, `Esc` clear
+  `Ctrl+C`/`Ctrl+V` seçili not/kutuları kopyala-yapıştır, `Ctrl+A` tümünü seç,
+  `Ctrl+G`/`Ctrl+Shift+G` grupla/çöz, `Esc` clear
 - PyInstaller paketi için gui.ui dosyası `sys._MEIPASS` üzerinden bulunur
   (gui.py'de fonksiyonla)
 
@@ -840,6 +878,109 @@ mesajına bak.
   bu API olmayabilir (graceful fallback var, "veri yok" der).
 
 ## Çözülen Sorunlar (tarihçe)
+
+- **Not seçim kutusu yazıya göre kocamandı, yazı fareyle boyutlandırılamıyordu,
+  grup seçiminde her öğenin kendi çerçevesi görünüyordu (v2.30.0, kullanıcı
+  bildirimi + ekran görüntüsü: "yazıyı küçültüyorum yazı kutusu çok büyük
+  kalıyor seçim zorlaşıyor … yazıyı da kutu gibi mouse ile boyutunu ayarlamak
+  istiyorum" · "gruba tıkladığımda tüm nesnelerin mavi alanları görünüyor,
+  grubun tek seçim alanı görülmeli" · "kutu nesnesi içeriğine ekleme özelliği")**:
+  **Ölçümle bulunan kök neden**: not sınırı `satır sayısı × fs × 1.3 + 10` ve
+  `genişlik + 16` ile, yani **SABİT dolguyla** hesaplanıyordu → yazı küçüldükçe
+  kutu orantısız büyük kalıyor (fs 40'ta ink 88×47 → kutu 104×62 = %32 fazla;
+  fs 24'te 52.8×28 → 68.8×41 = **%47 fazla**). Ayrıca sondaki BOŞ SATIRLAR
+  kutuyu şişiriyordu (`test\n\n\n` → ink 17, kutu **82.8**) — kullanıcının
+  ekran görüntüsündeki dev çerçevenin sebebi buydu.
+  **Çözüm**: sınır artık `text.getBBox()` ile ÖLÇÜLEN mürekkep kutusu + `fs`
+  ile ORANTILI dolgu (`max(1, fs*0.07)`). Boş satırların mürekkebi olmadığından
+  bbox onları saymaz. Ölçüldü: fs 40'ta 88×47 → 93.6×52.6, fs 24'te 52.8×28 →
+  56.1×31.4 (her ölçekte aynı oran); boş satırlı not 82.8 → 20.4.
+  `annoMeasure` artık `{{x,y,w,h}}` tutar (mürekkep kutusu çapayla aynı yerde
+  DEĞİL: yazı `a.x+8, a.y+5+fs*0.9`'da başlar), `annoBounds` bunu döndürür.
+  **Notu fareyle boyutlandırma**: köşe tutamaçları artık notta da var; sürükleme
+  `fs`'i ölçekler (iki eksenin ortalaması), KARŞI köşe yerinde kalır.
+  **İnce nokta**: yazının çapaya göre ofsetinde fs ile ölçeklenmeyen SABİTLER
+  var (`+8` / `+5`), bu yüzden "yeni kutu = eski kutu × f" tahmini karşı köşeyi
+  `8*(f−1)` kadar kaydırıyordu (ölçüldü: fs 20→43'te 9.2 birim). Düzeltme:
+  fs ayarlandıktan sonra BİR KEZ çizip gerçek sınır ölçülüyor ve sabit köşe tam
+  yerine oturtuluyor (ölçüm: sapma 0.0).
+  **Grup tek çerçeve**: gruplanmış öğelerde öğe-başına mavi seçim çerçevesi
+  çizilmiyor, yalnız grubun ortak çerçevesi kalıyor (tek üyeli grup normal öğe
+  gibi davranır — `annoGrpCount`). Çerçeve dolguları da ekran-sabit yapıldı.
+  **Bilgilendirme balonu toolbar'ın altında kalıyordu** (kullanıcı bildirimi:
+  "gruplarken ve çözerken bilgilendirme yazısı sayfa seçim combobox altında
+  kalıyor"): `#hier-toast` sabit `top:14px` + `z-index:60` ile duruyordu, oysa
+  toolbar `top:8px` + **z-index:200** → balon geometrik olarak toolbar'la üst
+  üste biniyor VE arkasında kalıyordu (en görünür kurbanı "Sayfa…" açılır
+  menüsü). Düzeltme: z-index 700 (toolbar 200 ve mini bar 600'ün üstünde,
+  `#svg-tip` 900 / modal 1000'in altında) + balon her gösterimde toolbar'ın
+  ALTINA konumlandırılıyor (`tbEl.offsetTop + offsetHeight + 10`) — toolbar dar
+  pencerede sarıp iki satır olabildiği için yükseklik sabit yazılamaz, her
+  seferinde ölçülür. Doğrulama **8/8**: geniş ve dar (560px, toolbar sarmış)
+  pencerede çakışma yok, "Sayfa…" menüsüyle kesişme yok, z-index önde,
+  gruplama ve çözme balonlarının ikisi de görünür.
+  **Kutunun içine yazı**: kutuya çift tık / mini bardaki **T** → editör kutunun
+  içinde açılır, oluşan not kutuyla otomatik gruplanır. Yeni bir "kutu metni"
+  alanı EKLENMEDİ (bkz. özellik bölümü): not nesnesi kullanılınca boyut/renk/
+  düzenleme akışı bedava geliyor.
+  **Doğrulama** (headless Edge + CDP, gerçek fare olayları): **28/28** — sıkı
+  sınır oranı (büyük ve küçük yazıda aynı), boş satırlı notun şişmemesi, notta
+  4 tutamaç, SE tutamacıyla büyütme/küçültme, karşı köşenin 0.0 sapmayla sabit
+  kalması, fs alt sınırı, gruplamadan önce 2 / sonra 0 öğe-çerçevesi + 1 grup
+  çerçevesi, dolgunun zoom'da ekran-sabit kalması, T düğmesinin yalnız tek
+  kutuda çıkması, editörün kutu İÇİNDE açılması, yazının gruplanması ve
+  kutuyla birlikte taşınması, çift tıkla ekleme, nota çift tıkla düzenlemenin
+  bozulmaması, 0 JS hatası · çoklu seçim **41/41**, kopyala-yapıştır **33/33**,
+  EN + birleşik **18/18**, sistem panosu **3/3** · `check_html_i18n` 266/266.
+
+- **Notlar/kutular yalnız TEK TEK seçilebiliyordu; gruplama yoktu (v2.30.0,
+  kullanıcı isteği: "notları ve yazıları aynı anda seçip taşımak istiyorum …
+  sol tık ile basılı tutunca seçimleri dikdörtgen içine alsın" + "not ve
+  kutuları gruplama özelliğide ekleyelim … birlikte seçip grupla ile beraber
+  bir nesne olabilsinler aynı zamanda grubu çöz de olsun")**: Seçim tekil bir
+  `annoSel` id'siydi; toplu taşıma/kopyalama/silme mümkün değildi.
+  **Tasarım çatışması ve kullanıcı kararı**: kullanıcının istediği "sol sürükle
+  = dikdörtgen seçim" o an **pan** jestiydi. Üç seçenek sunuldu (Seç aracı +
+  Shift kısayolu · sol sürükleyi seçime verip pan'ı orta tuşa taşımak · yalnız
+  Shift+sürükle); kullanıcı **Seç aracı + Shift+sürükle**'yi seçti → pan, tek
+  tuşlu fare ve dokunmatik davranışı HİÇ değişmedi. Seçim kuralı için de
+  **Altium/AutoCAD yön duyarlılığı** seçildi (soldan sağa pencere, sağdan sola
+  kesişen).
+  **Uygulama**: `annoSel` → `annoSelIds` dizisi; seçim görselleri, mini bar,
+  Del, taşıma, kopyalama ve yapıştırma çoklu çalışacak şekilde yeniden yazıldı
+  (18 çağrı noktası). Kement `annoMarq` ile kanvas koordinatında çizilir
+  (çerçeve kalınlığı `1/scale` ile ekran-sabit). Gruplama `a.g` alanıyla;
+  genişletme TEK merkezde (`annoExpand`, `annoSetSelMany`) olduğundan tık /
+  kement / Ctrl+A / Shift+tık yollarının hepsi grubu birlikte alır.
+  **Yapıştırma ve içe aktarmada grup kimliği yenilenir** — yoksa kopya orijinal
+  grupla birleşir ve birini taşıyınca diğeri de giderdi.
+  **YOL BOYUNDA YAKALANAN GERÇEK HATA — bayat `panMoved`**: pan handler'ına
+  eklenen `if (e.shiftKey) return;` erken çıkışı, bayrağı sıfırlayan satırdan
+  ÖNCE geliyordu. `panMoved` yalnız bir sonraki pan mousedown'ında sıfırlandığı
+  (mouseup'ta sıfırlanmadığı) için pan'dan sonraki Shift+tık'ta bayrak TRUE
+  kalıyor ve click handler'ları `if (panMoved) return;` ile aksiyonu iptal
+  ediyordu → **pan'dan sonra Shift+tık ile net karşılaştırma çalışmıyordu**.
+  Düzeltme: `panMoved = false` her viewport mousedown'ının EN BAŞINA alındı
+  (yeni jest başlıyorsa bayrak tazedir; erken çıkışlar onu bayat bırakamaz).
+  **Doğrulama** (headless Edge + CDP, gerçek fare/klavye olayları): çoklu seçim
+  + gruplama **41/41** (yön duyarlılığının iki yönü, Shift+sürüklede pan
+  YAPILMAMASI ve düz sürüklede pan'ın SÜRMESİ, Shift+tık ekle/çıkar, toplu
+  taşımada seçili olmayanın yerinde kalması, mini bar sayacı ve −/+/renk'in
+  hepsine uygulanması, Ctrl+A/C/V/Del, Ctrl+G ile grup kimliği, gruptan tek
+  öğeye tıklayınca tamamının seçilmesi, grubun birlikte taşınması, kementin
+  gruba dokununca tamamını alması, yapıştırılan kopyanın AYRI grup olması,
+  Ctrl+Shift+G, tutamaçların yalnız tek kutuda çıkması, localStorage, düz ve
+  Shift+tık net karşılaştırması regresyonu, 0 JS hatası) · v2.29.0 kopyala-
+  yapıştır paketi **33/33** · EN çıktı + birleşik görünüm **18/18** · sistem
+  panosu **3/3** · `write/read_annotations` grup alanını koruyor ·
+  `node --check` temiz · `tools/check_html_i18n.py` 263/263, ölü anahtar 0.
+  **Test notu**: headless pencere 800×600 olduğundan viewport 756×441'dir —
+  fare testlerinde koordinatlar bu sınırın İÇİNDE olmalı (dışarısı sessizce
+  hiçbir şeye gitmez, "pan çalışmıyor" gibi görünür) ve boş nokta
+  `elementFromPoint` ile DOM'dan bulunmalıdır. Metin katmanı yalnız okunur
+  zoom'da kurulduğundan (`TL_MIN_SCALE`) net span testleri o zoom'da yapılmalı;
+  ayrıca `#anno-layer` (z-index 120) metin katmanının ÜSTÜNDEdir → net tıklama
+  regresyonu ölçülürken kanvastaki notlar temizlenmelidir.
 
 - **Not/kutu kopyala-yapıştır yoktu; yeni kutu kalın kenarla geliyordu
   (v2.29.0, kullanıcı isteği: "eklenenleri kopyala yapıştır özelliğide

@@ -91,7 +91,7 @@ from altium_monkey.altium_schdoc import AltiumSchDoc
 
 # Uygulama sürümü — tek kaynak burası; gui.py buradan import eder.
 # HTML çıktılarında sağ üst köşedeki rozette görünür (build saati yerine).
-APP_VERSION = "2.29.0"
+APP_VERSION = "2.30.0"
 
 # Önerilen minimum altium_monkey sürümü. Bu sürümden öncesinde:
 #   · 2026.6.21 öncesi — STM32 gibi IC'lerde dikey pin adları yatay çiziliyordu.
@@ -4155,7 +4155,7 @@ def build_combined_shell(sch_html, pcb_html, timestamp, project_name, have_pcb,
 </head>
 <body>
 <div id="topbar">
-  <span class="title">⟪Şematik + PCB⟫</span>
+  <span class="title">{project_name}</span>
   <span class="hint">⟪Bir tarafta komponente tıkla → diğerlerinde otomatik gösterilir⟫</span>
   <div id="view-modes">
     <button class="vm-btn active" id="vm-sch" title="⟪Sadece şematik ( 1 )⟫">⟪Şematik⟫</button>
@@ -4168,7 +4168,7 @@ def build_combined_shell(sch_html, pcb_html, timestamp, project_name, have_pcb,
       fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"
       d="M1.6 5.4V1.6H5.4M10.6 1.6H14.4V5.4M14.4 10.6V14.4H10.6M5.4 14.4H1.6V10.6"/></svg>
   </button>
-  <span class="badge">{project_name} · v{APP_VERSION}</span>
+  <span class="badge">Schematic Viz Generator · v{APP_VERSION}</span>
 </div>
 <div id="split">
   <div class="pane" id="pane-sch">
@@ -6950,7 +6950,7 @@ def build_html(sheets, net_list, components, timestamp,
                  background:#1a1a1a; border:1px solid #444; color:#ddd;
                  padding:6px 12px; font-size:12px; border-radius:3px;
                  pointer-events:none; opacity:0; transition:opacity .2s ease;
-                 z-index:60; max-width:80%; }}
+                 z-index:700; max-width:80%; }}
   #hier-toast.show {{ opacity:1; }}
   /* touch-action:none ŞART — yoksa mobil tarayıcı parmak jestini kendi alır
      (sayfa kaydırma/zoom) ve installGesture'a pointermove hiç gelmez. */
@@ -7023,6 +7023,12 @@ def build_html(sheets, net_list, components, timestamp,
   #anno-layer .anno-box rect {{ pointer-events:none; }}
   #anno-layer .anno-box rect.anno-hit {{ pointer-events:stroke; }}
   #anno-layer .anno-sel-rect {{ pointer-events:none; }}
+  /* Dikdörtgen (kement) seçim çerçevesi — AutoCAD/Altium yönü: soldan sağa
+     PENCERE (mavi, düz: yalnız tamamen içeridekiler), sağdan sola KESİŞEN
+     (yeşil, kesikli: dokunan her şey). Rengi/çizgisi JS'te ayarlanır. */
+  #anno-layer .anno-marq {{ pointer-events:none; }}
+  /* Grup çerçevesi: gruplanmış öğeler seçiliyken ortak sınırlarını gösterir */
+  #anno-layer .anno-grp-rect {{ pointer-events:none; }}
   /* rect.anno-handle: .anno-box rect kuralıyla özgüllük eşit, SONRA geldiği
      için kazanır (tutamaçlar tıklanabilir kalır) */
   #anno-layer rect.anno-handle {{ pointer-events:all; }}
@@ -7057,6 +7063,9 @@ def build_html(sheets, net_list, components, timestamp,
                                  border:1px solid transparent; background:none;
                                  cursor:pointer; border-radius:3px; }}
   #anno-bar input[type=color]:hover {{ border-color:#4ec9b0; }}
+  /* Çoklu seçimde kaç öğe seçili olduğunu gösteren etiket (tek seçimde gizli) */
+  #anno-bar .anno-count {{ display:none; align-self:center; color:#4ec9b0;
+                           font-size:11px; padding:0 5px; white-space:nowrap; }}
   /* Tıklanabilir yazıların hover rengi artık KANVASA çizilir (schHovItem →
      dlDrawSheet): span'ı renklendirmek aynı yazıyı ikinci kez, ikinci bir
      rasterizer'la çizerdi. Eski `fill:` kuralları SVG özelliğiydi, DOM
@@ -7301,9 +7310,11 @@ def build_html(sheets, net_list, components, timestamp,
     </label>
     <div class="toolbar-sep"></div>
     <button class="tool-btn" id="anno-note"
-            title="⟪Not ekle: butona bas, şemada istediğin yere tıkla ve DOĞRUDAN yaz (dışına tıkla = bitir, Enter = yeni satır). Sonradan: çift tık düzenle · sürükle taşı · seç + Del sil · A−/A+ yazı boyutu · Ctrl+C / Ctrl+V kopyala-yapıştır⟫">⟪Not⟫</button>
+            title="⟪Not ekle: butona bas, şemada istediğin yere tıkla ve DOĞRUDAN yaz (dışına tıkla = bitir, Enter = yeni satır). Sonradan: çift tık düzenle · sürükle taşı · KÖŞE TUTAMACIYLA ya da A−/A+ ile yazı boyutu · seç + Del sil · Ctrl+C / Ctrl+V kopyala-yapıştır⟫">⟪Not⟫</button>
     <button class="tool-btn" id="anno-box"
-            title="⟪Kutu içine al: butona bas, sürükleyerek çerçeve çiz (Esc iptal). Sonradan: kenarına tıkla seç → sürükle taşı · köşe tutamaçlarıyla boyutlandır · Del sil · −/+ kenar kalınlığı · Ctrl+C / Ctrl+V kopyala-yapıştır⟫">⟪Kutu⟫</button>
+            title="⟪Kutu içine al: butona bas, sürükleyerek çerçeve çiz (Esc iptal). Sonradan: kenarına tıkla seç → sürükle taşı · köşe tutamaçlarıyla boyutlandır · Del sil · −/+ kenar kalınlığı · Ctrl+C / Ctrl+V kopyala-yapıştır. İÇİNE YAZI: kutuya çift tık ya da mini bardaki T (yazı kutuyla gruplanır)⟫">⟪Kutu⟫</button>
+    <button class="tool-btn" id="anno-sel"
+            title="⟪Dikdörtgen seçim: butona bas, sürükleyerek birden çok not/kutuyu birlikte seç (soldan sağa: yalnız tamamen içeride kalanlar · sağdan sola: dokunan her şey). Seçim bitince araç kapanır. Aynısı her an Shift + sürükle ile de yapılır. Sonra hepsi birlikte taşınır, Ctrl+C ile kopyalanır, Del ile silinir, Ctrl+G ile gruplanır⟫">⟪Seç⟫</button>
     <button class="tool-btn" id="anno-save"
             title="⟪Not ve kutuları HTML dosyasının içine göm ve kaydet. Chromium'da AÇIK DOSYANIN ÜSTÜNE yazabilir (ilk kayıtta dosyayı seç; aynı oturumda sonrakiler sessiz). Firefox'ta kopya indirir. Paylaşınca/başka bilgisayarda da görünür⟫">⟪Kaydet⟫</button>
     <button class="tool-btn" id="anno-exp"
@@ -7337,7 +7348,10 @@ def build_html(sheets, net_list, components, timestamp,
       <tr><td><kbd>0</kbd></td><td>⟪Görünümü sıfırla⟫</td></tr>
       <tr><td><kbd>F</kbd></td><td>⟪Son sayfaya fit zoom⟫</td></tr>
       <tr><td><kbd>+</kbd> / <kbd>-</kbd></td><td>Zoom in / out</td></tr>
-      <tr><td><kbd>Ctrl</kbd> + <kbd>C</kbd> / <kbd>V</kbd></td><td>⟪Seçili notu / kutuyu kopyala · fare konumuna yapıştır⟫</td></tr>
+      <tr><td><kbd>Ctrl</kbd> + <kbd>C</kbd> / <kbd>V</kbd></td><td>⟪Seçili not / kutuları kopyala · fare konumuna yapıştır⟫</td></tr>
+      <tr><td><kbd>Ctrl</kbd> + <kbd>A</kbd></td><td>⟪Tüm not ve kutuları seç⟫</td></tr>
+      <tr><td><kbd>Ctrl</kbd> + <kbd>G</kbd></td><td>⟪Seçili not ve kutuları grupla (birlikte seçilip taşınırlar)⟫</td></tr>
+      <tr><td><kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>G</kbd></td><td>⟪Grubu çöz⟫</td></tr>
       <tr><td><kbd>?</kbd></td><td>⟪Bu pencereyi aç / kapat⟫</td></tr>
     </table>
     <h3>⟪Şematik Hiyerarşi⟫</h3>
@@ -7360,7 +7374,12 @@ def build_html(sheets, net_list, components, timestamp,
       <tr><td>⟪Designator'a tık (şema)⟫</td><td>⟪Komponent detay popup'ı aç⟫</td></tr>
       <tr><td>⟪Toolbar: Not / Kutu⟫</td><td>⟪Tıklanan yere doğrudan yazı yaz / alanı kutu içine al (Esc iptal)⟫</td></tr>
       <tr><td>⟪Not/kutuya tık + sürükle⟫</td><td>⟪Seç ve taşı · kutuda köşe tutamacı: boyutlandır⟫</td></tr>
-      <tr><td>⟪Seçiliyken Del · mini bar −/+⟫</td><td>⟪Sil · yazı boyutu / kenar kalınlığı⟫</td></tr>
+      <tr><td>⟪Shift + sürükle (ya da Seç aracı)⟫</td><td>⟪Dikdörtgenle çoklu seçim — soldan sağa: tamamen içeridekiler, sağdan sola: dokunan her şey⟫</td></tr>
+      <tr><td>⟪Shift + nota / kutuya tık⟫</td><td>⟪Seçime ekle / seçimden çıkar⟫</td></tr>
+      <tr><td>⟪Çoklu seçimde sürükle⟫</td><td>⟪Seçili tüm not ve kutuları birlikte taşı⟫</td></tr>
+      <tr><td>⟪Kutuya çift tık (ya da mini barda T)⟫</td><td>⟪Kutunun içine yazı ekle — yazı kutuyla gruplanır, birlikte taşınır⟫</td></tr>
+      <tr><td>⟪Gruptaki bir öğeye tık⟫</td><td>⟪Grubun tamamı seçilir — mini bardaki zincir düğmesi grubu çözer⟫</td></tr>
+      <tr><td>⟪Seçiliyken Del · mini bar −/+⟫</td><td>⟪Sil · yazı boyutu / kenar kalınlığı (seçili hepsine)⟫</td></tr>
       <tr><td>⟪Nota çift tık⟫</td><td>⟪Yerinde düzenle (boş bırak = sil)⟫</td></tr>
     </table>
     <h3>⟪Dokunmatik (telefon / tablet)⟫</h3>
@@ -7898,13 +7917,22 @@ function classifyNet(name) {{
 let panning = false, sx, sy, stx, sty, panMoved = false;
 viewport.addEventListener('mousedown', e => {{
   if (gTouchActive()) return;   // dokunma jesti sürüyor (compat fare olayı)
+  // panMoved YENİ jestin başında sıfırlanır — pan başlamayacak olsa bile.
+  // (Aşağıdaki erken çıkışlar bayrağı bayat bırakırsa, bir önceki pan'ın
+  //  "hareket etti" durumu sonraki TIKLAMAYI yutar: click handler'ları
+  //  panMoved'a bakıp aksiyonu iptal ediyor — Shift+tık net karşılaştırması
+  //  bu yüzden pan'dan sonra çalışmıyordu.)
+  panMoved = false;
   if (e.target.closest('.tool-btn') || e.target.closest('#detail-panel')) return;
-  if (annoTool) return;   // not/kutu aracı aktif — pan yerine araç çalışır
+  if (annoTool) return;   // not/kutu/seç aracı aktif — pan yerine araç çalışır
+  // Shift + sürükle = not/kutu dikdörtgen seçimi (kement) → pan BAŞLATMA.
+  // Shift + TIK (net karşılaştırma) etkilenmez: pan zaten harekette başlar.
+  if (e.shiftKey) return;
   // Metin katmanı SPAN'ı üzerinde pan BAŞLATMA → tarayıcının native metin
   // seçimi çalışsın (PDF'teki gibi sürükleyip kopyalama). Katmanın KABI
   // pointer-events:none olduğundan boş alanda hedef span olmaz, pan çalışır.
   if (e.target.closest && e.target.closest('.tl span')) return;
-  panning = true; panMoved = false; sx = e.clientX; sy = e.clientY; stx = tx; sty = ty;
+  panning = true; sx = e.clientX; sy = e.clientY; stx = tx; sty = ty;
   viewport.classList.add('grabbing');
 }});
 window.addEventListener('mousemove', e => {{
@@ -8720,6 +8748,13 @@ function goRootSheet() {{
 function hierToast(msg) {{
   if (!hierToastEl) return;
   hierToastEl.textContent = msg;
+  // Balon TOOLBAR'IN ALTINA konur: sabit top ile toolbar'la üst üste biniyor
+  // ve "Sayfa…" açılır menüsünün ARKASINDA kalıyordu (kullanıcı bildirimi).
+  // Toolbar dar pencerede sarıp iki satır olabildiğinden yükseklik her
+  // gösterimde ölçülür; ölçüm yapılamazsa eski sabit konuma düşülür.
+  const tbEl = document.getElementById('toolbar');
+  if (tbEl && tbEl.offsetHeight)
+    hierToastEl.style.top = (tbEl.offsetTop + tbEl.offsetHeight + 10) + 'px';
   hierToastEl.classList.add('show');
   clearTimeout(hierToast._t);
   hierToast._t = setTimeout(() => hierToastEl.classList.remove('show'), 1800);
@@ -9041,8 +9076,19 @@ document.addEventListener('keydown', e => {{
   // içeriğini izin istemeden verdiğinden asıl işi o handler yapar.
   if ((e.ctrlKey || e.metaKey) && !e.altKey && !annoInEditable()) {{
     const ck = (e.key || '').toLowerCase();
+    if (ck === 'g' && annoSelIds.length) {{
+      e.preventDefault();                       // Ctrl+G grupla · Ctrl+Shift+G çöz
+      if (e.shiftKey) annoUngroupSel(); else annoGroupSel();
+      return;
+    }}
+    if (ck === 'a' && annotations.length && !annoTextSelected()) {{
+      e.preventDefault();                       // tümünü seç (kanvas uygulaması gibi)
+      annoSetSelMany(annotations.map(a => a.id));
+      hierToast(annoSelIds.length + ' ⟪öğe seçildi⟫');
+      return;
+    }}
     if (ck === 'c') {{
-      if (annoSel != null && !annoTextSelected()) {{
+      if (annoSelIds.length && !annoTextSelected()) {{
         e.preventDefault(); annoCopySel(); return;
       }}
       annoClip = null;      // kullanıcı BAŞKA bir şey kopyaladı → pano bayatlamasın
@@ -9055,13 +9101,13 @@ document.addEventListener('keydown', e => {{
   }}
   // Not/kutu aracı aktifken Esc yalnız araçtan çıkar; değilse önce seçimi bırakır
   if (e.key === 'Escape' && (annoTool || annoDrag)) {{ setAnnoTool(null); return; }}
-  if (e.key === 'Escape' && annoSel != null) {{ annoSetSel(null); return; }}
-  // Seçili not/kutu Del (veya Backspace) ile silinir — yazı alanları hariç
-  if ((e.key === 'Delete' || e.key === 'Backspace') && annoSel != null) {{
+  if (e.key === 'Escape' && annoSelIds.length) {{ annoSetSel(null); return; }}
+  // Seçili not/kutular Del (veya Backspace) ile silinir — yazı alanları hariç
+  if ((e.key === 'Delete' || e.key === 'Backspace') && annoSelIds.length) {{
     const ae = document.activeElement;
     if (!ae || (ae.tagName !== 'INPUT' && ae.tagName !== 'TEXTAREA'
                 && ae.tagName !== 'SELECT' && !ae.isContentEditable)) {{
-      e.preventDefault(); annoDelete(annoSel); return;
+      e.preventDefault(); annoDeleteSel(); return;
     }}
   }}
   if (e.key === '?') {{ e.preventDefault(); toggleShortcutModal(); }}
@@ -9171,9 +9217,15 @@ annoBar.innerHTML =
     '<button data-act="minus" title="⟪Yazı boyutu / kenar kalınlığı azalt⟫">−</button>'
   + '<button data-act="plus" title="⟪Yazı boyutu / kenar kalınlığı artır⟫">+</button>'
   + '<input type="color" title="⟪Renk (not yazısı / kutu kenarı)⟫">'
-  + '<button data-act="del" title="⟪Sil (Del)⟫">×</button>';
+  + '<button data-act="txt" title="⟪Kutunun içine yazı ekle (kutuya çift tık ile de olur)⟫">T</button>'
+  + '<button data-act="grp" title="⟪Grupla (Ctrl+G) / Grubu çöz (Ctrl+Shift+G)⟫">⊞</button>'
+  + '<button data-act="del" title="⟪Sil (Del)⟫">×</button>'
+  + '<span class="anno-count"></span>';
 viewport.appendChild(annoBar);
 const annoColorInp = annoBar.querySelector('input[type=color]');
+const annoCountEl = annoBar.querySelector('.anno-count');   // "N öğe" (çoklu seçim)
+const annoGrpBtn = annoBar.querySelector('[data-act="grp"]');
+const annoTxtBtn = annoBar.querySelector('[data-act="txt"]');
 
 const ANNO_NS = 'http://www.w3.org/2000/svg';
 const LS_ANNO = 'schviz-anno:' + (PROJECT_NAME || 'proje');
@@ -9181,11 +9233,62 @@ let annotations = [];      // {{k:'note',id,x,y,text,fs}} | {{k:'box',id,x,y,w,h
 let annoTool = null;       // null | 'note' | 'box'
 let annoDrag = null;       // kutu çizimi sürüyor: {{x0,y0,x1,y1}}
 let annoJustDrew = false;  // kutu/taşıma biten click'i seçim-temizlemeden korur
-let annoSel = null;        // seçili annotation id'si
+let annoSelIds = [];       // SEÇİLİ annotation id'leri (çoklu seçim, hep String)
+let annoMarq = null;       // dikdörtgen (kement) seçim sürüyor: {{x0,y0,x1,y1}}
+let annoPendGroup = null;  // kutunun İÇİNE yazı ekleniyor: o kutunun id'si
 let annoEditId = null;     // yerinde düzenlenen not id'si ('' = yeni not)
 let annoEditPos = null;    // yeni notun kanvas konumu
 let annoMove = null;       // taşıma/boyutlandırma sürükleme durumu
 const annoMeasure = {{}};  // not id → render'da ölçülen {{w,h}} (seçim çerçevesi)
+// Kimlikler İÇE AKTARMADA sayı da olabildiğinden karşılaştırma hep String üzerinden
+function annoIsSel(id) {{ return annoSelIds.indexOf(String(id)) >= 0; }}
+function annoSelItems() {{ return annotations.filter(a => annoIsSel(a.id)); }}
+// --- Gruplama: öğenin `g` alanı grup kimliğidir (yoksa gruplanmamış).
+// Seçim DAİMA gruba genişler (annoSetSelMany içinde) → gruba ait bir öğeye
+// tıklamak/kementle dokunmak grubun tamamını seçer, hepsi birlikte taşınır.
+function annoExpand(ids) {{
+  const keys = (ids || []).map(String);
+  const groups = {{}};
+  annotations.forEach(a => {{ if (a.g && keys.indexOf(String(a.id)) >= 0) groups[a.g] = 1; }});
+  const out = keys.slice();
+  annotations.forEach(a => {{
+    if (a.g && groups[a.g] && out.indexOf(String(a.id)) < 0) out.push(String(a.id));
+  }});
+  return out;
+}}
+// Seçim TEK bir grubun tamamı mı (mini bar düğmesi "çöz"e döner)
+function annoSelGroup() {{
+  const sel = annoSelItems();
+  if (sel.length < 2 || !sel[0].g) return null;
+  const g = sel[0].g;
+  if (!sel.every(a => a.g === g)) return null;
+  return g;
+}}
+// Kutunun İÇİNE yazı: typewriter editörü kutunun sol-üstünde açılır, yazı
+// bitince oluşan not kutuyla GRUPLANIR → ikisi tek nesne gibi taşınır,
+// kopyalanır, silinir. Ayrı bir "kutu metni" alanı EKLENMEDİ: mevcut not
+// nesnesi kullanılınca yazı boyutu (köşe tutamacı / A−A+), rengi ve yerinde
+// düzenleme akışı hiç değişmeden çalışıyor.
+function annoAddTextInBox(b) {{
+  const pad = Math.max(6, Math.min(b.w, b.h) * 0.08);
+  annoPendGroup = String(b.id);
+  annoOpenEditor(null, {{ x: b.x + pad, y: b.y + pad }});
+}}
+function annoGroupSel() {{
+  const sel = annoSelItems();
+  if (sel.length < 2) {{ hierToast('⟪Gruplamak için en az iki öğe seçin⟫'); return; }}
+  const gid = 'g' + annoId();
+  sel.forEach(a => {{ a.g = gid; }});
+  annoStore(); annoRender();
+  hierToast(sel.length + ' ⟪öğe gruplandı⟫');
+}}
+function annoUngroupSel() {{
+  const sel = annoSelItems().filter(a => a.g);
+  if (!sel.length) {{ hierToast('⟪Seçimde grup yok⟫'); return; }}
+  sel.forEach(a => {{ delete a.g; }});
+  annoStore(); annoRender();
+  hierToast('⟪Grup çözüldü⟫');
+}}
 var __annoUi = null;       // applyT her karede çağırır (var: hoisting, TDZ yok)
 
 function annoLoad() {{
@@ -9209,19 +9312,28 @@ function annoRectEl(x, y, w, h) {{
 // Seçim çerçevesi/bar için öğe sınırları (not boyutu render'da ölçülür)
 function annoBounds(a) {{
   if (a.k === 'box') return {{ x: a.x, y: a.y, w: a.w, h: a.h }};
-  const m = annoMeasure[a.id] || {{ w: 60, h: 28 }};
-  return {{ x: a.x, y: a.y, w: m.w, h: m.h }};
+  const m = annoMeasure[a.id];
+  // Not sınırı render'da ÖLÇÜLEN mürekkep kutusudur (x/y de ölçümden gelir —
+  // yazı a.x+8, a.y+…'de başlar, çapa ile sınır aynı nokta değildir).
+  if (m && m.x != null) return {{ x: m.x, y: m.y, w: m.w, h: m.h }};
+  return {{ x: a.x, y: a.y, w: (m ? m.w : 60), h: (m ? m.h : 28) }};
+}}
+// Grup üye sayısı: tek üyeli grup normal öğe gibi davranır (üyeleri silinmiş)
+function annoGrpCount(g) {{
+  let n = 0;
+  annotations.forEach(a => {{ if (a.g === g) n++; }});
+  return n;
 }}
 function annoRender() {{
   annoLayer.innerHTML = '';
   annotations.forEach(a => {{
     if (a.id === annoEditId) return;   // düzenlenen not şu an editörde
     const g = document.createElementNS(ANNO_NS, 'g');
-    g.setAttribute('class', 'anno anno-' + a.k + (a.id === annoSel ? ' sel' : ''));
+    g.setAttribute('class', 'anno anno-' + a.k + (annoIsSel(a.id) ? ' sel' : ''));
     g.setAttribute('data-id', String(a.id));
     const tip = document.createElementNS(ANNO_NS, 'title');
     tip.textContent = a.k === 'note'
-      ? '⟪Sürükle: taşı · Çift tık: düzenle · Seç + Del: sil · Ctrl+C kopyala⟫'
+      ? '⟪Sürükle: taşı · Çift tık: düzenle · Köşe tutamacı: yazı boyutu · Del: sil · Ctrl+C kopyala⟫'
       : '⟪Kenardan sürükle: taşı · Köşe tutamacı: boyutlandır · Del: sil · Ctrl+C kopyala⟫';
     g.appendChild(tip);
     if (a.k === 'box') {{
@@ -9254,28 +9366,46 @@ function annoRender() {{
       }});
       g.appendChild(t);
       annoLayer.appendChild(g);            // getBBox için önce DOM'a girmeli
-      let tw = 60; try {{ tw = t.getBBox().width; }} catch (e) {{}}
-      const bw = Math.max(tw + 16, 30);
-      const bh = lines.length * fs * 1.3 + 10;
-      annoMeasure[a.id] = {{ w: bw, h: bh }};
+      // Sınır GERÇEK çizim kutusundan (ink bbox) + fs ile ORANTILI dolgudan
+      // gelir. Eskiden `satır sayısı × fs × 1.3 + 10` ve `genişlik + 16` sabit
+      // dolgu kullanılıyordu; ölçüldü: yazı küçüldükçe kutu orantısız büyük
+      // kalıyor (fs 40'ta ink 88×47 → kutu 104×62; fs 24'te 52.8×28 → 68.8×41)
+      // ve SONDAKİ BOŞ SATIRLAR kutuyu şişiriyordu (ink 17 → kutu 82.8).
+      // Boş satırların mürekkebi olmadığından bbox onları saymaz.
+      let bb = null; try {{ bb = t.getBBox(); }} catch (e) {{}}
+      const pd = Math.max(1, fs * 0.07);   // fs ile ORANTILI, sıkı
+      const mm = (bb && bb.width > 0)
+        ? {{ x: bb.x - pd, y: bb.y - pd,
+             w: Math.max(6, bb.width + pd * 2), h: Math.max(6, bb.height + pd * 2) }}
+        : {{ x: a.x, y: a.y, w: Math.max(12, fs), h: Math.max(12, fs * 1.3) }};
+      annoMeasure[a.id] = mm;
       // Arka plan kutusu YOK (v2.9.40, kullanıcı isteği) — çıplak yazı.
       // Görünmez hit-rect tıklama/sürükleme yüzeyi verir: şeffaf ama
       // "painted" fill (rgba 0) pointer-events'i yakalar, fill:none yakalamaz.
-      const hit = annoRectEl(a.x, a.y, bw, bh);
+      const hit = annoRectEl(mm.x, mm.y, mm.w, mm.h);
       hit.setAttribute('class', 'anno-hit');
       hit.setAttribute('fill', 'rgba(0,0,0,0)');
       g.insertBefore(hit, t);
     }}
     // Seçim görselleri: kesikli çerçeve + (kutuda) köşe tutamaçları.
     // Kalınlık/boyutları __annoUi ekran-sabit tutar (1/scale).
-    if (a.id === annoSel) {{
+    if (annoIsSel(a.id)) {{
       const b = annoBounds(a);
-      const sr = annoRectEl(b.x - 3, b.y - 3, b.w + 6, b.h + 6);
-      sr.setAttribute('class', 'anno-sel-rect');
-      sr.setAttribute('fill', 'none');
-      sr.setAttribute('stroke', '#26a0da');
-      g.appendChild(sr);
-      if (a.k === 'box')
+      // GRUPLANMIŞ öğede öğe-başına çerçeve YOK: grup tek nesne gibi görünsün
+      // diye aşağıda TEK ortak çerçeve çizilir (kullanıcı isteği v2.30.0).
+      const inGrp = !!(a.g && annoGrpCount(a.g) > 1);
+      if (!inGrp) {{
+        const sr = annoRectEl(b.x, b.y, b.w, b.h);   // dolgu __annoUi'de (ekran-sabit)
+        sr.setAttribute('class', 'anno-sel-rect');
+        sr.setAttribute('data-bx', b.x); sr.setAttribute('data-by', b.y);
+        sr.setAttribute('data-bw', b.w); sr.setAttribute('data-bh', b.h);
+        sr.setAttribute('fill', 'none');
+        sr.setAttribute('stroke', '#26a0da');
+        g.appendChild(sr);
+      }}
+      // Boyutlandırma tutamaçları yalnız TEK öğe seçiliyken — kutuda kenar,
+      // NOTTA yazı boyutu ölçeklenir (çoklu seçim/grupta bilerek yok)
+      if (!inGrp && annoSelIds.length === 1)
         ['nw', 'ne', 'sw', 'se'].forEach(c => {{
           const hd = annoRectEl(0, 0, 0, 0);
           hd.setAttribute('class', 'anno-handle');
@@ -9286,23 +9416,54 @@ function annoRender() {{
         }});
     }}
   }});
+  // Seçili GRUPLARIN ortak çerçevesi: gruplanmış öğeler tek parça gibi görünsün
+  const gseen = {{}};
+  annoSelItems().forEach(a => {{
+    if (!a.g || gseen[a.g]) return;
+    gseen[a.g] = 1;
+    const mem = annotations.filter(x => x.g === a.g);
+    if (mem.length < 2) return;
+    const b = annoSelBounds(mem);
+    const gr = annoRectEl(b.x, b.y, b.w, b.h);      // dolgu __annoUi'de
+    gr.setAttribute('class', 'anno-grp-rect');
+    gr.setAttribute('data-bx', b.x); gr.setAttribute('data-by', b.y);
+    gr.setAttribute('data-bw', b.w); gr.setAttribute('data-bh', b.h);
+    gr.setAttribute('fill', 'none');
+    gr.setAttribute('stroke', '#4ec9b0');
+    annoLayer.appendChild(gr);
+  }});
   if (__annoUi) __annoUi();
 }}
 
 const annoNoteBtn = document.getElementById('anno-note');
 const annoBoxBtn = document.getElementById('anno-box');
+const annoSelBtn = document.getElementById('anno-sel');
 function setAnnoTool(t) {{
-  annoTool = t; annoDrag = null;
+  annoTool = t; annoDrag = null; annoMarq = null;
   annoNoteBtn.classList.toggle('active', t === 'note');
   annoBoxBtn.classList.toggle('active', t === 'box');
+  annoSelBtn.classList.toggle('active', t === 'sel');
   viewport.classList.toggle('anno-mode', !!t);
   const tmp = annoLayer.querySelector('.anno-temp');
   if (tmp) tmp.remove();
+  const mq = annoLayer.querySelector('.anno-marq');
+  if (mq) mq.remove();
   if (t) annoSetSel(null);   // araç açılırken mevcut seçim bırakılır
 }}
-function annoSetSel(id) {{
-  if (annoSel === id) return;
-  annoSel = id;
+function annoSetSel(id) {{ annoSetSelMany(id == null ? [] : [id]); }}
+function annoSetSelMany(ids) {{
+  const next = annoExpand(ids);          // gruptan bir öğe = grubun tamamı
+  if (next.length === annoSelIds.length && next.every((v, i) => v === annoSelIds[i]))
+    return;                                    // değişmediyse yeniden çizme
+  annoSelIds = next;
+  annoRender();
+}}
+// Shift + tık: öğeyi seçime ekler / seçimden çıkarır
+function annoToggleSel(id) {{
+  const grp = annoExpand([id]);          // gruplanmışsa tüm grup birlikte girer/çıkar
+  const on = annoIsSel(id);
+  annoSelIds = on ? annoSelIds.filter(v => grp.indexOf(v) < 0)
+                  : annoSelIds.concat(grp.filter(v => !annoIsSel(v)));
   annoRender();
 }}
 function annoDelete(id) {{
@@ -9310,19 +9471,57 @@ function annoDelete(id) {{
   if (i < 0) return;
   annotations.splice(i, 1);
   delete annoMeasure[id];
-  if (annoSel === id) annoSel = null;
+  annoSelIds = annoSelIds.filter(v => v !== String(id));
   annoStore(); annoRender();
+}}
+// Seçili TÜM öğeleri siler (Del / mini bardaki ×)
+function annoDeleteSel() {{
+  if (!annoSelIds.length) return;
+  const n = annoSelIds.length;
+  annoSelIds.forEach(id => {{ delete annoMeasure[id]; }});
+  annotations = annotations.filter(a => !annoIsSel(a.id));
+  annoSelIds = [];
+  annoStore(); annoRender();
+  if (n > 1) hierToast(n + ' ⟪öğe silindi⟫');
+}}
+// Seçili öğelerin ortak sınırı (mini barın konumu + çoklu seçim çerçevesi)
+function annoSelBounds(sel) {{
+  let x1 = Infinity, y1 = Infinity, x2 = -Infinity, y2 = -Infinity;
+  sel.forEach(a => {{
+    const b = annoBounds(a);
+    x1 = Math.min(x1, b.x); y1 = Math.min(y1, b.y);
+    x2 = Math.max(x2, b.x + b.w); y2 = Math.max(y2, b.y + b.h);
+  }});
+  return {{ x: x1, y: y1, w: x2 - x1, h: y2 - y1 }};
 }}
 // Seçim görselleri ekran-sabit kalınlıkta tutulur + mini bar seçili öğeyi izler.
 // applyT her transform değişiminde çağırır (pan/zoom'da bar öğeyle gider).
 __annoUi = function() {{
   const k = 1 / scale;
+  // Seçim/grup çerçevelerinin DOLGUSU da ekran-sabit (eskiden kanvas
+  // birimindeydi: yakın zoomda kocaman, uzakta yok gibi görünüyordu)
+  const padRect = (r, pd) => {{
+    const bx = +r.getAttribute('data-bx'), by = +r.getAttribute('data-by');
+    const bw = +r.getAttribute('data-bw'), bh = +r.getAttribute('data-bh');
+    if (!isFinite(bx)) return;
+    r.setAttribute('x', bx - pd); r.setAttribute('y', by - pd);
+    r.setAttribute('width', Math.max(0, bw + pd * 2));
+    r.setAttribute('height', Math.max(0, bh + pd * 2));
+  }};
   annoLayer.querySelectorAll('.anno-sel-rect').forEach(r => {{
+    padRect(r, 3 * k);
     r.setAttribute('stroke-width', 1.3 * k);
     r.setAttribute('stroke-dasharray', (4 * k) + ' ' + (3 * k));
   }});
-  const a = annotations.find(x => x.id === annoSel);
-  if (a && a.k === 'box') {{
+  annoLayer.querySelectorAll('.anno-grp-rect').forEach(r => {{
+    padRect(r, 7 * k);
+    r.setAttribute('rx', 3 * k);
+    r.setAttribute('stroke-width', 1.3 * k);
+    r.setAttribute('stroke-dasharray', (9 * k) + ' ' + (5 * k));
+  }});
+  const sel = annoSelItems();
+  const a = sel.length === 1 ? sel[0] : null;   // tutamaçlar yalnız tek seçimde
+  if (a) {{                                     // kutu VE not (v2.30.0)
     const hs = 7 * k, b = annoBounds(a);
     const pos = {{ nw: [b.x, b.y], ne: [b.x + b.w, b.y],
                    sw: [b.x, b.y + b.h], se: [b.x + b.w, b.y + b.h] }};
@@ -9334,9 +9533,20 @@ __annoUi = function() {{
       h.setAttribute('stroke-width', 1 * k);
     }});
   }}
-  if (a && annoEditId === null) {{
-    const b = annoBounds(a);
-    annoColorInp.value = a.color || (a.k === 'note' ? '#c62828' : '#ffb300');
+  if (sel.length && annoEditId === null) {{
+    const b = annoSelBounds(sel);
+    const f = sel[0];
+    annoColorInp.value = f.color || (f.k === 'note' ? '#c62828' : '#ffb300');
+    annoCountEl.textContent = sel.length > 1 ? sel.length + ' ⟪öğe⟫' : '';
+    annoCountEl.style.display = sel.length > 1 ? 'block' : 'none';   // CSS'te none
+    // Düğme bağlama göre: tek grubun tamamı seçiliyse ÇÖZ, değilse GRUPLA
+    // T yalnız TEK kutu seçiliyken (yazı o kutunun içine eklenecek)
+    annoTxtBtn.style.display =
+      (sel.length === 1 && sel[0].k === 'box') ? 'block' : 'none';
+    const gsel = annoSelGroup();
+    annoGrpBtn.style.display = (sel.length > 1 || gsel) ? 'block' : 'none';
+    annoGrpBtn.textContent = gsel ? '⊟' : '⊞';
+    annoGrpBtn.classList.toggle('on', !!gsel);
     annoBar.style.display = 'flex';
     annoBar.style.left = Math.max(2, Math.round(b.x * scale + tx)) + 'px';
     annoBar.style.top = Math.max(2, Math.round(b.y * scale + ty - 32)) + 'px';
@@ -9346,6 +9556,7 @@ __annoUi = function() {{
 }};
 annoNoteBtn.onclick = () => setAnnoTool(annoTool === 'note' ? null : 'note');
 annoBoxBtn.onclick = () => setAnnoTool(annoTool === 'box' ? null : 'box');
+annoSelBtn.onclick = () => setAnnoTool(annoTool === 'sel' ? null : 'sel');
 
 // Ekran (client) koordinatı → kanvas koordinatı
 function annoCanvasXY(e) {{
@@ -9393,10 +9604,22 @@ function annoCommitEditor() {{
   annoEditId = null;
   annoEditor.style.display = 'none';
   if (editing === '') {{
-    if (text.trim())
-      annotations.push({{ k: 'note', id: annoId(), x: annoEditPos.x,
-                          y: annoEditPos.y, text: text,
-                          fs: parseFloat(annoEditor.dataset.fs) || 14 }});
+    if (text.trim()) {{
+      const nn = {{ k: 'note', id: annoId(), x: annoEditPos.x,
+                    y: annoEditPos.y, text: text,
+                    fs: parseFloat(annoEditor.dataset.fs) || 14 }};
+      annotations.push(nn);
+      // Kutunun içine eklendiyse kutuyla aynı gruba girer (kutunun grubu
+      // varsa ona katılır, yoksa yeni grup kurulur) ve grup seçili kalır.
+      if (annoPendGroup) {{
+        const bx = annotations.find(x => String(x.id) === annoPendGroup);
+        if (bx) {{
+          const gid = bx.g || ('g' + annoId());
+          bx.g = gid; nn.g = gid;
+          annoSelIds = annoExpand([nn.id]);
+        }}
+      }}
+    }}
   }} else {{
     const i = annotations.findIndex(x => String(x.id) === String(editing));
     if (i >= 0) {{
@@ -9404,6 +9627,7 @@ function annoCommitEditor() {{
       else annotations.splice(i, 1);
     }}
   }}
+  annoPendGroup = null;                  // her yolda temizlenir (iptal dahil)
   annoStore(); annoRender();
 }}
 annoEditor.addEventListener('blur', annoCommitEditor);
@@ -9456,7 +9680,7 @@ window.addEventListener('mouseup', () => {{
     annotations.push({{ k: 'box', id: nid, x: b.x, y: b.y,
                         w: b.w, h: b.h, sw: 0.5 }});
     annoStore();
-    annoSel = nid;   // yeni kutu seçili gelsin (hemen taşı/boyutlandır/sil)
+    annoSelIds = [String(nid)];  // yeni kutu seçili gelsin (taşı/boyutlandır/sil)
     annoRender();
   }}
   // mouseup'ı izleyen click seçim-temizleme sanılmasın (click bu görevden
@@ -9467,11 +9691,13 @@ window.addEventListener('mouseup', () => {{
 
 // Çift tık: notu yerinde düzenle (typewriter editörüyle)
 annoLayer.addEventListener('dblclick', e => {{
-  const g = e.target.closest('.anno-note');
+  const g = e.target.closest('.anno');
   if (!g) return;
   e.stopPropagation(); e.preventDefault();
   const a = annotations.find(x => String(x.id) === g.getAttribute('data-id'));
-  if (a) annoOpenEditor(a, null);
+  if (!a) return;
+  if (a.k === 'note') annoOpenEditor(a, null);   // yerinde düzenle
+  else annoAddTextInBox(a);                      // kutunun İÇİNE yazı ekle
 }});
 
 // Tıkla-seç + sürükle-taşı + (kutuda) köşe tutamacından boyutlandır.
@@ -9484,11 +9710,19 @@ annoLayer.addEventListener('mousedown', e => {{
   e.stopPropagation(); e.preventDefault();
   const a = annotations.find(x => String(x.id) === gEl.getAttribute('data-id'));
   if (!a) return;
-  annoSetSel(a.id);
+  // Shift + tık: seçime ekle / çıkar (taşıma BAŞLATMAZ — bu bir seçim jesti)
+  if (e.shiftKey && !hEl) {{ annoToggleSel(a.id); return; }}
+  // Zaten seçiliyse ÇOKLU seçim korunur (hepsi birlikte taşınsın); değilse
+  // yalnız o öğe seçilir — masaüstü uygulamalarındaki alışılmış davranış.
+  if (!annoIsSel(a.id)) annoSetSel(a.id);
   const p = annoCanvasXY(e);
+  // Tutamaçtan boyutlandırma yalnız o öğeye; taşıma seçili HEPSİNE
+  const grp = hEl ? [a] : annoSelItems();
   annoMove = {{ a: a, mode: hEl ? hEl.getAttribute('data-c') : 'move',
                 px: p.x, py: p.y, ox: a.x, oy: a.y,
-                ow: a.w || 0, oh: a.h || 0, moved: false }};
+                ow: a.w || 0, oh: a.h || 0, moved: false,
+                b0: annoBounds(a), fs0: a.fs || 14,   // not boyutlandırma için
+                grp: grp.map(it => ({{ a: it, ox: it.x, oy: it.y }})) }};
 }});
 window.addEventListener('mousemove', e => {{
   if (!annoMove) return;
@@ -9498,7 +9732,33 @@ window.addEventListener('mousemove', e => {{
   annoMove.moved = true;
   const a = annoMove.a, m = annoMove.mode;
   if (m === 'move') {{
-    a.x = annoMove.ox + dx; a.y = annoMove.oy + dy;
+    annoMove.grp.forEach(g => {{ g.a.x = g.ox + dx; g.a.y = g.oy + dy; }});
+  }} else if (a.k === 'note') {{
+    // NOTU KUTU GİBİ BOYUTLANDIR (v2.30.0, kullanıcı isteği): köşe sürüklemesi
+    // yazı boyutunu (fs) ölçekler, KARŞI köşe yerinde kalır. Metnin ölçüsü fs
+    // ile doğrusal büyüdüğünden yeni kutu = eski kutu × f (render'da yeniden
+    // ölçülür, sapma görünmez).
+    const b0 = annoMove.b0;
+    const sgx = (m === 'ne' || m === 'se') ? 1 : -1;
+    const sgy = (m === 'sw' || m === 'se') ? 1 : -1;
+    const nw = Math.max(1, b0.w + sgx * dx), nh = Math.max(1, b0.h + sgy * dy);
+    let f = (nw / b0.w + nh / b0.h) / 2;          // köşegen his: iki eksen ortalaması
+    const nfs = Math.max(4, Math.min(200, annoMove.fs0 * f));
+    f = nfs / annoMove.fs0;                       // kelepçeden SONRAKİ gerçek oran
+    a.fs = Math.round(nfs * 10) / 10;
+    const fx = (m === 'nw' || m === 'sw') ? b0.x + b0.w : b0.x;   // sabit köşe
+    const fy = (m === 'nw' || m === 'ne') ? b0.y + b0.h : b0.y;
+    const nx = (m === 'nw' || m === 'sw') ? fx - b0.w * f : fx;
+    const ny = (m === 'nw' || m === 'ne') ? fy - b0.h * f : fy;
+    a.x = nx - (b0.x - annoMove.ox) * f;      // kaba konum (tahmin)
+    a.y = ny - (b0.y - annoMove.oy) * f;
+    // Yazının çapaya göre ofsetinde fs ile ÖLÇEKLENMEYEN sabitler var
+    // (tspan x = a.x + 8, y = a.y + 5 + …) → tahmin f-1 oranında kayıyor.
+    // Bir kez çizip GERÇEK sınırı ölçüyor ve sabit köşeyi tam yerine oturtuyoruz.
+    annoRender();
+    const nb = annoBounds(a);
+    a.x += fx - ((m === 'nw' || m === 'sw') ? nb.x + nb.w : nb.x);
+    a.y += fy - ((m === 'nw' || m === 'ne') ? nb.y + nb.h : nb.y);
   }} else {{
     let x1 = annoMove.ox, y1 = annoMove.oy;
     let x2 = annoMove.ox + annoMove.ow, y2 = annoMove.oy + annoMove.oh;
@@ -9524,7 +9784,7 @@ window.addEventListener('mouseup', () => {{
 // Boş alana tık: seçimi bırak (pan/araç/taşıma sonrası click hariç)
 viewport.addEventListener('click', e => {{
   if (annoTool || annoJustDrew || annoMove || panMoved) return;
-  if (annoSel === null) return;
+  if (!annoSelIds.length) return;
   if (e.target.closest('.anno') || e.target.closest('#anno-bar')
       || e.target.closest('#toolbar') || e.target.closest('.tool-btn')) return;
   annoSetSel(null);
@@ -9536,19 +9796,30 @@ annoBar.addEventListener('click', e => {{
   const act = e.target.getAttribute && e.target.getAttribute('data-act');
   if (!act) return;
   e.stopPropagation();
-  const a = annotations.find(x => x.id === annoSel);
-  if (!a) return;
-  if (act === 'del') {{ annoDelete(annoSel); return; }}
+  if (act === 'del') {{ annoDeleteSel(); return; }}
+  if (act === 'grp') {{
+    if (annoSelGroup()) annoUngroupSel(); else annoGroupSel();
+    return;
+  }}
+  if (act === 'txt') {{
+    const b = annoSelItems().filter(x => x.k === 'box');
+    if (b.length === 1) annoAddTextInBox(b[0]);
+    return;
+  }}
+  const sel = annoSelItems();
+  if (!sel.length) return;
   const d = act === 'plus' ? 1 : -1;
-  if (a.k === 'note') a.fs = Math.max(4, Math.min(48, (a.fs || 14) + d * 2));
-  else a.sw = Math.max(0.5, Math.min(8, (a.sw || 1.5) + d * 0.5));
+  sel.forEach(a => {{                     // çoklu seçimde hepsine uygulanır
+    if (a.k === 'note') a.fs = Math.max(4, Math.min(48, (a.fs || 14) + d * 2));
+    else a.sw = Math.max(0.5, Math.min(8, (a.sw || 1.5) + d * 0.5));
+  }});
   annoStore(); annoRender();
 }});
 // Renk seçici: not yazısının / kutu kenarının rengi (canlı önizleme)
 annoColorInp.addEventListener('input', () => {{
-  const a = annotations.find(x => x.id === annoSel);
-  if (!a) return;
-  a.color = annoColorInp.value;
+  const sel = annoSelItems();
+  if (!sel.length) return;
+  sel.forEach(a => {{ a.color = annoColorInp.value; }});
   annoStore(); annoRender();
 }});
 
@@ -9593,10 +9864,13 @@ document.getElementById('anno-file').onchange = e => {{
     if (!items || !items.length) {{ hierToast('⟪Dosyada not bulunamadı⟫'); return; }}
     // Kimlik çakışırsa GELEN nota yeni kimlik verilir → mevcut notlar kaybolmaz
     const have = new Set(annotations.map(a => String(a.id)));
+    const gmap = {{}};
     items.forEach(a => {{
       const c = Object.assign({{}}, a);
       if (have.has(String(c.id))) c.id = annoId();
       have.add(String(c.id));
+      // Grup kimlikleri yenilenir (mevcut bir grupla çakışmasın)
+      if (c.g) c.g = gmap[c.g] || (gmap[c.g] = 'g' + annoId());
       annotations.push(c);
     }});
     annoStore(); annoRender();
@@ -9605,6 +9879,78 @@ document.getElementById('anno-file').onchange = e => {{
   rd.readAsText(f);
   e.target.value = '';
 }};
+
+// === Dikdörtgen (kement) çoklu seçim ====================================
+// İki giriş yolu: toolbar'daki **Seç** aracı (basılıyken sol sürükle) ve her an
+// geçerli **Shift + sürükle** kısayolu. Sol sürükle = pan DAVRANIŞI DEĞİŞMEDİ;
+// pan handler'ı Shift'te ve araç açıkken kendini devre dışı bırakır.
+// Yön duyarlı (AutoCAD/Altium): soldan sağa PENCERE (yalnız tamamen içeride
+// kalanlar), sağdan sola KESİŞEN (dokunan her şey).
+viewport.addEventListener('mousedown', e => {{
+  if (e.button !== 0) return;
+  if (annoTool && annoTool !== 'sel') return;      // not/kutu araçları kendi işini yapar
+  if (!annoTool && !e.shiftKey) return;            // kısayol yolu: Shift şart
+  if (e.target.closest('#toolbar') || e.target.closest('.tool-btn')
+      || e.target.closest('#detail-panel') || e.target.closest('#anno-bar')) return;
+  // Shift+TIK'ın mevcut işleri korunur: net karşılaştırma (metin katmanı) ve
+  // öğeyi seçime ekleme (annoLayer). Kement yalnız BOŞ alanda başlar.
+  if (!annoTool && e.target.closest
+      && (e.target.closest('.tl span') || e.target.closest('.anno'))) return;
+  e.preventDefault();
+  const p = annoCanvasXY(e);
+  annoMarq = {{ x0: p.x, y0: p.y, x1: p.x, y1: p.y,
+                sx: e.clientX, sy: e.clientY, moved: false }};
+}});
+function annoMarqRect() {{
+  return {{ x: Math.min(annoMarq.x0, annoMarq.x1), y: Math.min(annoMarq.y0, annoMarq.y1),
+            w: Math.abs(annoMarq.x1 - annoMarq.x0), h: Math.abs(annoMarq.y1 - annoMarq.y0) }};
+}}
+window.addEventListener('mousemove', e => {{
+  if (!annoMarq) return;
+  const p = annoCanvasXY(e);
+  annoMarq.x1 = p.x; annoMarq.y1 = p.y;
+  if (!annoMarq.moved
+      && Math.hypot(e.clientX - annoMarq.sx, e.clientY - annoMarq.sy) < 3) return;
+  annoMarq.moved = true;
+  let el = annoLayer.querySelector('.anno-marq');
+  if (!el) {{
+    el = document.createElementNS(ANNO_NS, 'rect');
+    el.setAttribute('class', 'anno-marq');
+    annoLayer.appendChild(el);
+  }}
+  const win = annoMarq.x1 >= annoMarq.x0;      // soldan sağa = pencere
+  const k = 1 / scale;                          // çerçeve ekran-sabit kalınlıkta
+  el.setAttribute('fill', win ? 'rgba(38,160,218,0.10)' : 'rgba(76,175,80,0.10)');
+  el.setAttribute('stroke', win ? '#26a0da' : '#4caf50');
+  el.setAttribute('stroke-width', 1.2 * k);
+  el.setAttribute('stroke-dasharray', win ? 'none' : (5 * k) + ' ' + (4 * k));
+  const r = annoMarqRect();
+  el.setAttribute('x', r.x); el.setAttribute('y', r.y);
+  el.setAttribute('width', r.w); el.setAttribute('height', r.h);
+}});
+window.addEventListener('mouseup', () => {{
+  if (!annoMarq) return;
+  const m = annoMarq;
+  annoMarq = null;
+  const el = annoLayer.querySelector('.anno-marq');
+  if (el) el.remove();
+  if (annoTool === 'sel') setAnnoTool(null);   // araç iş bitince kendiliğinden kapanır
+  if (!m.moved) return;                        // sürüklenmedi: sadece tık
+  const win = m.x1 >= m.x0;
+  const r = {{ x: Math.min(m.x0, m.x1), y: Math.min(m.y0, m.y1),
+               w: Math.abs(m.x1 - m.x0), h: Math.abs(m.y1 - m.y0) }};
+  const hit = annotations.filter(a => {{
+    const b = annoBounds(a);
+    return win
+      ? (b.x >= r.x && b.y >= r.y && b.x + b.w <= r.x + r.w && b.y + b.h <= r.y + r.h)
+      : !(b.x > r.x + r.w || b.x + b.w < r.x || b.y > r.y + r.h || b.y + b.h < r.y);
+  }});
+  annoSetSelMany(hit.map(a => a.id));
+  // İzleyen click seçim-temizleme sanılmasın (kutu çizimindeki desenin aynısı)
+  annoJustDrew = true;
+  setTimeout(() => {{ annoJustDrew = false; }}, 0);
+  hierToast(hit.length ? hit.length + ' ⟪öğe seçildi⟫' : '⟪Dikdörtgende öğe yok⟫');
+}});
 
 // === Not / kutu kopyala-yapıştır (Ctrl+C / Ctrl+V) =======================
 // Kopyalanan öğe İKİ yerde tutulur: sayfa içi pano (annoClip) ve sistem
@@ -9644,17 +9990,20 @@ function annoPasteAnchor() {{
   return {{ x: (cx - tx) / scale, y: (cy - ty) / scale }};
 }}
 function annoCopySel() {{
-  const a = annotations.find(x => x.id === annoSel);
-  if (!a) return false;
-  annoClip = [JSON.parse(JSON.stringify(a))];
+  const sel = annoSelItems();
+  if (!sel.length) return false;
+  const a = sel[0];
+  annoClip = JSON.parse(JSON.stringify(sel));
   const txt = JSON.stringify({{ schviz: 'anno', project: PROJECT_NAME,
                                 ts: Date.now(), items: annoClip }});
   try {{
     if (navigator.clipboard && navigator.clipboard.writeText)
       navigator.clipboard.writeText(txt).catch(() => {{}});
   }} catch (err) {{}}   // izin yok / eski tarayıcı: sayfa içi pano yeter
-  hierToast(a.k === 'note' ? '⟪Not kopyalandı — Ctrl+V ile yapıştır⟫'
-                           : '⟪Kutu kopyalandı — Ctrl+V ile yapıştır⟫');
+  hierToast(sel.length > 1
+    ? sel.length + ' ⟪öğe kopyalandı — Ctrl+V ile yapıştır⟫'
+    : (a.k === 'note' ? '⟪Not kopyalandı — Ctrl+V ile yapıştır⟫'
+                      : '⟪Kutu kopyalandı — Ctrl+V ile yapıştır⟫'));
   return true;
 }}
 // Öğeleri kanvasa ekler: her birine YENİ kimlik verilir (çakışma olmasın),
@@ -9666,13 +10015,16 @@ function annoPasteItems(items) {{
   let mx = Infinity, my = Infinity;
   items.forEach(a => {{ mx = Math.min(mx, a.x); my = Math.min(my, a.y); }});
   const dx = an.x - mx, dy = an.y - my;
-  let last = null;
+  const fresh = [], gmap = {{}};
   items.forEach(a => {{
     const c = JSON.parse(JSON.stringify(a));
     c.id = annoId(); c.x = a.x + dx; c.y = a.y + dy;
-    annotations.push(c); last = c.id;
+    // Grup kimliği YENİDEN üretilir: kopya kendi grubunu kurar, yapıştırılan
+    // öğeler orijinal grupla birleşip onu da taşınır/silinir hale getirmesin.
+    if (c.g) c.g = gmap[c.g] || (gmap[c.g] = 'g' + annoId());
+    annotations.push(c); fresh.push(String(c.id));
   }});
-  annoSel = last;              // yapıştırılan hemen taşınabilsin/silinebilsin
+  annoSelIds = fresh;          // yapıştırılanlar hemen taşınabilsin/silinebilsin
   annoStore(); annoRender();
   hierToast(items.length + ' ⟪öğe yapıştırıldı⟫');
   return true;

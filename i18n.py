@@ -574,7 +574,6 @@ _EN_HTML = {
     "Şema Sayfası": "Schematic Sheet",
     "Zemin": "Background",
     "Zemin rengi": "Background color",
-    "Görüntü": "Image",
     "Ölç": "Measure",
     "Çevir": "Flip",
     "Parçalar": "Parts",
@@ -678,7 +677,6 @@ _EN_HTML = {
     "Sil (Del)": "Delete (Del)",
 
     # --- şematik görüntüleyici --------------------------------------------
-    "Şematik": "Schematic",
     "Şematik + PCB ·": "Schematic + PCB ·",
     "Böl": "Split",
     "Sadece şematik ( 1 )": "Schematic only ( 1 )",

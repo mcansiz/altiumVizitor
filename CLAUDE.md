@@ -527,15 +527,16 @@ Bir değişiklik yaptıktan sonra:
   `document.getElementById`'sine, taşınan çubuğun İÇİNE de bakan bir yedek
   eklenir (yalnız çocuklar; çubuğun kendi id'si bilerek çözülmez ki şematiğin
   `hierToast`'u '#toolbar' bulamayınca doğru şekilde varsayılan konuma düşsün).
-  **Mod düğmeleri MUTLAK ortalanır** (`position:absolute; left:50%`): sağdaki
-  araç seti moda göre genişlik değiştirdiğinden akışta kalsalardı her geçişte
-  kayarlardı (kullanıcı: "geçişlerde yer değiştirmesin"). Çakışma sağ bloğun
-  `max-width:calc(50% - 110px)` sınırıyla yapısal olarak engellenir; sağ blok
-  SARMAZ, sığmayınca **yatay kayar** ve `#pane-tools` yüksekliği sabittir
-  (27px) — yoksa kaydırma çubuğu kimi modda çıkıp kimi modda çıkmayınca üst
-  çubuk 34↔44px oynuyordu. `.vm-btn`'ler hep kalın (aktif olunca kalınlaşsaydı
-  grup genişliği 1-2px değişirdi). Ölçüldü: 1920 ve 1600px'te üst çubuk 38px
-  ve mod düğmeleri dört modda da **birebir aynı** konumda.
+  **Mod düğmeleri SOL BAŞTA, proje adının yanında** (kullanıcı isteği):
+  konumları sağdaki araç setinden tamamen bağımsız olduğundan geçişlerde asla
+  oynamazlar — ölçüldü: dört modda ve 1280/1600/1920px'te `[93, 5]`. (Önce
+  mutlak ortalanmışlardı; sağ blok sarınca ortalama da kayıyordu, ayrıca
+  ortalamayı korumak için gereken yatay kaydırma çubuğunu kullanıcı
+  beğenmedi.) Sağ blok **yatay KAYMAZ, alt alta SARAR** ("browser küçülürse
+  buna göre alt alta sığdır"): 1280px Böl modunda üst çubuk 62px'e uzar,
+  diğer tüm mod/genişliklerde 34px. `.vm-btn`'ler hep kalın (aktif olunca
+  kalınlaşsaydı grup genişliği 1-2px değişirdi), rozet tek satır
+  (`white-space:nowrap`).
   Doğrulama **25/25** (üç çubuğun taşınması, moda göre görünürlük, PCB ⟳/Ölç
   ve 3D Üst düğmelerinin iframe'e etkisi + aktif vurgu, konum sabitliği,
   0 JS hatası).
@@ -562,8 +563,22 @@ Bir değişiklik yaptıktan sonra:
   panel araçları + tam ekran + **`Schematic Viz Generator · v{APP_VERSION}`**
   rozeti. **"Sayfa…" açılır menüsü KALDIRILDI** (hiyerarşi sekmesi yeterli —
   şematik viewer'ın kendisinden de çıktı) ve cross-probe açıklama metni
-  kaldırıldı. Tam ekran düğmesi araç düğmeleriyle aynı yüksekliğe getirildi.
-  Rozet <1750px, proje adı <820px gizlenir (araç satırı bölünmesin).
+  kaldırıldı. Mod düğmesi "Şematik" → **SCH**. Tam ekran düğmesi araç
+  düğmeleriyle aynı yüksekliğe getirildi. Rozet <1000px, proje adı <820px
+  gizlenir.
+- **Mükerrer düğme temizliği** (v2.30.0, kullanıcı isteği: "aynı özelliğe
+  sahip fazla buton olmasın, burada detaylı düşünmen gerekiyor"):
+  (1) şematikteki **Reset KALDIRILDI** — `resetView()` sabit bir görünüme
+  atlıyordu (tx=40, ty=40, scale=0.30) ama `Tümü` sayfaları GERÇEKTEN
+  sığdırıyor: aynı amaç, Reset zayıf olanı (`0` kısayolu ve fonksiyon duruyor).
+  (2) PCB'deki **"Görüntü" → "PNG"** (şematiktekiyle aynı iş, artık aynı ad).
+  (3) **Böl modunda panel etiketi**: iki set birden görününce `+`, `−`, `?`,
+  `PNG` düğmeleri iki panelde de bulunduğundan setlerin başına **SCH** / **PCB**
+  çipi konur (`.ptag`, yalnız `#pane-tools.split` iken görünür). Düğmeler
+  KALDIRILMADI: her biri KENDİ panelini etkiliyor (şematiğin `+`'sı şemayı,
+  PCB'ninki board'u), yani işlev mükerrer değil — belirsizlik etiketle çözüldü.
+  `Tümü` (tüm sayfalar) ile `Sığdır` (board) da farklı kapsamda olduğundan
+  ikisi de duruyor.
 - **Not/kutu kopyala-yapıştır** (v2.29.0): seçili öğe **Ctrl+C**, **Ctrl+V**
   ile **farenin altına** yapıştırılır (fare kanvasın dışındaysa görünüm
   merkezine); kopya YENİ kimlik alır, orijinalden bağımsızdır. Kopyalanan öğe

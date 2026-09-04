@@ -4108,29 +4108,30 @@ def build_combined_shell(sch_html, pcb_html, timestamp, project_name, have_pcb,
              border-bottom:1px solid #333; display:flex; align-items:flex-start;
              padding:5px 12px; gap:14px; color:#ccc; font-size:12px; }}
   #topbar .title {{ color:#4ec9b0; font-weight:bold; line-height:23px;
-                    white-space:nowrap;
-                    overflow:hidden; text-overflow:ellipsis;
-                    max-width:calc(50% - 120px); }}
+                    white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
+                    max-width:280px; flex:0 0 auto; }}
   /* Araçlar üst çubuğa taşındığından yer dar: ekran iyice daralınca rozet
      çekilir ki araç satırı bölünmesin (açıklama metni v2.30.0'da kalktı). */
-  /* Araç seti geniş (şematikte 13 düğme): rozet erken çekilir ki üst çubuk
-     her modda TEK SATIR kalsın — yoksa satır sayısı moda göre değişip
-     proje adı/tam ekran düğmesi dikey oynuyordu. */
-  @media (max-width: 1750px) {{ #topbar .badge {{ display:none; }} }}
-  #topbar .badge {{ color:#555; font-size:11px; }}
+  @media (max-width: 1000px) {{ #topbar .badge {{ display:none; }} }}
+  #topbar .badge {{ color:#555; font-size:11px; white-space:nowrap;
+                    align-self:center; }}
   /* === Taşınan panel araç çubukları (şematik / PCB / 3D) ===
      iframe'lerin stil sayfaları burada GEÇERSİZ (düğümler başka belgeye
      alındı) → gereken kurallar bilerek TEKRARLANIR ve üçü de aynı ölçüye
      getirilir. Tek dosya çıktılarda hiçbir şey değişmez (orada toolbar
      kendi kanvasının üstünde yüzmeye devam eder). */
-  /* Yükseklik SABİT (düğme 23px + 4px kaydırma çubuğu payı): kaydırma çubuğu
-     kimi modda çıkıp kimi modda çıkmayınca üst çubuk 34↔44px oynuyordu. */
-  #pane-tools {{ display:flex; align-items:center; min-width:0; height:27px;
-                 overflow-x:auto; overflow-y:hidden; scrollbar-width:thin; }}
-  #pane-tools::-webkit-scrollbar {{ height:4px; }}
-  #pane-tools::-webkit-scrollbar-thumb {{ background:#444; border-radius:2px; }}
-  #pane-tools .ptools {{ display:flex; gap:5px; flex-wrap:nowrap;
+  #pane-tools {{ display:flex; flex:1 1 auto; min-width:0;
+                 justify-content:flex-end; }}
+  #pane-tools .ptools {{ display:flex; gap:5px; flex-wrap:wrap;
                          align-items:center; justify-content:flex-end; }}
+  /* Böl modunda İKİ set birden görünür; hangi düğmenin hangi panele ait
+     olduğu belirsiz kalmasın diye setin başına panel etiketi konur
+     (aynı simgeli +, −, ?, PNG düğmeleri iki panelde de var). */
+  #pane-tools .ptag {{ display:none; color:#4ec9b0; font-size:10px;
+                       font-weight:bold; letter-spacing:0.5px; padding:0 3px;
+                       align-self:center; }}
+  #pane-tools.split .ptag {{ display:inline-block; }}
+  #pane-tools.split .ptools {{ border-left:1px solid #333; padding-left:6px; }}
   #pane-tools .ptools[hidden] {{ display:none; }}
   #pane-tools .tool-btn, #pane-tools .tb, #pane-tools .b3d {{
              background:rgba(40,40,40,0.95); color:#ccc; border:1px solid #444;
@@ -4157,20 +4158,20 @@ def build_combined_shell(sch_html, pcb_html, timestamp, project_name, have_pcb,
                               white-space:nowrap; overflow:hidden;
                               text-overflow:ellipsis; pointer-events:none; }}
   #pane-tools #current-net:empty {{ display:none; }}
-  /* Mod düğmeleri çubuğun TAM ORTASINDA ve akıştan bağımsız: sağdaki araç
-     seti moda göre değiştiğinden (şematik / PCB / 3D) akışta kalsalardı her
-     geçişte kayarlardı — kullanıcı isteği "geçişlerde yer değiştirmesin".
-     Çakışma sağ grubun max-width'i ile yapısal olarak engellenir. */
-  #view-modes {{ position:absolute; left:50%; top:5px; line-height:1;
-                 transform:translateX(-50%); display:flex; gap:2px; z-index:2; }}
+  /* Mod düğmeleri SOL BAŞTA, proje adının hemen yanında: konumları sağdaki
+     araç setinden (moda göre değişir) tamamen bağımsız → geçişlerde asla
+     oynamazlar. (Önce ortalanmıştı; sağ blok sarınca ortalama da kayıyordu.) */
+  #view-modes {{ display:flex; gap:2px; flex:0 0 auto; line-height:1; }}
   /* Aktif düğme kalınlaşınca grup genişliği değişip düğmeler 1-2px oynuyordu
      → hepsi kalın; aktiflik yalnız renkle belli olur. */
   .vm-btn {{ font-weight:bold; }}
   /* Sağ blok: araçlar + tam ekran + rozet. Ortadaki mod grubuna asla
      giremesin diye ekranın yarısı - mod grubunun yarısı ile sınırlı. */
+  /* Sağ blok: araçlar + tam ekran + rozet. Araçlar sığmazsa YATAY KAYMAZ,
+     ALT ALTA SARAR (kullanıcı isteği) → üst çubuk gerektiği kadar uzar. */
   #right-group {{ margin-left:auto; display:flex; align-items:flex-start;
                   gap:10px; flex-wrap:nowrap; justify-content:flex-end;
-                  max-width:calc(50% - 110px); min-width:0; }}
+                  flex:1 1 auto; min-width:0; }}
   .vm-btn {{ background:#222; border:1px solid #3a3a3a; color:#bbb;
              font-size:11px; padding:3px 10px; cursor:pointer; }}
   .vm-btn:first-child {{ border-radius:4px 0 0 4px; }}
@@ -4213,13 +4214,12 @@ def build_combined_shell(sch_html, pcb_html, timestamp, project_name, have_pcb,
     #topbar {{ height:auto; min-height:40px; padding:3px 8px; gap:8px; }}
     #topbar .badge, #topbar .title {{ display:none; }}
     #view-modes {{ margin:0 auto; }}
-    /* Dar ekranda araçlar tam satır kaplar (gizlenmez: tek erişim yolu),
-       mod düğmeleri akışa döner (mutlak ortalama dar ekranda çakışırdı) */
+    /* Dar ekranda araçlar tam satır kaplar (gizlenmez: tek erişim yolu) */
     #topbar {{ flex-wrap:wrap; }}
-    #view-modes {{ position:static; transform:none; margin:0 auto; }}
-    #right-group {{ max-width:100%; flex:1 1 100%; }}
-    #pane-tools {{ flex:1 1 100%; overflow:visible; }}
-    #pane-tools .ptools {{ justify-content:center; flex-wrap:wrap; }}
+    #view-modes {{ margin:0 auto; }}
+    #right-group {{ flex:1 1 100%; }}
+    #pane-tools {{ flex:1 1 100%; }}
+    #pane-tools .ptools {{ justify-content:center; }}
     #pane-tools .tool-btn, #pane-tools .tb, #pane-tools .b3d {{
                padding:6px 9px; font-size:12px; }}
     .vm-btn {{ padding:9px 14px; font-size:12px; }}
@@ -4231,7 +4231,7 @@ def build_combined_shell(sch_html, pcb_html, timestamp, project_name, have_pcb,
 <div id="topbar">
   <span class="title">{project_name}</span>
   <div id="view-modes">
-    <button class="vm-btn active" id="vm-sch" title="⟪Sadece şematik ( 1 )⟫">⟪Şematik⟫</button>
+    <button class="vm-btn active" id="vm-sch" title="⟪Sadece şematik ( 1 )⟫">SCH</button>
     <button class="vm-btn" id="vm-both" title="⟪Yan yana ( 2 )⟫">⟪Böl⟫</button>
     <button class="vm-btn" id="vm-pcb" title="⟪Sadece PCB ( 3 )⟫">PCB</button>
     {btn_3d}
@@ -4315,7 +4315,11 @@ function hoistTools(frame, srcId, key) {{
     d.getElementById = id => orig(id)
       || tb.querySelector('[id="' + String(id).replace(/"/g, '') + '"]');
     tb.classList.add('ptools');
+    const tag = document.createElement('span');   // Böl modunda görünür
+    tag.className = 'ptag';
+    tag.textContent = key === 'sch' ? 'SCH' : (key === 'pcb' ? 'PCB' : '3D');
     paneToolsEl.appendChild(document.adoptNode(tb));
+    tb.insertBefore(tag, tb.firstChild);
     hoisted[key] = tb;
     // Tıklamadan sonra odak KABUKTA kalırsa iframe'in klavye kısayolları
     // (/, B, Del, M, R, Ctrl+C/V/A/G…) çalışmaz → odağı panele geri ver.
@@ -4331,6 +4335,8 @@ const PANE_TOOLS = {{ sch: ['sch'], both: ['sch', 'pcb'],
 function applyPaneTools() {{
   const show = PANE_TOOLS[curMode] || [];
   Object.keys(hoisted).forEach(k => {{ hoisted[k].hidden = show.indexOf(k) < 0; }});
+  // İki set birden görünüyorsa (Böl) panel etiketleri açılır
+  paneToolsEl.classList.toggle('split', show.length > 1);
 }}
 
 // Performans: açılış SADECE şematik — PCB ve 3D tembel yüklenir (ilk o moda
@@ -4705,7 +4711,7 @@ __MOBILE_META__
       <button class="tb" id="b-meas" title="⟪Ölçüm ( M )⟫">⟪Ölç⟫</button>
       <button class="tb active" id="b-pin" title="⟪Pad no + net ( P )⟫">Pin</button>
       <button class="tb" id="b-bg" title="⟪Zemin rengi⟫">⟪Zemin⟫</button>
-      <button class="tb" id="b-png" title="⟪Görünümü PNG indir⟫">⟪Görüntü⟫</button>
+      <button class="tb" id="b-png" title="⟪Görünümü PNG indir⟫">PNG</button>
       <button class="tb" id="b-help" title="⟪Yardım ( ? )⟫">?</button>
     </div>
     <div id="info">⟪Sürükle / tek parmak: kaydır · Tekerlek / iki parmak: zoom · Tıkla: komponent · Çift tık: net⟫</div>
@@ -7456,7 +7462,6 @@ def build_html(sheets, net_list, components, timestamp,
     <div class="toolbar-sep"></div>
     <button class="tool-btn" id="shortcut-btn" title="⟪Kısayollar (?)⟫">?</button>
     <button class="tool-btn" id="export-png">PNG</button>
-    <button class="tool-btn" id="reset-view">Reset</button>
     <button class="tool-btn" id="clear-sel">Clear</button>
   </div>
   <div id="zoom-info">Zoom <span id="zoom-val">0.30x</span></div>
@@ -9265,7 +9270,6 @@ document.addEventListener('keydown', e => {{
   }}
 }});
 
-document.getElementById('reset-view').onclick = resetView;
 document.getElementById('clear-sel').onclick = clearSelection;
 
 // === Renk picker'lar - canlı güncelleme ===

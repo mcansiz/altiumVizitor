@@ -572,8 +572,6 @@ _EN_HTML = {
     "Dönüş": "Rotation",
     "PCB Konumu": "PCB Position",
     "Şema Sayfası": "Schematic Sheet",
-    "Sayfa…": "Sheet…",
-    "Sayfaya git": "Go to sheet",
     "Zemin": "Background",
     "Zemin rengi": "Background color",
     "Görüntü": "Image",
@@ -687,8 +685,6 @@ _EN_HTML = {
     "Yan yana ( 2 )": "Side by side ( 2 )",
     "Sadece PCB ( 3 )": "PCB only ( 3 )",
     "3D görünüm ( 4 )": "3D view ( 4 )",
-    "Bir tarafta komponente tıkla → diğerlerinde otomatik gösterilir":
-        "Click a component on one side → it is shown automatically on the others",
     "PCB hazırlanıyor…": "Preparing PCB…",
     "3D hazırlanıyor…": "Preparing 3D…",
     "Net adına tık (şema/sol panel)": "Click a net name (schematic/left panel)",

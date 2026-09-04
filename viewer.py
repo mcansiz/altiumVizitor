@@ -4104,51 +4104,75 @@ def build_combined_shell(sch_html, pcb_html, timestamp, project_name, have_pcb,
   html,body {{ height:100dvh; }}
   /* Şematik toolbar'ı buraya TAŞINDIĞINDAN (aşağıdaki hoist) çubuk sabit
      yükseklikte olamaz: dar pencerede araçlar ikinci satıra sarar. */
-  #topbar {{ min-height:34px; background:#161616; border-bottom:1px solid #333;
-             display:flex; align-items:center; padding:3px 12px; gap:14px;
-             color:#ccc; font-size:12px; flex-wrap:wrap; }}
-  #topbar .title {{ color:#4ec9b0; font-weight:bold; }}
-  #topbar .hint {{ color:#666; white-space:nowrap; overflow:hidden;
-                   text-overflow:ellipsis; min-width:0; }}
-  /* Araçlar üst çubuğa taşındığından yer dar: açıklama ve rozet, ekran
-     daraldıkça sırayla çekilir ki araç satırı bölünmesin. */
-  @media (max-width: 1580px) {{ #topbar .hint {{ display:none; }} }}
-  @media (max-width: 1150px) {{ #topbar .badge {{ display:none; }} }}
+  #topbar {{ position:relative; min-height:34px; background:#161616;
+             border-bottom:1px solid #333; display:flex; align-items:flex-start;
+             padding:5px 12px; gap:14px; color:#ccc; font-size:12px; }}
+  #topbar .title {{ color:#4ec9b0; font-weight:bold; line-height:23px;
+                    white-space:nowrap;
+                    overflow:hidden; text-overflow:ellipsis;
+                    max-width:calc(50% - 120px); }}
+  /* Araçlar üst çubuğa taşındığından yer dar: ekran iyice daralınca rozet
+     çekilir ki araç satırı bölünmesin (açıklama metni v2.30.0'da kalktı). */
+  /* Araç seti geniş (şematikte 13 düğme): rozet erken çekilir ki üst çubuk
+     her modda TEK SATIR kalsın — yoksa satır sayısı moda göre değişip
+     proje adı/tam ekran düğmesi dikey oynuyordu. */
+  @media (max-width: 1750px) {{ #topbar .badge {{ display:none; }} }}
   #topbar .badge {{ color:#555; font-size:11px; }}
-  /* === Taşınan şematik toolbar'ı === iframe'in stil sayfası burada GEÇERSİZ
-     (düğüm başka belgeye alındı) → gereken kurallar bilerek TEKRARLANIR.
-     Şematik viewer'ın kendi kuralları değişmedi; tek dosya çıktıda toolbar
-     yine kanvasın üstünde yüzer. */
-  #sch-tools {{ flex:1 1 320px; min-width:0; display:flex; margin-left:auto; }}
-  #sch-tools #toolbar {{ display:flex; gap:5px; flex-wrap:wrap; width:100%;
+  /* === Taşınan panel araç çubukları (şematik / PCB / 3D) ===
+     iframe'lerin stil sayfaları burada GEÇERSİZ (düğümler başka belgeye
+     alındı) → gereken kurallar bilerek TEKRARLANIR ve üçü de aynı ölçüye
+     getirilir. Tek dosya çıktılarda hiçbir şey değişmez (orada toolbar
+     kendi kanvasının üstünde yüzmeye devam eder). */
+  /* Yükseklik SABİT (düğme 23px + 4px kaydırma çubuğu payı): kaydırma çubuğu
+     kimi modda çıkıp kimi modda çıkmayınca üst çubuk 34↔44px oynuyordu. */
+  #pane-tools {{ display:flex; align-items:center; min-width:0; height:27px;
+                 overflow-x:auto; overflow-y:hidden; scrollbar-width:thin; }}
+  #pane-tools::-webkit-scrollbar {{ height:4px; }}
+  #pane-tools::-webkit-scrollbar-thumb {{ background:#444; border-radius:2px; }}
+  #pane-tools .ptools {{ display:flex; gap:5px; flex-wrap:nowrap;
                          align-items:center; justify-content:flex-end; }}
-  #sch-tools .tool-btn {{ background:rgba(40,40,40,0.95); color:#ccc;
-                          border:1px solid #444; padding:3px 8px; cursor:pointer;
-                          font-family:inherit; font-size:11px; border-radius:3px; }}
-  #sch-tools .tool-btn:hover {{ background:#333; color:#4ec9b0;
-                                border-color:#4ec9b0; }}
-  #sch-tools .tool-btn.active {{ background:#2a4a6a; border-color:#4ec9b0;
-                                 color:#4ec9b0; }}
-  #sch-tools #sheet-jump {{ max-width:130px; appearance:auto;
-                            font-family:inherit; }}
-  #sch-tools .toolbar-sep {{ width:1px; background:#444; margin:2px 3px;
-                             align-self:stretch; }}
-  #sch-tools .color-input {{ width:22px; height:22px; border:1px solid #444;
-                             border-radius:3px; cursor:pointer; overflow:hidden;
-                             padding:0; background:transparent; display:flex;
-                             align-items:center; justify-content:center; }}
-  #sch-tools .color-input:hover {{ border-color:#888; }}
-  #sch-tools .color-input input[type="color"] {{ width:200%; height:200%;
-                             border:none; padding:0; cursor:pointer;
-                             transform:translate(-25%, -25%); }}
-  #sch-tools #current-net {{ align-self:center; color:#4ec9b0; font-size:11px;
-                             font-weight:bold; max-width:190px;
-                             white-space:nowrap; overflow:hidden;
-                             text-overflow:ellipsis; pointer-events:none; }}
-  #sch-tools #current-net:empty {{ display:none; }}
-  #view-modes {{ display:flex; gap:2px; margin-left:18px; }}
+  #pane-tools .ptools[hidden] {{ display:none; }}
+  #pane-tools .tool-btn, #pane-tools .tb, #pane-tools .b3d {{
+             background:rgba(40,40,40,0.95); color:#ccc; border:1px solid #444;
+             padding:3px 7px; cursor:pointer; font-family:inherit;
+             font-size:11px; border-radius:3px; line-height:15px; }}
+  #pane-tools .tool-btn:hover, #pane-tools .tb:hover, #pane-tools .b3d:hover {{
+             background:#333; color:#4ec9b0; border-color:#4ec9b0; }}
+  #pane-tools .tool-btn.active, #pane-tools .tb.active {{
+             background:#2a4a6a; border-color:#4ec9b0; color:#4ec9b0; }}
+  #pane-tools .b3d.on {{ background:#4ec9b0; color:#0a0a0a;
+                         border-color:#4ec9b0; }}
+  #pane-tools .toolbar-sep {{ width:1px; background:#444; margin:2px 3px;
+                              align-self:stretch; }}
+  #pane-tools .color-input {{ width:22px; height:22px; border:1px solid #444;
+                              border-radius:3px; cursor:pointer; overflow:hidden;
+                              padding:0; background:transparent; display:flex;
+                              align-items:center; justify-content:center; }}
+  #pane-tools .color-input:hover {{ border-color:#888; }}
+  #pane-tools .color-input input[type="color"] {{ width:200%; height:200%;
+                              border:none; padding:0; cursor:pointer;
+                              transform:translate(-25%, -25%); }}
+  #pane-tools #current-net {{ align-self:center; color:#4ec9b0; font-size:11px;
+                              font-weight:bold; max-width:190px;
+                              white-space:nowrap; overflow:hidden;
+                              text-overflow:ellipsis; pointer-events:none; }}
+  #pane-tools #current-net:empty {{ display:none; }}
+  /* Mod düğmeleri çubuğun TAM ORTASINDA ve akıştan bağımsız: sağdaki araç
+     seti moda göre değiştiğinden (şematik / PCB / 3D) akışta kalsalardı her
+     geçişte kayarlardı — kullanıcı isteği "geçişlerde yer değiştirmesin".
+     Çakışma sağ grubun max-width'i ile yapısal olarak engellenir. */
+  #view-modes {{ position:absolute; left:50%; top:5px; line-height:1;
+                 transform:translateX(-50%); display:flex; gap:2px; z-index:2; }}
+  /* Aktif düğme kalınlaşınca grup genişliği değişip düğmeler 1-2px oynuyordu
+     → hepsi kalın; aktiflik yalnız renkle belli olur. */
+  .vm-btn {{ font-weight:bold; }}
+  /* Sağ blok: araçlar + tam ekran + rozet. Ortadaki mod grubuna asla
+     giremesin diye ekranın yarısı - mod grubunun yarısı ile sınırlı. */
+  #right-group {{ margin-left:auto; display:flex; align-items:flex-start;
+                  gap:10px; flex-wrap:nowrap; justify-content:flex-end;
+                  max-width:calc(50% - 110px); min-width:0; }}
   .vm-btn {{ background:#222; border:1px solid #3a3a3a; color:#bbb;
-             font-size:11px; padding:3px 12px; cursor:pointer; }}
+             font-size:11px; padding:3px 10px; cursor:pointer; }}
   .vm-btn:first-child {{ border-radius:4px 0 0 4px; }}
   .vm-btn:last-child {{ border-radius:0 4px 4px 0; }}
   .vm-btn:hover {{ color:#4ec9b0; border-color:#4ec9b0; }}
@@ -4157,8 +4181,11 @@ def build_combined_shell(sch_html, pcb_html, timestamp, project_name, have_pcb,
   /* Tam ekran düğmesi mod grubunun DIŞINDA duruyor → kendi köşe yuvarlaması
      olmalı (.vm-btn:first/last-child kuralları grup içindekiler için).
      Özgüllük eşit ama bu kural SONRA geldiği için kazanır. */
-  .vm-btn.fs-btn {{ border-radius:4px; margin-left:10px; padding:3px 9px;
-                    display:inline-flex; align-items:center; }}
+  /* Tam ekran düğmesi araç düğmeleriyle AYNI yükseklikte görünsün
+     (kullanıcı isteği: "biraz küçük görünüyor") — ikon da büyütüldü. */
+  .vm-btn.fs-btn {{ border-radius:3px; margin-left:10px; padding:4px 10px;
+                    display:inline-flex; align-items:center;
+                    justify-content:center; }}
   body {{ display:flex; flex-direction:column; }}
   #topbar {{ flex-shrink:0; }}
   #split {{ display:flex; flex:1; min-height:0; width:100%; }}
@@ -4184,12 +4211,17 @@ def build_combined_shell(sch_html, pcb_html, timestamp, project_name, have_pcb,
      düğmeleri parmakla basılacak kadar büyür. Ayraç da kalınlaşır. === */
   @media (max-width: 820px) {{
     #topbar {{ height:auto; min-height:40px; padding:3px 8px; gap:8px; }}
-    #topbar .hint, #topbar .badge, #topbar .title {{ display:none; }}
+    #topbar .badge, #topbar .title {{ display:none; }}
     #view-modes {{ margin:0 auto; }}
-    /* Dar ekranda araçlar tam satır kaplar (gizlenmez: tek erişim yolu) */
-    #sch-tools {{ flex:1 1 100%; margin-left:0; }}
-    #sch-tools #toolbar {{ justify-content:center; }}
-    #sch-tools .tool-btn {{ padding:6px 9px; font-size:12px; }}
+    /* Dar ekranda araçlar tam satır kaplar (gizlenmez: tek erişim yolu),
+       mod düğmeleri akışa döner (mutlak ortalama dar ekranda çakışırdı) */
+    #topbar {{ flex-wrap:wrap; }}
+    #view-modes {{ position:static; transform:none; margin:0 auto; }}
+    #right-group {{ max-width:100%; flex:1 1 100%; }}
+    #pane-tools {{ flex:1 1 100%; overflow:visible; }}
+    #pane-tools .ptools {{ justify-content:center; flex-wrap:wrap; }}
+    #pane-tools .tool-btn, #pane-tools .tb, #pane-tools .b3d {{
+               padding:6px 9px; font-size:12px; }}
     .vm-btn {{ padding:9px 14px; font-size:12px; }}
     #divider {{ width:12px; }}
   }}
@@ -4198,20 +4230,21 @@ def build_combined_shell(sch_html, pcb_html, timestamp, project_name, have_pcb,
 <body>
 <div id="topbar">
   <span class="title">{project_name}</span>
-  <span class="hint">⟪Bir tarafta komponente tıkla → diğerlerinde otomatik gösterilir⟫</span>
-  <div id="sch-tools"></div>
   <div id="view-modes">
     <button class="vm-btn active" id="vm-sch" title="⟪Sadece şematik ( 1 )⟫">⟪Şematik⟫</button>
     <button class="vm-btn" id="vm-both" title="⟪Yan yana ( 2 )⟫">⟪Böl⟫</button>
     <button class="vm-btn" id="vm-pcb" title="⟪Sadece PCB ( 3 )⟫">PCB</button>
     {btn_3d}
   </div>
-  <button class="vm-btn fs-btn" id="vm-fs" title="⟪Tam ekran aç / kapat ( F11 )⟫">
-    <svg viewBox="0 0 16 16" width="11" height="11" aria-hidden="true"><path
-      fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"
-      d="M1.6 5.4V1.6H5.4M10.6 1.6H14.4V5.4M14.4 10.6V14.4H10.6M5.4 14.4H1.6V10.6"/></svg>
-  </button>
-  <span class="badge">Schematic Viz Generator · v{APP_VERSION}</span>
+  <div id="right-group">
+    <div id="pane-tools"></div>
+    <button class="vm-btn fs-btn" id="vm-fs" title="⟪Tam ekran aç / kapat ( F11 )⟫">
+      <svg viewBox="0 0 16 16" width="13" height="13" aria-hidden="true"><path
+        fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"
+        d="M1.6 5.4V1.6H5.4M10.6 1.6H14.4V5.4M14.4 10.6V14.4H10.6M5.4 14.4H1.6V10.6"/></svg>
+    </button>
+    <span class="badge">Schematic Viz Generator · v{APP_VERSION}</span>
+  </div>
 </div>
 <div id="split">
   <div class="pane" id="pane-sch">
@@ -4257,43 +4290,76 @@ async function loadFrame(id, b64) {{
       + '⟪Lütfen tarayıcıyı güncelleyin.⟫</body>'
     : html;
 }}
-// === Şematik toolbar'ını üst çubuğa taşı (kullanıcı isteği) ===============
-// iframe AYNI ORIGIN'de (srcdoc) olduğundan düğümü `adoptNode` ile alıyoruz;
-// üzerindeki olay dinleyicileri KORUNUR ve iframe'in kendi kapanışlarında
-// çalışmaya devam eder → mesajlaşma protokolü GEREKMEZ. Taşınmayan tek şey
-// CSS: gereken kurallar kabuğun stil sayfasında tekrar tanımlı (#sch-tools).
-const schToolsEl = document.getElementById('sch-tools');
-let schToolsDone = false;
-function hoistSchToolbar() {{
-  if (schToolsDone) return;
+// === Panel araç çubuklarını üst çubuğa taşı (kullanıcı isteği) ============
+// iframe'ler AYNI ORIGIN'de (srcdoc) olduğundan düğümleri `adoptNode` ile
+// alıyoruz; üzerlerindeki olay dinleyicileri KORUNUR ve iframe'in kendi
+// kapanışlarında çalışmayı sürdürür → mesajlaşma protokolü GEREKMEZ.
+// Taşınmayan iki şey:
+//   1) CSS  → gereken kurallar kabuğun stil sayfasında tekrar tanımlı.
+//   2) `document.getElementById` ile ÇALIŞMA ANINDA yapılan sorgular →
+//      PCB kodu düğme durumunu böyle güncelliyor (ör. setOrient içinde
+//      getElementById('b-mir').classList...). Düğme artık o belgede
+//      olmadığından null dönerdi. Bu yüzden iframe'in getElementById'sine
+//      taşınan çubuğun İÇİNE de bakan bir yedek eklenir (yalnız çocuklar:
+//      çubuğun KENDİ id'si bilerek çözülmez, çünkü şematiğin hierToast'u
+//      '#toolbar' bulamayınca doğru şekilde varsayılan konuma düşer).
+const paneToolsEl = document.getElementById('pane-tools');
+const hoisted = {{}};              // mod anahtarı → taşınan çubuk düğümü
+function hoistTools(frame, srcId, key) {{
+  if (hoisted[key]) return;
   try {{
-    const d = frameSch.contentDocument;
-    const tb = d && d.getElementById('toolbar');
+    const d = frame.contentDocument;
+    const tb = d && d.getElementById(srcId);
     if (!tb) return;
-    schToolsEl.appendChild(document.adoptNode(tb));
-    schToolsDone = true;
+    const orig = d.getElementById.bind(d);
+    d.getElementById = id => orig(id)
+      || tb.querySelector('[id="' + String(id).replace(/"/g, '') + '"]');
+    tb.classList.add('ptools');
+    paneToolsEl.appendChild(document.adoptNode(tb));
+    hoisted[key] = tb;
     // Tıklamadan sonra odak KABUKTA kalırsa iframe'in klavye kısayolları
-    // (/, B, Del, Ctrl+C/V/A/G…) çalışmaz → odağı şematiğe geri ver.
+    // (/, B, Del, M, R, Ctrl+C/V/A/G…) çalışmaz → odağı panele geri ver.
     tb.addEventListener('click', () => {{
-      try {{ frameSch.contentWindow.focus(); }} catch (e) {{}}
+      try {{ frame.contentWindow.focus(); }} catch (e) {{}}
     }});
-  }} catch (e) {{}}   // farklı origin / erken çağrı: toolbar iframe'de kalır
+    applyPaneTools();
+  }} catch (e) {{}}   // farklı origin / erken çağrı: çubuk panelinde kalır
+}}
+// Hangi panelin araçları görünecek: Böl modunda ikisi birden.
+const PANE_TOOLS = {{ sch: ['sch'], both: ['sch', 'pcb'],
+                      pcb: ['pcb'], td: ['td'] }};
+function applyPaneTools() {{
+  const show = PANE_TOOLS[curMode] || [];
+  Object.keys(hoisted).forEach(k => {{ hoisted[k].hidden = show.indexOf(k) < 0; }});
 }}
 
 // Performans: açılış SADECE şematik — PCB ve 3D tembel yüklenir (ilk o moda
 // geçişte). Açılışta ekstra yük yok; şematik hemen etkileşime hazır.
 let curMode = 'sch';
-frameSch.addEventListener('load', () => setTimeout(hoistSchToolbar, 60));
+frameSch.addEventListener('load',
+  () => setTimeout(() => hoistTools(frameSch, 'toolbar', 'sch'), 60));
 loadFrame('frame-sch', SCH_GZ);
 function repostSel(fr) {{ setTimeout(() => {{
   if (lastSel) postTo(fr, {{type:'xprobe', source:'sch', designator:lastSel}});
   if (lastNet) postTo(fr, {{type:'xprobe-net', source:'sch', net:lastNet}});
 }}, 400); }}
 function ensurePcbLoaded() {{
-  if (!pcb_loaded) {{ pcb_loaded = true; loadFrame('frame-pcb', PCB_GZ).then(() => repostSel(framePcb)); }}
+  if (!pcb_loaded) {{
+    pcb_loaded = true;
+    framePcb.addEventListener('load',
+      () => setTimeout(() => hoistTools(framePcb, 'toolbar', 'pcb'), 60),
+      {{ once: true }});
+    loadFrame('frame-pcb', PCB_GZ).then(() => repostSel(framePcb));
+  }}
 }}
 function ensure3dLoaded() {{
-  if (HAVE_3D && !td_loaded) {{ td_loaded = true; loadFrame('frame-3d', TD_GZ).then(() => repostSel(frame3d)); }}
+  if (HAVE_3D && !td_loaded) {{
+    td_loaded = true;
+    frame3d.addEventListener('load',
+      () => setTimeout(() => hoistTools(frame3d, 'tb3d', 'td'), 60),
+      {{ once: true }});
+    loadFrame('frame-3d', TD_GZ).then(() => repostSel(frame3d));
+  }}
 }}
 
 // === Cross-probe yönlendirme (üç yönlü) ===
@@ -4396,8 +4462,7 @@ function setViewMode(mode) {{
     panePcbEl.style.display=''; dividerEl.style.display='';
     paneShown(frameSch); paneShown(framePcb);
   }}
-  // Şematik araçları yalnız şematiğin göründüğü modlarda anlamlı
-  schToolsEl.style.display = (mode === 'sch' || mode === 'both') ? 'flex' : 'none';
+  applyPaneTools();   // o moda ait panelin araçları gösterilir
   Object.entries(vmButtons).forEach(([k, b]) => b && b.classList.toggle('active', k === mode));
 }}
 // Klavye: 1=Şematik 2=Böl 3=PCB 4=3D (odak kabuktayken)
@@ -7204,7 +7269,6 @@ def build_html(sheets, net_list, components, timestamp,
   #toolbar {{ position:absolute; top:8px; right:8px; left:8px; display:flex; gap:6px;
               z-index:200; flex-wrap:wrap; justify-content:flex-end;
               align-items:flex-start; }}
-  #sheet-jump {{ max-width:150px; appearance:auto; font-family:inherit; }}
   /* Fare ile üzerine gelince bilgi balonu (komponent/net/block) */
   #svg-tip {{ position:fixed; display:none; background:#111; color:#ddd;
               border:1px solid {inter_color}; border-radius:4px; padding:5px 9px;
@@ -7307,7 +7371,6 @@ def build_html(sheets, net_list, components, timestamp,
     #toolbar {{ flex-wrap:wrap; justify-content:flex-end; gap:4px;
                 max-width:calc(100vw - 46px); }}
     .tool-btn {{ padding:8px 11px; font-size:12px; }}
-    #sheet-jump {{ max-width:120px; }}
     #shortcuts, #brand {{ display:none; }}
     #current-net {{ max-width:150px; font-size:11px; }}
     .modal-content {{ min-width:0; width:92vw; padding:14px 16px; }}
@@ -7364,7 +7427,6 @@ def build_html(sheets, net_list, components, timestamp,
   </div>
   <div id="toolbar">
     <div id="current-net"></div>
-    <select id="sheet-jump" class="tool-btn" title="⟪Sayfaya git⟫"></select>
     <button class="tool-btn" id="leave-sheet"
             title="⟪Üst sayfaya dön — hiyerarşide bir seviye yukarı ( Alt+Backspace )⟫">↰</button>
     <button class="tool-btn" id="zoom-in" title="⟪Yaklaş ( + )⟫">+</button>
@@ -8542,16 +8604,9 @@ document.querySelectorAll('#type-chips .chip').forEach(ch => {{
   }};
 }});
 
-// === Toolbar: sayfa seçici + zoom kontrolleri ===
-const sheetJump = document.getElementById('sheet-jump');
-sheetJump.innerHTML = '<option value="">⟪Sayfa…⟫</option>' +
-  Object.entries(sheetPos).map(([id, sp]) =>
-    `<option value="${{id}}">${{escHtml(sp.name)}}</option>`).join('');
-sheetJump.addEventListener('change', () => {{
-  if (!sheetJump.value) return;
-  fitToSheet(sheetJump.value); lastFitSheetId = sheetJump.value;
-  sheetJump.value = ''; sheetJump.blur();
-}});
+// === Toolbar: zoom kontrolleri ===
+// NOT: "Sayfa…" açılır menüsü v2.30.0'da KALDIRILDI — sayfaya gitmek için
+// Hiyerarşi sekmesi (ağaç + arama + ↰ / ⌂ / Alt+Backspace) yeterli.
 document.getElementById('zoom-in').onclick = () => zoomBy(1.35);
 document.getElementById('zoom-out').onclick = () => zoomBy(1 / 1.35);
 document.getElementById('fit-all').onclick = fitAll;

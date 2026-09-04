@@ -516,6 +516,29 @@ Bir değişiklik yaptıktan sonra:
   kendi grubunu kurar, orijinal grupla birleşip onu da taşınır/silinir hale
   getirmez. Grup alanı localStorage'a, gömülü nota, dışa aktarılan JSON'a ve
   panoya olduğu gibi taşınır.
+- **ÜÇ panelin araç çubuğu da üst çubuğa taşınır ve moda göre değişir**
+  (v2.30.0, kullanıcı isteği): şematik `#toolbar`, PCB `#toolbar` ve 3D `#tb3d`
+  düğümleri `#pane-tools` yuvasına alınır; Şematik → şematik araçları, PCB →
+  PCB araçları, 3D → 3D araçları, **Böl → şematik + PCB birlikte**.
+  **ÇALIŞMA ANINDA `getElementById` TUZAĞI**: PCB kodu düğme durumunu tıklama
+  anında yeniden sorgulayarak günceller (`setOrient` içinde
+  `getElementById('b-mir').classList…`, `setMeasure`, `b-pin`). Düğüm artık o
+  belgede olmadığından **null dönüp patlardı** → taşırken iframe'in
+  `document.getElementById`'sine, taşınan çubuğun İÇİNE de bakan bir yedek
+  eklenir (yalnız çocuklar; çubuğun kendi id'si bilerek çözülmez ki şematiğin
+  `hierToast`'u '#toolbar' bulamayınca doğru şekilde varsayılan konuma düşsün).
+  **Mod düğmeleri MUTLAK ortalanır** (`position:absolute; left:50%`): sağdaki
+  araç seti moda göre genişlik değiştirdiğinden akışta kalsalardı her geçişte
+  kayarlardı (kullanıcı: "geçişlerde yer değiştirmesin"). Çakışma sağ bloğun
+  `max-width:calc(50% - 110px)` sınırıyla yapısal olarak engellenir; sağ blok
+  SARMAZ, sığmayınca **yatay kayar** ve `#pane-tools` yüksekliği sabittir
+  (27px) — yoksa kaydırma çubuğu kimi modda çıkıp kimi modda çıkmayınca üst
+  çubuk 34↔44px oynuyordu. `.vm-btn`'ler hep kalın (aktif olunca kalınlaşsaydı
+  grup genişliği 1-2px değişirdi). Ölçüldü: 1920 ve 1600px'te üst çubuk 38px
+  ve mod düğmeleri dört modda da **birebir aynı** konumda.
+  Doğrulama **25/25** (üç çubuğun taşınması, moda göre görünürlük, PCB ⟳/Ölç
+  ve 3D Üst düğmelerinin iframe'e etkisi + aktif vurgu, konum sabitliği,
+  0 JS hatası).
 - **Şematik toolbar'ı birleşik görünümde ÜST ÇUBUĞA taşınır** (v2.30.0,
   kullanıcı isteği: "kırmızı alanı da üst siyah bara taşı"): kabuk, şematik
   iframe'i yüklenince `#toolbar` düğümünü `document.adoptNode` ile alıp
@@ -534,11 +557,13 @@ Bir değişiklik yaptıktan sonra:
   Sayfa… seçenekleri + 2 renk seçici taşındı, Not/Seç/zoom/Reset/Sayfa…/renk
   hepsi iframe'e etki ediyor, aktif vurgu, odağın iframe'e dönmesi, mod
   görünürlüğü, balon ve gruplama regresyonu, 0 JS hatası).
-- **Birleşik görünüm üst çubuğu** (v2.30.0, kullanıcı isteği): SOLDA artık
-  Altium **proje adı** yazar (eskiden sabit "Şematik + PCB"), SAĞDAKİ rozette
-  **`Schematic Viz Generator · v{APP_VERSION}`** durur (eskiden proje adı +
-  sürüm). Sekme başlığı değişmedi. 820px altında ikisi de mobil düzende gizli
-  kalmayı sürdürür.
+- **Birleşik görünüm üst çubuğu** (v2.30.0, kullanıcı isteği): SOLDA Altium
+  **proje adı** (eskiden sabit "Şematik + PCB"), ORTADA mod düğmeleri, SAĞDA
+  panel araçları + tam ekran + **`Schematic Viz Generator · v{APP_VERSION}`**
+  rozeti. **"Sayfa…" açılır menüsü KALDIRILDI** (hiyerarşi sekmesi yeterli —
+  şematik viewer'ın kendisinden de çıktı) ve cross-probe açıklama metni
+  kaldırıldı. Tam ekran düğmesi araç düğmeleriyle aynı yüksekliğe getirildi.
+  Rozet <1750px, proje adı <820px gizlenir (araç satırı bölünmesin).
 - **Not/kutu kopyala-yapıştır** (v2.29.0): seçili öğe **Ctrl+C**, **Ctrl+V**
   ile **farenin altına** yapıştırılır (fare kanvasın dışındaysa görünüm
   merkezine); kopya YENİ kimlik alır, orijinalden bağımsızdır. Kopyalanan öğe

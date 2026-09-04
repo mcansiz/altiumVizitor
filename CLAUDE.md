@@ -516,6 +516,24 @@ Bir değişiklik yaptıktan sonra:
   kendi grubunu kurar, orijinal grupla birleşip onu da taşınır/silinir hale
   getirmez. Grup alanı localStorage'a, gömülü nota, dışa aktarılan JSON'a ve
   panoya olduğu gibi taşınır.
+- **Şematik toolbar'ı birleşik görünümde ÜST ÇUBUĞA taşınır** (v2.30.0,
+  kullanıcı isteği: "kırmızı alanı da üst siyah bara taşı"): kabuk, şematik
+  iframe'i yüklenince `#toolbar` düğümünü `document.adoptNode` ile alıp
+  topbar'daki `#sch-tools` yuvasına koyar. **Olay dinleyicileri düğümle birlikte
+  taşınır** ve iframe'in kendi kapanışlarında çalışmayı sürdürür → mesajlaşma
+  protokolü gerekmez (srcdoc iframe aynı origin). Taşınmayan tek şey CSS:
+  gereken kurallar kabuğun stil sayfasında `#sch-tools` altında TEKRARLANIR
+  (bilerek kopya — iki belge, tek düğüm). **Üç ayrıntı**: (1) tıklamadan sonra
+  odak kabukta kalırsa iframe'in klavye kısayolları (`/`, `B`, `Del`, `Ctrl+C`…)
+  çalışmaz → her tıklamada `frameSch.contentWindow.focus()`; (2) araçlar yalnız
+  Şematik ve Böl modlarında gösterilir (PCB/3D'de gizlenir); (3) yer darlığında
+  önce açıklama metni (<1580px), sonra rozet (<1150px) çekilir ki araç satırı
+  bölünmesin — ölçüldü: 1920 ve 1366px'te üst çubuk tek satır (34px).
+  **Tek dosya şematik çıktısı DEĞİŞMEDİ**: orada toolbar yine kanvasın üstünde
+  yüzer. Doğrulama **19/19** (düğüm kabukta / iframe'de değil, 15 düğme +
+  Sayfa… seçenekleri + 2 renk seçici taşındı, Not/Seç/zoom/Reset/Sayfa…/renk
+  hepsi iframe'e etki ediyor, aktif vurgu, odağın iframe'e dönmesi, mod
+  görünürlüğü, balon ve gruplama regresyonu, 0 JS hatası).
 - **Birleşik görünüm üst çubuğu** (v2.30.0, kullanıcı isteği): SOLDA artık
   Altium **proje adı** yazar (eskiden sabit "Şematik + PCB"), SAĞDAKİ rozette
   **`Schematic Viz Generator · v{APP_VERSION}`** durur (eskiden proje adı +

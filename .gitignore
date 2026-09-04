@@ -21,6 +21,6 @@ AltiumBasic/
 # Örnek/çalışma Excel dosyaları
 *.xlsx
 
-# Proje yedekleri / arşivler (57 MB'lık altium-monley.zip bir kez
-# yanlışlıkla depoya girdi — bkz. commit 1c6e7ee)
+# Proje yedekleri / arşivler (altium-monley.zip bir kez yanlışlıkla depoya
+# girmişti; geçmişten de temizlendi — kural tekrarını engelliyor)
 *.zip

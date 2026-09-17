@@ -5,7 +5,7 @@ Wavenumber'ın ticari "viz sch 1.0" ürününün açık-kaynak alternatifi.
 [altium_monkey](https://github.com/wavenumber-eng/altium_monkey) kütüphanesi
 (Eli Hughes / Wavenumber) üzerine kurulu.
 
-**Mevcut sürüm**: `APP_VERSION` sabiti **`viewer.py`'de** tutulur (şu an 2.30.0);
+**Mevcut sürüm**: `APP_VERSION` sabiti **`viewer.py`'de** tutulur (şu an 2.31.0);
 `gui.py` oradan import eder (v2.9.29'da taşındı — HTML çıktıları da sürümü
 gösterebilsin diye, tek kaynak). Yeni özellik/düzeltme ekleyince bu sabiti
 güncelle (semver: major.minor.patch). Sürüm pencere başlığında, alt durum
@@ -936,6 +936,38 @@ mesajına bak.
   bu API olmayabilir (graceful fallback var, "veri yok" der).
 
 ## Çözülen Sorunlar (tarihçe)
+
+- **Şematik render artık IR üzerinden: `to_ir()` → `SchGeometrySvgRenderer`
+  (v2.31.0, upstream tavsiyesi — altium_monkey yazarı issue #59'da işaret etti)**:
+  `to_svg()` zaten içeride kütüphanenin kendi ara temsilini (**gotIR**, şema
+  `x2.sch_onscreen_geometry_oracle.v1`) üretip ATIYOR. `_collect_data` artık IR'ı
+  kendisi üretip SVG'yi ondan render ediyor (`_sch_ir_renderer()` tembel çözer;
+  kütüphanede yoksa eski `to_svg()` yoluna sessizce düşer).
+  **Çizim yolu HİÇ etkilenmez** — ölçüldü: renderer'ın SVG'si `to_svg()` ile
+  **8/8 sayfada BAYT BAYT aynı**, JSON çıktıları bit bit aynı (BRK-210
+  `ee03b73b…`, Smart_MCU `f5fe9ef3…`), HTML boyutları birebir, birleşik görünüm
+  sorunsuz. Ek yük **%3** (8 sayfa 2.87 → 2.96 s).
+  **KRİTİK — hibrit NAİF kurulmamalı**: `to_svg()` + ayrıca `to_ir()` çağırmak
+  IR'ı İKİ kez ürettiğinden **+%92**'dir (4.26 → 8.17 s). Tek IR üretip SVG'yi
+  ondan render etmek %3. `SchGeometrySvgRenderer` kurulu **2026.8.21'de VAR**,
+  bu yüzden yükseltme gerekmiyor.
+  **Neden yapıldı**: IR kayıtları TİPLİ (`netlabel` / `designator` / `port` /
+  `sheetentry` / `wire` / `pin`) ve kayıt başına `bounds` taşıyor; `pen` de
+  `dash_style` + `dash_values` veriyor. Net konumları bir gün SVG metni
+  eşleştirmek yerine oradan alınabilir → "Bilinen Kısıtlar"daki *net adı bir
+  komponent designator'ı ile çakışırsa* maddesi yapısal olarak kalkar.
+  **ŞU AN ALINMIYOR (bilinçli, ölçümle)**: (1) `extract_label_positions` bu
+  projelerde zaten %100 isabetli — merkeze düşen **0**, bulunan ad kümesi IR
+  ile **birebir aynı**; (2) IR'ın **METİN** koordinatı **ŞEKİL** koordinatından
+  FARKLI uzayda: şekilde `y = -(tf_y)/upp` doğru, metinde `y = tf_y/upp + C`
+  gerekiyor ve C (ölçülen **1119**, canvas 1110) henüz belgeden türetilemedi.
+  **TUZAK**: sheet dikdörtgeni y'de simetrik olduğundan (0..1110) yanlış işareti
+  GİZLER — doğrulama mutlaka bir METİN konumuyla yapılmalı. Sabit çözülmeden
+  aşama 2'ye geçilmemeli.
+  **Prototip** (IR → draw-list dönüştürücü) yazıldı ama aynı y hatasını taşıyor;
+  ayrıca IR'da bir nesne İKİ kayıtta birden görünür (pin hem `pin` hem
+  `component` kaydında) → `gotBeginGroup`'un `parameters` alanı başka bir kaydın
+  kimliğiyse o grup atlanmalı, yoksa her şey çift çizilir.
 
 - **Not seçim kutusu yazıya göre kocamandı, yazı fareyle boyutlandırılamıyordu,
   grup seçiminde her öğenin kendi çerçevesi görünüyordu (v2.30.0, kullanıcı

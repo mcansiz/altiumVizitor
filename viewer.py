@@ -91,7 +91,7 @@ from altium_monkey.altium_schdoc import AltiumSchDoc
 
 # Uygulama sürümü — tek kaynak burası; gui.py buradan import eder.
 # HTML çıktılarında sağ üst köşedeki rozette görünür (build saati yerine).
-APP_VERSION = "2.30.0"
+APP_VERSION = "2.31.0"
 
 # Önerilen minimum altium_monkey sürümü. Bu sürümden öncesinde:
 #   · 2026.6.21 öncesi — STM32 gibi IC'lerde dikey pin adları yatay çiziliyordu.
@@ -1354,6 +1354,28 @@ def _pick_pcbdoc(project_path, log):
     return (best, best_doc)
 
 
+_SCH_IR_RENDERER = "?"          # "?" = henüz denenmedi, None = yok
+
+
+def _sch_ir_renderer():
+    """@brief SCH IR (gotIR) → SVG renderer'ını tembel çözer.
+
+    @details `AltiumSchDoc.to_ir()` + bu renderer ikilisi, `to_svg()`'nin
+    içeride yaptığı işin ta kendisidir; IR'ı elde tutmak için ayrıştırıldı.
+    Kütüphanede yoksa None döner ve çağıran eski `to_svg()` yoluna düşer.
+
+    @return Renderer örneği veya None
+    """
+    global _SCH_IR_RENDERER
+    if _SCH_IR_RENDERER == "?":
+        try:
+            from altium_monkey.altium_sch_geometry_renderer import SchGeometrySvgRenderer
+            _SCH_IR_RENDERER = SchGeometrySvgRenderer()
+        except Exception:
+            _SCH_IR_RENDERER = None
+    return _SCH_IR_RENDERER
+
+
 def _hide_title_block(schdoc) -> bool:
     """@brief Sayfanın antet/çerçeve grafiklerini render'dan düşürür.
 
@@ -1441,10 +1463,35 @@ def _collect_data(project_path: str, log, with_pcb=False, progress=None,
             # o anki ayarlarını okur). Netlist/komponent verisi etkilenmez.
             if hide_title_block and _hide_title_block(schdoc):
                 n_title_hidden += 1
-            try:
-                svg = schdoc.to_svg()
-            except TypeError:
-                svg = schdoc.to_svg(project_parameters=project.parameters)
+            # Sayfa önce IR'a (gotIR — altium_monkey'in kendi ara temsili)
+            # çevrilir, SVG o IR'dan render edilir. `to_svg()` zaten aynı IR'ı
+            # üretip ATIYOR; bu yol onu erişilebilir kılar. Ölçüldü: ek yük %3
+            # (8 sayfa, 2.87 → 2.96 s) ve renderer'ın SVG'si `to_svg()` ile
+            # BAYT BAYT AYNI (8/8 sayfa) → çizim yolu hiç etkilenmez.
+            #
+            # IR'ın ASIL değeri kayıtların TİPLİ olması (netlabel / designator /
+            # port / sheetentry + kayıt başına `bounds`): net konumları bir gün
+            # SVG metni eşleştirmek yerine oradan alınabilir. ŞU AN ALINMIYOR —
+            # ölçüldü ki mevcut `extract_label_positions` bu projelerde zaten
+            # %100 isabetli (merkeze düşen 0) ve IR'ın METİN koordinatı ŞEKİL
+            # koordinatından farklı bir uzayda: şekilde y = -(tf_y)/upp doğru,
+            # metinde y = tf_y/upp + C ve C (ölçülen 1119, canvas 1110) henüz
+            # belgeden türetilemedi. O sabit çözülmeden geçilmemeli.
+            svg = None
+            renderer = _sch_ir_renderer()
+            if renderer is not None:
+                try:
+                    svg = renderer.render(schdoc.to_ir())
+                except Exception as e:      # IR yolu yoksa/bozuksa sessizce SVG'ye dön
+                    svg = None
+                    if idx == 0:
+                        log(tr('  · IR yolu kullanılamadı, SVG yoluna dönülüyor ({a0}).')
+                            .format(a0=type(e).__name__))
+            if svg is None:
+                try:
+                    svg = schdoc.to_svg()
+                except TypeError:
+                    svg = schdoc.to_svg(project_parameters=project.parameters)
 
             # Tüm sayfalar TEK HTML dokümanına gömüldüğünden id'ler sayfaya
             # özgü ad-alanına alınır (yoksa clip-path'ler karışır, çok satırlı

@@ -270,6 +270,8 @@ _EN = {
 # (str.format() çalışma anında uygular — kaybolursa sayı biçimi bozulur).
 # ---------------------------------------------------------------------------
 _EN_LOG = {
+    "  · IR yolu kullanılamadı, SVG yoluna dönülüyor ({a0}).":
+        "  · IR path unavailable, falling back to SVG ({a0}).",
     # --- genel akış / özet ------------------------------------------------
     "Proje: {a0}": "Project: {a0}",
     "{a0} şema bulundu.\n": "{a0} schematic(s) found.\n",

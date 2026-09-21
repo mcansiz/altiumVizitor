@@ -5,7 +5,7 @@ Wavenumber'ın ticari "viz sch 1.0" ürününün açık-kaynak alternatifi.
 [altium_monkey](https://github.com/wavenumber-eng/altium_monkey) kütüphanesi
 (Eli Hughes / Wavenumber) üzerine kurulu.
 
-**Mevcut sürüm**: `APP_VERSION` sabiti **`viewer.py`'de** tutulur (şu an 2.31.0);
+**Mevcut sürüm**: `APP_VERSION` sabiti **`viewer.py`'de** tutulur (şu an 2.32.0);
 `gui.py` oradan import eder (v2.9.29'da taşındı — HTML çıktıları da sürümü
 gösterebilsin diye, tek kaynak). Yeni özellik/düzeltme ekleyince bu sabiti
 güncelle (semver: major.minor.patch). Sürüm pencere başlığında, alt durum
@@ -220,7 +220,7 @@ kaynak olarak tutulur (dist adı, import adı, minimum sürüm, ne için gerekti
 doğrudan mı/alt bağımlılık mı). `requirements.txt` bu tabloyla eşleşir
 (`py -3.12 deps.py --requirements` ile karşılaştırılabilir).
 
-- **Doğrudan**: PyQt5, altium-monkey (>= **2026.8.21**, bkz. sürüm notu),
+- **Doğrudan**: PyQt5, altium-monkey (>= **2026.9.19**, bkz. sürüm notu),
   openpyxl, cascadio, trimesh, numpy
 - **Alt bağımlılık** (olmazsa yine çöker): PyQt5-Qt5, PyQt5-sip, freetype-py,
   lxml, lz4, pillow, uharfbuzz, wn-geometer, et-xmlfile
@@ -936,6 +936,43 @@ mesajına bak.
   bu API olmayabilir (graceful fallback var, "veri yok" der).
 
 ## Çözülen Sorunlar (tarihçe)
+
+- **altium_monkey 2026.8.21 → 2026.9.19 yükseltmesi — bildirdiğimiz iki upstream
+  regresyonu düzelene kadar BEKLENDİ (v2.32.0)**: 2026.9.12 iki sorun getirmişti ve
+  ikisi de bize aitti; ölçülüp `wavenumber-eng/altium_monkey`'e bildirildi:
+  **#59** (blanket kesikli çizgisi düz çiziliyor — `line_style` yok sayılıyor,
+  SVG'de `stroke-dasharray` hiç yok) ve **#60** (şematik parse + `to_svg()`
+  3-11x yavaş). #59 **2026.9.15**'te, #60 **2026.9.18**'de kapandı.
+  **Yol boyunca bir regresyon yayınlanmadan yakalandı**: `2026.9.18-test1` dalında
+  `to_pnp()` şematik derlemesini atlayınca `comment` bozuluyordu — sadece boşalmıyor,
+  önbellekteki `Value` görüntü comment'i sanıldığı için YANLIŞ değer veriyordu
+  (BRK-210: 262 boş / 12 yanlış; BRK-209: 515 boş / 184 yanlış;
+  `GDT2 '75V 20KA' → '1pF'` — gaz deşarj tüpüne kapasite değeri). Bildirildi,
+  yazar aynı gün düzeltip (`5bfbb1a`) sürüme öyle aldı.
+  **2026.9.19 ölçümü (BRK-210 8 sayfa + BRK-209 13 sayfa)**:
+  PnP `comment` **284/284 ve 719/719 birebir** 8.21 ile aynı, `parameters['Comment']`
+  yerinde · netlist ortak netlerde **bağlantı farkı 0** · BOM 278/278, `value` tam ·
+  şematik metin sayısı aynı (3082) · kesikli çizgi `stroke-dasharray="2 2"` × 90 ve
+  draw-list'e taşınıyor (6 stil).
+  **Kazançlar**: `to_pnp()` 4.9 → **1.3 s** (3.5x, artık şematik derlemesi yapmıyor;
+  eski davranış `to_pnp(use_schematic_metadata=True)`) · `compile_netlist` eşit
+  (2.5 → 2.3 s) · şematik HTML 1.74 → **1.50 MB** (`ln` 59225 → 31695, kesikli
+  çizgiler artık dasharray) · **BOM `sheet` alanı kanal komponentlerinde DÜZELDİ**
+  (`C60_diffI2C_1..3`, `IC13_diffI2C_*` — 30 satırda boştu, artık
+  `[07] - diffI2C.SchDoc`) · `Comment: '=Value'` gerçek değerine çözülüyor (12 satır) ·
+  sahte tek-pinli auto-net'ler düştü (net 269 → 267: `NetIC12_J9/J10`, PCB'de
+  `net_index=None`).
+  **Kabul edilen küçük farklar**: PnP `description` 9 MEKANİK öğede boşaldı
+  (`MECH-ETIKET` / `MECH-ESD-LOGO` / `MECH-Fiducial` — monte edilmeyen kalemler;
+  upstream'e not düşüldü) · BOM `description` 1 satırda farklı kaynaktan ·
+  **parametre anahtarlarının harf düzeni değişti** (`Max Output current` →
+  `Max Output Current`, `PartId`/`partid`) → **BOM CSV'de bazı sütun adları değişir**.
+  **Ortam değişmedi**: `wn-geometer` yine `manylinux_2_35` (Linux eşiği Ubuntu 22.04+),
+  Python >=3.12,<3.15. `pcb_manufacturing` alt paketi 2026.9.12'de kalkmıştı, yerine
+  `sch_compiled_design` var; **msgspec/jsonschema-rs hâlâ `deps.py` tablosuna
+  GİRMEMELİ** — ölçüldü: ikisi de `sys.meta_path`'ten bloklanınca kullandığımız
+  10 modülün **10'u** açılıyor (gerekçe: v2.27.7 kaydı, exe'yi açılmaz yapıyordu).
+  **exe yeniden paketlenmeli** (altium_monkey + wn-geometer ikilileri değişti).
 
 - **Şematik render artık IR üzerinden: `to_ir()` → `SchGeometrySvgRenderer`
   (v2.31.0, upstream tavsiyesi — altium_monkey yazarı issue #59'da işaret etti)**:

@@ -83,7 +83,7 @@ DEPENDENCIES = (
     # --- Doğrudan import edilenler (gui.py / viewer.py) ---
     Dep("PyQt5", "PyQt5", "5.15.11",
         "Masaüstü arayüz (gui.py + gui.ui)", True),
-    Dep("altium-monkey", "altium_monkey", "2026.8.21",
+    Dep("altium-monkey", "altium_monkey", "2026.9.19",
         "Altium SchDoc/PcbDoc okuma, SVG render, netlist derleme", True),
     Dep("openpyxl", "openpyxl", "3.1",
         "Excel çıktıları (IC bağlantı haritası, MCU pin listesi)", True),

@@ -5,9 +5,9 @@
 # LINUX NOTU: altium-monkey'nin bağımlılığı wn-geometer yalnızca
 # manylinux_2_35 wheel'i dağıtıyor -> glibc >= 2.35 gerekir
 # (Ubuntu 22.04+ / Debian 12+). Daha eski dağıtımda pip
-# "ResolutionImpossible: wn-geometer==2026.8.21" hatası verir.
+# "ResolutionImpossible: wn-geometer==2026.9.19" hatası verir.
 # (2026.8.21 öncesi wn-geometer manylinux_2_39 idi = Ubuntu 24.04+;
-#  altium-monkey yükseltmesi Linux eşiğini İKİ LTS geriye çekti.)
+#  o yükseltme Linux eşiğini İKİ LTS geriye çekti, 2026.9.19'da da aynı.)
 # Python >= 3.12 şart (altium-monkey: >=3.12,<3.15).
 #
 # DENETİM: aynı liste deps.py'de (Dep tablosu) tutulur ve uygulama HER
@@ -18,11 +18,11 @@
 
 # --- Çekirdek (GUI + üretim) ---
 PyQt5>=5.15.11
-altium-monkey>=2026.8.21   # PCB parametre Unicode'u (UNICODE__<ALAN> sideband'i),
-                           # uzantısız sheet-symbol referansı, Altium paint order
-                           # ve multichannel numaralandırma düzeltmeleri bu
-                           # sürümde (bkz. CLAUDE.md sürüm notu).
-                           # pillow'u 12.3.0'a, wn-geometer'ı 2026.8.21'e pinler
+altium-monkey>=2026.9.19   # Kesikli çizgi (blanket) stroke-dasharray olarak
+                           # geliyor ve `to_pnp()` şematik derlemesi yapmadan
+                           # PCB'den üretiliyor (3.5x hızlı) — ikisi de bizim
+                           # bildirdiğimiz upstream issue #59/#60 ile geldi.
+                           # pillow'u 12.3.0'a, wn-geometer'ı 2026.9.19'a pinler
                            # (otomatik yükselir); msgspec + jsonschema-rs ekler.
 openpyxl>=3.1              # Excel çıktıları (IC haritası, MCU pin listesi)
 
@@ -39,7 +39,7 @@ numpy>=2.0
 #   pillow, uharfbuzz, wn-geometer
 #   et-xmlfile                    → openpyxl
 #
-# pip AYRICA msgspec + jsonschema-rs kuruyor (altium-monkey 2026.8.21'in
+# pip AYRICA msgspec + jsonschema-rs kuruyor (altium-monkey 2026.9.19'un
 # `pcb_manufacturing` / IPC-2581 alt paketi için). Bizim kod yolumuz o paketi
 # hiç import etmiyor, bu yüzden deps.py'nin denetim listesinde BİLEREK yoklar —
 # eklenirse paketlenmiş exe açılmaz olur (gerekçe: deps.py, tablo sonu).

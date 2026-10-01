@@ -91,7 +91,7 @@ from altium_monkey.altium_schdoc import AltiumSchDoc
 
 # Uygulama sürümü — tek kaynak burası; gui.py buradan import eder.
 # HTML çıktılarında sağ üst köşedeki rozette görünür (build saati yerine).
-APP_VERSION = "2.32.0"
+APP_VERSION = "2.32.1"
 
 # Önerilen minimum altium_monkey sürümü. Bu sürümden öncesinde:
 #   · 2026.6.21 öncesi — STM32 gibi IC'lerde dikey pin adları yatay çiziliyordu.
@@ -303,6 +303,60 @@ def patch_altium_text_decoding(log=None):
             n += 1
     if log:
         log(tr('  · metin çözücü toleranslı moda alındı (cp1252 → UTF-8 fallback, {a0} modül)').format(a0=n))
+    return True
+
+
+def patch_sch_component_description_unicode(log=None):
+    """@brief Komponent açıklamasını `%UTF8%` yan kaydından okutur (upstream #70).
+
+    @details
+    Altium, Windows-1252'ye sığmayan metni (`Ω`, `℃`, `√`, Çince) alanın İKİNCİ
+    bir Unicode kopyasında saklar. altium_monkey 2026.9.11'den beri komponent
+    açıklamasını düz `read_str` ile, yani yalnız 1252 kopyasından okuyor
+    (`_read_dynamic_field` helper'ı duruyor ama bu alanda çağrılmıyor) →
+    `550mΩ` yerine `550mO`, `℃` yerine `?` dönüyor ve bu bozuk metin BOM
+    CSV'sine ve JSON'a giriyor. Upstream kaydı: wavenumber-eng/altium_monkey#70
+    (düzeltme hazır, henüz yayınlanmadı — 2026.9.22'de de bozuk).
+
+    Yama `parse_from_record`'u sarmalar: kütüphane kendi okumasını yaptıktan
+    SONRA aynı alanı kütüphanenin KENDİ `_read_dynamic_field` helper'ıyla
+    yeniden okur (yan kayıt varsa onu tercih eder). Yan kayıt yoksa helper
+    1252 değerini döndürür, yani ASCII açıklamalarda tam no-op. Düzeltme
+    yayınlandığında da zararsız kalır (aynı değer iki kez okunur).
+
+    @param log Opsiyonel log callback'i (yalnız yama uygulanınca bir kez yazar)
+    @return True (yama etkin) / False (bu sürümde gerekmiyor veya yapı farklı)
+    """
+    try:
+        from altium_monkey import altium_record_sch__component as M
+        from altium_monkey.altium_serializer import AltiumSerializer
+    except Exception:
+        return False
+    cls = getattr(M, "AltiumSchComponent", None)
+    fields = getattr(M, "Fields", None)
+    if cls is None or fields is None:
+        return False
+    orig = getattr(cls, "parse_from_record", None)
+    if orig is None or not hasattr(cls, "_read_dynamic_field"):
+        return False          # helper yok (2026.8.21 ve öncesi) → zaten doğru okuyor
+    if getattr(orig, "_viz_patched", False):
+        return True
+
+    def patched(self, record, font_manager=None):
+        orig(self, record, font_manager)
+        try:
+            val, has = self._read_dynamic_field(
+                AltiumSerializer(), record, fields.COMPONENT_DESCRIPTION, "")
+        except Exception:
+            return            # kütüphane yapısı değiştiyse okunan değere dokunma
+        if has and val:
+            self.component_description = val
+            self._has_component_description = True
+
+    patched._viz_patched = True
+    cls.parse_from_record = patched
+    if log:
+        log(tr('  · komponent açıklamaları Unicode yan kaydından okunuyor (upstream #70)'))
     return True
 
 # Mobil/dokunmatik ekranlarda kullanılacak `<head>` etiketleri. Viewport meta'sı
@@ -1428,6 +1482,7 @@ def _collect_data(project_path: str, log, with_pcb=False, progress=None,
     @return Üretilen sonuç.
     """
     patch_altium_text_decoding()   # cp1252'ye sığmayan metin sayfayı düşürmesin
+    patch_sch_component_description_unicode()   # `Ω`/`℃` açıklamada korunsun (#70)
 
     prog = progress or (lambda frac, label: None)
     log(tr('Proje: {a0}').format(a0=project_path))
@@ -5669,6 +5724,7 @@ def generate_pcb_canvas_viewer(project_path, output_path, log=print, progress=No
     from altium_monkey.altium_pcbdoc import AltiumPcbDoc
     prog = progress or (lambda p, l: None)
     patch_altium_text_decoding()
+    patch_sch_component_description_unicode()
     prog(5, tr('PCB okunuyor'))
     pcb_path, pcb = _pick_pcbdoc(project_path, log)
     if pcb is None:

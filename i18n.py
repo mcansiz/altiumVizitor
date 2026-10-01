@@ -300,6 +300,8 @@ _EN_LOG = {
     "  · metin çözücü toleranslı moda alındı (cp1252 → UTF-8 fallback, {a0} modül)":
         "  · text decoder switched to tolerant mode (cp1252 → UTF-8 fallback, "
         "{a0} module(s))",
+    "  · komponent açıklamaları Unicode yan kaydından okunuyor (upstream #70)":
+        "  · component descriptions read from the Unicode sidecar (upstream #70)",
     "  ! Not: altium_monkey {a0} kullanılıyor. Dikey pin adları (STM32 vb.) {a1} "
     "öncesinde yatay render edilir. Güncelleme önerilir: pip install --upgrade "
     "altium-monkey":

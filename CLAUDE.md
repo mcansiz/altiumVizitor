@@ -5,7 +5,7 @@ Wavenumber'ın ticari "viz sch 1.0" ürününün açık-kaynak alternatifi.
 [altium_monkey](https://github.com/wavenumber-eng/altium_monkey) kütüphanesi
 (Eli Hughes / Wavenumber) üzerine kurulu.
 
-**Mevcut sürüm**: `APP_VERSION` sabiti **`viewer.py`'de** tutulur (şu an 2.32.0);
+**Mevcut sürüm**: `APP_VERSION` sabiti **`viewer.py`'de** tutulur (şu an 2.32.1);
 `gui.py` oradan import eder (v2.9.29'da taşındı — HTML çıktıları da sürümü
 gösterebilsin diye, tek kaynak). Yeni özellik/düzeltme ekleyince bu sabiti
 güncelle (semver: major.minor.patch). Sürüm pencere başlığında, alt durum
@@ -937,6 +937,37 @@ mesajına bak.
 
 ## Çözülen Sorunlar (tarihçe)
 
+- **BOM/JSON'daki komponent açıklamalarında `Ω` → `O`, `℃` → `?` — upstream #70
+  için kendi yamamız (v2.32.1)**: Altium, Windows-1252'ye sığmayan metni (`Ω`, `℃`,
+  `√`, Çince) alanın **İKİNCİ bir Unicode kopyasında** saklar. altium_monkey
+  **2026.9.11'den beri** komponent açıklamasını düz `read_str` ile, yani yalnız
+  1252 kopyasından okuyor — `_read_dynamic_field` helper'ı sınıfta DURUYOR ve
+  `lib_reference`/`library_path`/`source_library_name` için kullanılıyor, ama
+  `COMPONENT_DESCRIPTION` okunurken atlanmış (`altium_record_sch__component.py`,
+  `parse_from_record`). Sonuç BOM CSV'sine ve JSON'a giren YANLIŞ değer:
+  `550mΩ` → **`550mO`**, `470Ω` → **`470O`**, `±100ppm/℃` → `±100ppm/?`.
+  Upstream kaydı **#70** (Eli kendisi açtı, 2026-09-28; "fix is done, priority for
+  the next release"). **Ölçüldü: 2026.9.22'de de bozuk**, yani beklemek BOM'u bozuk
+  bırakıyor. **Dosya kaydetmediğimiz için veri kaybı riski YOK** — issue'nun asıl
+  konusu kaydetmede sideband'in silinmesi; bizi yalnız okuma tarafı etkiliyor.
+  **Çözüm** `patch_sch_component_description_unicode()` (v2.15.1'deki
+  `patch_altium_text_decoding` deseninin aynısı; `_collect_data` ve
+  `generate_pcb_canvas_viewer` başında çağrılır): `parse_from_record` sarmalanır,
+  kütüphane kendi okumasını yaptıktan SONRA aynı alan kütüphanenin **KENDİ**
+  `_read_dynamic_field` helper'ıyla yeniden okunur. Kendi kodunu kullandığı için
+  Unicode kuralını biz yeniden yazmıyoruz; yan kayıt yoksa helper 1252 değerini
+  döndürür → **ASCII açıklamalarda tam no-op**. Helper'ı olmayan sürümlerde
+  (2026.8.21 ve öncesi — onlar zaten doğru okuyor) yama kendini devre dışı bırakır,
+  düzeltme yayınlanınca da zararsız kalır (aynı değer iki kez okunur).
+  **Ölçülen etki**: BRK-209 (589 komponent) 2026.8.21 referansıyla **589/589
+  birebir**; gerçek üretim yolunda JSON'da `Ω` 12 / `℃` 6, BOM CSV'sinde `Ω` 257,
+  bozuk kalıntı (`550mO`/`470O`/`ppm/?`) **0**. **Regresyon kanıtı**: yama kapalı
+  ve açık üretilen JSON'lar karşılaştırıldı — BRK-210'da **md5 bit bit AYNI**
+  (o projede 1252 dışı açıklama yok), BRK-209'da **tek fark o 5 komponent**
+  (Q5/Q6/Q7/R71/R126); net 605=605, BOM 707=707, parametre anahtar kümesi aynı.
+  **Not**: `µ`/`°`/`±` zaten 1252'de olduğundan hiç etkilenmemişti — bu yüzden
+  v2.32.0 ölçümünde fark 1 satır görünmüştü; `Ω`/`℃` taşıyan proje gerekiyordu.
+
 - **altium_monkey 2026.8.21 → 2026.9.19 yükseltmesi — bildirdiğimiz iki upstream
   regresyonu düzelene kadar BEKLENDİ (v2.32.0)**: 2026.9.12 iki sorun getirmişti ve
   ikisi de bize aitti; ölçülüp `wavenumber-eng/altium_monkey`'e bildirildi:
@@ -962,9 +993,16 @@ mesajına bak.
   `[07] - diffI2C.SchDoc`) · `Comment: '=Value'` gerçek değerine çözülüyor (12 satır) ·
   sahte tek-pinli auto-net'ler düştü (net 269 → 267: `NetIC12_J9/J10`, PCB'de
   `net_index=None`).
-  **Kabul edilen küçük farklar**: PnP `description` 9 MEKANİK öğede boşaldı
-  (`MECH-ETIKET` / `MECH-ESD-LOGO` / `MECH-Fiducial` — monte edilmeyen kalemler;
-  upstream'e not düşüldü) · BOM `description` 1 satırda farklı kaynaktan ·
+  **Kabul edilen küçük farklar**: PnP `description` **8** MEKANİK öğede boşaldı
+  (BRK-210: `FP1..FP6 MECH-Fiducial`, `M1 MECH-ESD-LOGO`, `M2 MECH-ETIKET` — monte
+  edilmeyen kalemler; upstream'e not düşüldü). **Bu KASITLI** (Eli, #60, 2026-09-21):
+  varsayılan `to_pnp()` açıklamayı PcbDoc'un `SOURCEDESCRIPTION` alanından okur ve
+  grafik/mekanik öğelerde o alan boş olabilir; **`to_pnp(use_schematic_metadata=True)`**
+  eski derlenmiş-şematik birleştirmesini yapar. Ölçüldü: o flag ile 8 satırın **8'i**
+  dolar, dolu satırların açıklaması ve TÜM `comment` değerleri DEĞİŞMEZ. Flag'i açmak
+  şematik derlemesini geri getirip `to_pnp`'yi 1.3 → 4.9 s'ye çıkardığından (v2.32.0
+  kazancının tamamı) açılmadı — boş kalan 8 kalem montaj verisi değil ·
+  BOM `description` 1 satırda farklı kaynaktan ·
   **parametre anahtarlarının harf düzeni değişti** (`Max Output current` →
   `Max Output Current`, `PartId`/`partid`) → **BOM CSV'de bazı sütun adları değişir**.
   **Ortam değişmedi**: `wn-geometer` yine `manylinux_2_35` (Linux eşiği Ubuntu 22.04+),

@@ -104,7 +104,7 @@ if ONEDIR:
         name='SchematicViz',
         debug=False,
         bootloader_ignore_signals=False,
-        strip=IS_LINUX,
+        strip=False,    # bkz. aşağıdaki tek dosya EXE'deki not (numpy/OpenBLAS)
         upx=False,
         console=False,
         disable_windowed_traceback=False,
@@ -114,7 +114,7 @@ if ONEDIR:
         entitlements_file=None,
         icon=EXE_ICON,
     )
-    coll = COLLECT(exe, a.binaries, a.datas, strip=IS_LINUX, upx=False,
+    coll = COLLECT(exe, a.binaries, a.datas, strip=False, upx=False,
                    name='SchematicViz')
     if IS_MACOS:
         _ver = re.search(r'^APP_VERSION = "([^"]+)"',
@@ -144,10 +144,12 @@ else:
         name='SchematicViz',
         debug=False,
         bootloader_ignore_signals=False,
-        # Linux: .so sembol tablolarını soy (özellikle pyenv/kaynaktan derlenmiş
-        # libpython 31 MB -> ~8 MB). `strip` komutu için: sudo apt install binutils
-        # Windows'ta PE dosyalarına uygulanmaz, zararsız.
-        strip=IS_LINUX,
+        # strip KAPALI (v2.33.0): Linux'ta numpy'nin gömülü OpenBLAS'ını
+        # bozuyordu (`libscipy_openblas64_…so: ELF load command address/offset
+        # not page-aligned`) → numpy, trimesh ve cascadio import edilemiyor,
+        # 3D üretimi duruyordu. CI duman testi yakaladı. PyInstaller strip için
+        # dosya bazında istisna sunmuyor; boyut kazancı doğruluğa değmez.
+        strip=False,
         # onefile zaten her parçayı zlib ile sıkıştırıyor; UPX üstüne pek bir şey
         # eklemez, Qt ile nadiren sorun çıkarır — kapalı.
         upx=False,

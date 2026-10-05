@@ -1002,6 +1002,19 @@ mesajına bak.
 
 ## Çözülen Sorunlar (tarihçe)
 
+- **Linux paketinde 3D üretimi çalışmıyordu — `strip` numpy'nin OpenBLAS'ını
+  bozuyordu (v2.33.0, CI'daki AppImage duman testi yakaladı)**: Spec Linux'ta
+  `strip=True` kullanıyordu (libpython'u küçültmek için). Paketlenmiş
+  uygulamada numpy import'u `libscipy_openblas64_-….so: ELF load command
+  address/offset not page-aligned` ile düşüyor, bu yüzden trimesh VE cascadio
+  da açılamıyor ve birleşik görünüm "3D STEP bağımlılıkları eksik" diye
+  duruyordu. Bağımlılık kapısı bunu GÖREMEZ: frozen modda yalnız `find_spec`
+  bakıyor (modül bulunuyor, yüklenince patlıyor). Windows/macOS'ta strip zaten
+  kapalıydı. `build_linux.sh`'in tek dosya çıktısı da aynı ayarı kullandığından
+  muhtemelen aynı hatayı taşıyordu. Çözüm: `strip=False` (PyInstaller dosya
+  bazında istisna sunmuyor). Self-test'e ağır modülleri TEK TEK gerçekten
+  import eden `importlar` adımı eklendi — teşhis ancak onunla mümkün oldu.
+
 - **PCB'siz projede birleşik görünümün PCB panelinde çeviri işaretleri
   görünüyordu (v2.33.0, yeni testlerin ilk koşusunda yakalandı)**: PCB
   bulunamayınca panele konan yer tutucu sayfa (`empty_pcb_html`) hiçbir

@@ -1162,9 +1162,89 @@ class MainWindow(QtWidgets.QMainWindow):
             webbrowser.open(Path(self.last_output).as_uri())
 
 
+def run_selftest(report_path, project_path=None) -> int:
+    """@brief Paketlenmiş uygulamanın duman testi (`--selftest RAPOR [PROJE]`).
+
+    @details CI (`tools/smoke_launch.py`) exe / AppImage / .app'i bununla
+    sınar: bağımlılık kapısı (modül yüklenirken zaten çalıştı), gui.ui + ikon
+    yüklemesi, menü kurulumu, dil gidiş-dönüşü ve — proje verilirse — gerçek
+    bir JSON + birleşik görünüm üretimi (altium_monkey verileri, gömülü
+    three.js, cascadio/trimesh paketlenmiş mi). Pencere GÖSTERİLMEZ.
+    Sonuç RAPOR dosyasına JSON olarak yazılır: pencereli exe'nin
+    (console=False) stdout'u yoktur, çıktı başka türlü okunamaz.
+
+    @param report_path Raporun yazılacağı JSON dosyası
+    @param project_path Üretim denenecek .PrjPcb (None = yalnız arayüz)
+    @return Çıkış kodu (0 = her adım geçti)
+    """
+    import json
+    import tempfile
+    import time
+
+    report = {"version": APP_VERSION, "frozen": bool(getattr(sys, "frozen", False)),
+              "platform": platform.platform(), "ok": False, "steps": []}
+    lines = []
+
+    def step(name, fn):
+        t0 = time.time()
+        info = fn()
+        report["steps"].append({"step": name, "s": round(time.time() - t0, 2), "info": info})
+
+    try:
+        app = QtWidgets.QApplication.instance() or QtWidgets.QApplication(sys.argv[:1])
+        win = MainWindow()
+
+        def ui():
+            assert APP_VERSION in win.windowTitle(), win.windowTitle()
+            assert win.menuBar().actions(), "menü çubuğu boş"
+            return {"title": win.windowTitle(), "menus": len(win.menuBar().actions())}
+        step("arayuz", ui)
+
+        def lang():
+            win.set_language("tr", persist=False)
+            src = win.generateBtn.text()
+            win.set_language("en", persist=False)
+            en = win.generateBtn.text()
+            win.set_language("tr", persist=False)
+            assert en != src, f"İngilizce çeviri uygulanmadı: {en!r}"
+            assert win.generateBtn.text() == src, "Türkçeye dönüş bozuk"
+            return {"tr": src, "en": en}
+        step("dil", lang)
+
+        if project_path:
+            with tempfile.TemporaryDirectory() as tmp:
+                out_json = Path(tmp) / "selftest.json"
+                out_html = Path(tmp) / "selftest_birlesik.html"
+
+                def gen_json():
+                    generate_json(project_path, str(out_json), log=lines.append)
+                    summary = json.loads(out_json.read_text(encoding="utf-8"))["summary"]
+                    assert summary["sheet_count"] > 0 and summary["component_count"] > 0, summary
+                    return summary
+                step("json", gen_json)
+
+                def gen_combined():
+                    generate_combined_viewer(project_path, str(out_html), log=lines.append)
+                    html = out_html.read_text(encoding="utf-8")
+                    assert "⟪" not in html and "⟫" not in html, "çeviri işareti kalmış"
+                    return {"bytes": out_html.stat().st_size}
+                step("birlesik", gen_combined)
+        win.close()
+        app.processEvents()
+        report["ok"] = True
+    except BaseException:
+        report["error"] = traceback.format_exc()
+        report["log_tail"] = lines[-40:]
+    Path(report_path).write_text(json.dumps(report, ensure_ascii=False, indent=2),
+                                 encoding="utf-8")
+    return 0 if report["ok"] else 1
+
+
 def main():
     """@brief Uygulama giriş noktası (QApplication + MainWindow).
     """
+    if len(sys.argv) >= 3 and sys.argv[1] == "--selftest":
+        sys.exit(run_selftest(sys.argv[2], sys.argv[3] if len(sys.argv) > 3 else None))
     app = QtWidgets.QApplication(sys.argv)
     app.setStyle("Fusion")
     if ICON_FILE.exists():

@@ -2,6 +2,9 @@
 __pycache__/
 *.pyc
 
+# Testlerin indirdiği örnek projeler + test/paketleme ara çıktıları
+.tmp/
+
 # PyInstaller çıktıları
 build/
 dist/

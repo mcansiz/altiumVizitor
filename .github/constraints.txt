@@ -1,0 +1,35 @@
+# CI ve release derlemeleri için SABİT sürümler (pip -c ile requirements.txt'e
+# uygulanır). Ne kurulacağı requirements.txt'te, HANGİ sürümün kurulacağı burada:
+# böylece release paketi, test edilen ve geliştirme makinesinde ölçülen
+# ortamla aynı olur (2026-10-05 itibarıyla geliştirme makinesindeki sürümler).
+#
+# Yükseltme: önce yerelde dene (CLAUDE.md'deki yan yana ölçüm yöntemi), sonra
+# buradaki satırı değiştir — CI üç platformda yeniden doğrular.
+
+# --- Doğrudan ---
+PyQt5==5.15.11
+altium-monkey==2026.9.19
+openpyxl==3.1.5
+cascadio==0.1.1
+trimesh==5.0.0
+numpy==2.5.2
+
+# --- Alt bağımlılıklar ---
+# PyQt5-Qt5'in Windows tekerleği yalnız 5.15.2'de var; macOS arm64 tekerleği
+# ise 5.15.2'de YOK (DiskUltimate CI'ında ölçüldü).
+PyQt5-Qt5==5.15.2; sys_platform == "win32"
+PyQt5-Qt5==5.15.19; sys_platform != "win32"
+PyQt5-sip==12.19.0
+wn-geometer==2026.9.19
+pillow==12.3.0
+lxml==6.0.2
+lz4==4.4.5
+freetype-py==2.5.1
+uharfbuzz==0.56.0
+et-xmlfile==2.0.0
+msgspec==0.21.1
+jsonschema-rs==0.48.5
+
+# --- Paketleme ---
+pyinstaller==6.22.2
+pyinstaller-hooks-contrib==2026.7

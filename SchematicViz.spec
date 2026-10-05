@@ -2,11 +2,22 @@
 # SchematicViz spec — build_exe.bat (Windows) ve build_linux.sh (Linux) bunu kullanır.
 # PyQt5 için collect_all YOK (Designer/QML/çeviriler ~50 MB gömerdi);
 # PyInstaller'ın PyQt5 hook'u QtWidgets çekirdeğini zaten toplar.
+#
+# Çıktı biçimi platforma göre (CI: .github/workflows/release.yml):
+#   Windows / Linux  tek dosya  dist/SchematicViz(.exe)
+#   Linux + SCHVIZ_ONEDIR=1     klasör  dist/SchematicViz/  (AppImage'in içi —
+#                               tools/build_appimage.py; AppImage zaten
+#                               sıkıştırılmış olduğundan tek dosyanın her
+#                               açılışta /tmp'ye açılması gereksiz olurdu)
+#   macOS            klasör + .app  dist/SchematicViz.app (çift tıkla açılır)
+import os
 import re
 import sys
 from PyInstaller.utils.hooks import collect_all
 
 IS_LINUX = sys.platform.startswith('linux')
+IS_MACOS = sys.platform == 'darwin'
+ONEDIR = IS_MACOS or os.environ.get('SCHVIZ_ONEDIR') == '1'
 
 datas = [('gui.ui', '.'), ('icon.ico', '.')]
 binaries = []
@@ -80,29 +91,73 @@ a.datas = [d for d in a.datas if not _DROP_DATA.search(d[0])]
 
 pyz = PYZ(a.pure)
 
-exe = EXE(
-    pyz,
-    a.scripts,
-    a.binaries,
-    a.datas,
-    [],
-    name='SchematicViz',
-    debug=False,
-    bootloader_ignore_signals=False,
-    # Linux: .so sembol tablolarını soy (özellikle pyenv/kaynaktan derlenmiş
-    # libpython 31 MB -> ~8 MB). `strip` komutu için: sudo apt install binutils
-    # Windows'ta PE dosyalarına uygulanmaz, zararsız.
-    strip=IS_LINUX,
-    # onefile zaten her parçayı zlib ile sıkıştırıyor; UPX üstüne pek bir şey
-    # eklemez, Qt ile nadiren sorun çıkarır — kapalı.
-    upx=False,
-    upx_exclude=[],
-    runtime_tmpdir=None,
-    console=False,
-    disable_windowed_traceback=False,
-    argv_emulation=False,
-    target_arch=None,
-    codesign_identity=None,
-    entitlements_file=None,
-    icon=['icon.ico'],   # Windows/macOS'ta gömülür; Linux'ta yok sayılır (.desktop dosyası kullan)
-)
+# Windows/macOS'ta gömülür (macOS'ta Pillow .ico'yu .icns'e çevirir);
+# Linux'ta PyInstaller ikonu UYGULAMAZ, yalnız uyarı basar — verilmez.
+EXE_ICON = None if IS_LINUX else ['icon.ico']
+
+if ONEDIR:
+    exe = EXE(
+        pyz,
+        a.scripts,
+        [],
+        exclude_binaries=True,
+        name='SchematicViz',
+        debug=False,
+        bootloader_ignore_signals=False,
+        strip=IS_LINUX,
+        upx=False,
+        console=False,
+        disable_windowed_traceback=False,
+        argv_emulation=False,
+        target_arch=None,
+        codesign_identity=None,
+        entitlements_file=None,
+        icon=EXE_ICON,
+    )
+    coll = COLLECT(exe, a.binaries, a.datas, strip=IS_LINUX, upx=False,
+                   name='SchematicViz')
+    if IS_MACOS:
+        _ver = re.search(r'^APP_VERSION = "([^"]+)"',
+                         open(os.path.join(SPECPATH, 'viewer.py'), encoding='utf-8').read(),
+                         re.M).group(1)
+        app = BUNDLE(
+            coll,
+            name='SchematicViz.app',
+            icon='icon.ico',
+            bundle_identifier='io.github.mcansiz.schematicviz',
+            version=_ver,
+            info_plist={
+                'CFBundleName': 'SchematicViz',
+                'CFBundleDisplayName': 'Schematic Viz Generator',
+                'CFBundleShortVersionString': _ver,
+                'NSHighResolutionCapable': True,
+                'LSMinimumSystemVersion': '11.0',
+            },
+        )
+else:
+    exe = EXE(
+        pyz,
+        a.scripts,
+        a.binaries,
+        a.datas,
+        [],
+        name='SchematicViz',
+        debug=False,
+        bootloader_ignore_signals=False,
+        # Linux: .so sembol tablolarını soy (özellikle pyenv/kaynaktan derlenmiş
+        # libpython 31 MB -> ~8 MB). `strip` komutu için: sudo apt install binutils
+        # Windows'ta PE dosyalarına uygulanmaz, zararsız.
+        strip=IS_LINUX,
+        # onefile zaten her parçayı zlib ile sıkıştırıyor; UPX üstüne pek bir şey
+        # eklemez, Qt ile nadiren sorun çıkarır — kapalı.
+        upx=False,
+        upx_exclude=[],
+        runtime_tmpdir=None,
+        console=False,
+        disable_windowed_traceback=False,
+        argv_emulation=False,
+        target_arch=None,
+        codesign_identity=None,
+        entitlements_file=None,
+        icon=EXE_ICON,
+    )

@@ -1,0 +1,32 @@
+# Her push / PR'da üç platformda testler: hatalar sürüm günü değil hemen
+# yakalanır. Yalnız belge / görsel değişen commit'ler testi tetiklemez.
+name: CI
+
+on:
+  push:
+    branches: [master]
+    paths-ignore: ["**/*.md", ".claude/**", "img/**", "Doxyfile", "LICENSE"]
+  pull_request:
+    paths-ignore: ["**/*.md", ".claude/**", "img/**", "Doxyfile", "LICENSE"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  linux:
+    uses: ./.github/workflows/tests.yml
+    with:
+      os: ubuntu-22.04
+  windows:
+    uses: ./.github/workflows/tests.yml
+    with:
+      os: windows-2022
+  macos:
+    uses: ./.github/workflows/tests.yml
+    with:
+      os: macos-14

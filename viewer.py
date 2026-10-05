@@ -91,7 +91,7 @@ from altium_monkey.altium_schdoc import AltiumSchDoc
 
 # Uygulama sürümü — tek kaynak burası; gui.py buradan import eder.
 # HTML çıktılarında sağ üst köşedeki rozette görünür (build saati yerine).
-APP_VERSION = "2.32.1"
+APP_VERSION = "2.33.0"
 
 # Önerilen minimum altium_monkey sürümü. Bu sürümden öncesinde:
 #   · 2026.6.21 öncesi — STM32 gibi IC'lerde dikey pin adları yatay çiziliyordu.
@@ -3562,11 +3562,13 @@ def generate_combined_viewer(
         }
         for c in data.get("components", [])
     }
-    empty_pcb_html = ("<!DOCTYPE html><html><body style='background:#0a0a0a;"
-                      "color:#888;font-family:sans-serif;display:flex;"
-                      "align-items:center;justify-content:center;height:100vh;'>"
-                      "<div>⟪Bu projede okunabilir PCB dosyası bulunamadı.⟫</div>"
-                      "</body></html>")
+    # _tr_html şart: bu sayfa hiçbir build_*_html'den geçmiyor; çevrilmezse
+    # PCB'siz projede panelde çeviri işaretleri olduğu gibi görünürdü.
+    empty_pcb_html = _tr_html("<!DOCTYPE html><html><body style='background:#0a0a0a;"
+                              "color:#888;font-family:sans-serif;display:flex;"
+                              "align-items:center;justify-content:center;height:100vh;'>"
+                              "<div>⟪Bu projede okunabilir PCB dosyası bulunamadı.⟫</div>"
+                              "</body></html>")
 
     # 2) PCB paneli: geometri (canvas) görüntüleyici
     prog(60, tr('PCB geometrisi çıkarılıyor'))

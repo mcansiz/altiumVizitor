@@ -5,7 +5,7 @@ Wavenumber'ın ticari "viz sch 1.0" ürününün açık-kaynak alternatifi.
 [altium_monkey](https://github.com/wavenumber-eng/altium_monkey) kütüphanesi
 (Eli Hughes / Wavenumber) üzerine kurulu.
 
-**Mevcut sürüm**: `APP_VERSION` sabiti **`viewer.py`'de** tutulur (şu an 2.32.1);
+**Mevcut sürüm**: `APP_VERSION` sabiti **`viewer.py`'de** tutulur (şu an 2.33.0);
 `gui.py` oradan import eder (v2.9.29'da taşındı — HTML çıktıları da sürümü
 gösterebilsin diye, tek kaynak). Yeni özellik/düzeltme ekleyince bu sabiti
 güncelle (semver: major.minor.patch). Sürüm pencere başlığında, alt durum
@@ -104,6 +104,11 @@ sağ üst rozetinde (`{proje} · v{APP_VERSION}`) görünür.
   üretim ilerlemesini taşır → `logGroup`'taki `progressBar`'a yansır. `percent < 0`
   = belirsiz/marquee (süresi kestirilemeyen adım). Üretici fonksiyonlar
   `progress=` callback'i alır (combined/pcbgeo/html).
+  **`--selftest RAPOR [PROJE]`** (v2.33.0): pencereyi gösterMEDEN kurar, dil
+  TR→EN→TR döner, proje verilirse JSON + birleşik görünüm üretir, sonucu RAPOR
+  JSON'una yazar (`run_selftest`). CI paketlenmiş exe/AppImage/.app'i bununla
+  sınar (`tools/smoke_launch.py`); pencereli exe'nin stdout'u olmadığı için
+  sonuç dosyaya yazılır.
 - **`gui.ui`** — Qt Designer XML form. `uic.loadUi('gui.ui')` ile yüklenir.
   **Menü çubuğu burada DEĞİL** — `gui.py`'deki `_build_menu()` içinde kodla
   kurulur (bkz. "Üst menü + dil desteği").
@@ -287,6 +292,58 @@ py -3.12 -m PyInstaller --noconfirm --onefile --windowed --name "SchematicViz" ^
 
 Fresh Windows'ta exe açılmazsa **MS VC++ Redistributable** gerekir:
 https://aka.ms/vs/17/release/vc_redist.x64.exe
+
+## Testler + GitHub Actions (CI / Release) — v2.33.0+
+
+DiskUltimate deposundaki düzenin karşılığı. Üç iş akışı (`.github/workflows/`):
+
+- **`tests.yml`** — yeniden kullanılan test işi (`os` girdisi). Bağımlılıkları
+  `requirements.txt` + **`.github/constraints.txt`** (sabit sürümler — release
+  paketi test edilen ortamla aynı olsun) ile kurar, `deps.py`, örnek projeleri
+  indirir, `python -m unittest discover -s tests -t . -v` çalıştırır.
+- **`ci.yml`** — `master`'a her push / PR: **ubuntu-22.04 · windows-2022 ·
+  macos-14** (yalnız `.md`/görsel değişen commit'ler tetiklemez).
+- **`release.yml`** — `v*` etiketi: sürüm denetimi (etiket = `v{APP_VERSION}`,
+  değilse durur) → üç platformda test → üç platformda derleme + **paketlenmiş
+  uygulamanın deneme açılışı** → **TASLAK** release (`SHA256SUMS` dahil). Elle
+  çalıştırma (workflow_dispatch) = deneme: derler/sınar, dosyaları run'ın
+  Artifacts'ına koyar, release oluşturmaz. macOS DENEYSEL: düşerse release
+  yine oluşur, yalnız mac dosyası eklenmez.
+  Çıktılar: `SchematicViz-vX.Y.Z-win-x64.exe` (eski adlandırma korundu),
+  `…-linux-x86_64.AppImage`, `…-macos-arm64.zip` (.app).
+  Release başlığı commit başlığından: `v2.33.0: konu` → `v2.33.0 — konu`.
+  Gövde `.github/release_notes.py` ile (indirme tablosu TR+EN, kurulum, Full
+  Changelog); değişiklik notları `.github/release-notes/vX.Y.Z.tr.md` /
+  `.en.md` varsa oraya girer, yoksa taslakta elle yazılır.
+
+**Test verisi**: şirket projeleri depoya girmez → testler altium_monkey
+deposunun herkese açık örneklerini SABİT commit + SHA-256 ile indirir
+(`tools/fetch_samples.py` → `.tmp/samples/`): `m2_emmc` (şematik + PCB + 3D,
+BOM/PnP, IC haritası, MCU=U1) ve `simple_hierchical` (PCB'siz hiyerarşi).
+Her örnek kendi `<ad>/proj/` klasöründe durur — kardeş klasörde dururlarsa
+PcbDoc'suz projenin üst dizin taraması BAŞKA örneğin PcbDoc'unu alıyor
+(ölçüldü; bkz. Bilinen Kısıtlar).
+
+**Testler** (`tests/`, unittest, yerelde ~30 s): `test_static` (deps,
+requirements↔deps uyumu, `check_html_i18n`, sözdizimi), `test_gui` (offscreen
+self-test, `_BTN_LABELS`↔gui.ui, eksik çeviri), `test_generation` (iki örnekte
+YEDİ üreticinin hepsi; HTML'lerde ⟪⟫ kalıntısı yok, satır-içi script'ler —
+birleşik kabuğun gzip'li iç HTML'leri dahil — `node --check`'ten geçer, EN
+üretim, not yazma/okuma, CSV/xlsx içerik). Yerelde ağ/node yoksa ilgili testler
+ATLANIR; CI'da `SCHVIZ_REQUIRE_SAMPLES=1` / `SCHVIZ_REQUIRE_NODE=1` ile düşer.
+
+```bash
+py -3.12 -m unittest discover -s tests -t . -v      # tüm testler
+py -3.12 tools/smoke_launch.py 2.33.0 .tmp/samples/m2_emmc/proj/m2_emmc.PrjPcb dist/SchematicViz.exe
+```
+
+**Paketleme** (`SchematicViz.spec`): Windows/Linux tek dosya (değişmedi);
+`SCHVIZ_ONEDIR=1` → klasör (AppImage'in içi, `tools/build_appimage.py`);
+macOS → klasör + `BUNDLE` (.app). AppImage **ubuntu-22.04'te** derlenir:
+PyInstaller ikilisi derleme makinesinin glibc'sine bağlı, wn-geometer zaten
+2.35 istiyor — daha yeni makine eşiği gereksiz yükseltirdi. appimagetool
+1.9.1 SHA-256 ile sabit. Duman testinde Qt platformu `minimal` (offscreen
+Linux paketinden `_DROP` ile atılıyor).
 
 ## Git / GitHub yetkisi — push ve release için (v2.27.7+)
 
@@ -932,10 +989,27 @@ mesajına bak.
 ## Bilinen Kısıtlar
 
 - Net adı bir komponent designator ile çakışırsa net önceliği var (uncommon).
+- **PcbDoc'u olmayan proje, kardeş klasördeki BAŞKA bir projenin PcbDoc'unu
+  kullanabilir**: `_resolve_pcbdoc_paths` PrjPcb'de referans bulamayınca proje
+  klasörünü VE bir üst dizini (kardeş klasörler dahil) tarıyor (v2.9.1'de
+  `PCB PROJECT/` ↔ `PCB/` düzeni için bilerek eklendi). Ölçüldü (v2.33.0):
+  `simple_hierchical` örneği yan klasördeki `m2_emmc.PcbDoc`'u alıp PCB/PnP
+  üretti. Düzeltilmedi — kardeş-klasör düzenini bozmadan ayırt etmek için
+  ölçüt gerekiyor (ör. designator örtüşmesi, `_merge_netlist_with_pcb`'deki %50
+  kuralı gibi).
 - BOM/PnP `AltiumDesign` API'sine bağlı; çok eski altium_monkey sürümlerinde
   bu API olmayabilir (graceful fallback var, "veri yok" der).
 
 ## Çözülen Sorunlar (tarihçe)
+
+- **PCB'siz projede birleşik görünümün PCB panelinde çeviri işaretleri
+  görünüyordu (v2.33.0, yeni testlerin ilk koşusunda yakalandı)**: PCB
+  bulunamayınca panele konan yer tutucu sayfa (`empty_pcb_html`) hiçbir
+  `build_*_html`'den geçmediği için `_tr_html` uygulanmıyordu → kullanıcı
+  `⟪Bu projede okunabilir PCB dosyası bulunamadı.⟫` metnini köşeli
+  işaretleriyle görüyordu (İngilizce modda da Türkçe). Kabuktaki denetim bunu
+  göremezdi: iç HTML gzip+base64 gömülü. Çözüm: yer tutucu `_tr_html`'den
+  geçiyor; `test_combined_viewer` artık iç HTML'leri de çözüp ⟪⟫ arıyor.
 
 - **BOM/JSON'daki komponent açıklamalarında `Ω` → `O`, `℃` → `?` — upstream #70
   için kendi yamamız (v2.32.1)**: Altium, Windows-1252'ye sığmayan metni (`Ω`, `℃`,

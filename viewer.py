@@ -91,7 +91,7 @@ from altium_monkey.altium_schdoc import AltiumSchDoc
 
 # Uygulama sürümü — tek kaynak burası; gui.py buradan import eder.
 # HTML çıktılarında sağ üst köşedeki rozette görünür (build saati yerine).
-APP_VERSION = "2.33.0"
+APP_VERSION = "2.33.1"
 
 # Önerilen minimum altium_monkey sürümü. Bu sürümden öncesinde:
 #   · 2026.6.21 öncesi — STM32 gibi IC'lerde dikey pin adları yatay çiziliyordu.
@@ -1258,61 +1258,135 @@ def _resolve_schdoc_paths(project, project_path, log):
 def _resolve_pcbdoc_paths(project_path, log):
     """@brief PcbDoc dosyalarını bul (cross-platform, kardeş klasör dahil).
 
-    SchDoc çözümünün PCB karşılığı. Kör `rglob` proje klasörü altını tarar; oysa
-    PcbDoc çoğu projede proje dosyasının KARDEŞ klasöründedir (ör. PrjPcb
-    `PCB PROJECT/` içinde, PcbDoc `PCB/` içinde, referans `..\\PCB\\x.PcbDoc`).
-    Bu durumda proje klasörü altını tarayan rglob PCB'yi bulamaz.
+    SchDoc çözümünün PCB karşılığı. PcbDoc çoğu projede proje dosyasının KARDEŞ
+    klasöründedir (ör. PrjPcb `PCB PROJECT/` içinde, PcbDoc `PCB/` içinde,
+    referans `..\\PCB\\x.PcbDoc`); referans bu yüzden göreli yolla çözülür.
 
     Sıra:
     1. PrjPcb içindeki `DocumentPath=...PcbDoc` satırlarını oku, ters slash'i
-       normalize et, `..\\` ile yukarı çıkışları çöz. Dosya gerçekten varsa kullan
-       (case-insensitive eşleştirme de yapılır — Linux dosya sistemi için).
-    2. Son çare: proje klasörü VE bir üst dizini (kardeş klasörler dahil) rglob
-       ile *.PcbDoc tara.
+       normalize et, `..\\` ile yukarı çıkışları çöz. Dosya o yolda varsa KESİN.
+    2. Referans var ama o yolda dosya yoksa (taşınmış / büyük-küçük harf farkı):
+       AYNI ADLI dosya proje klasöründe ve bir üst dizinde aranır → TAHMİN.
+    3. Hiçbir referans çözülemediyse proje klasörü + üst dizin `*.PcbDoc`
+       taraması → TAHMİN.
+
+    **PrjPcb'de hiç PcbDoc referansı yoksa tarama YAPILMAZ** (v2.33.1): proje
+    Altium'da bir PCB'ye sahip değildir. Eskiden 3. adım bu durumda da
+    çalışıyor ve üst dizindeki BAŞKA bir projenin PcbDoc'unu alıyordu
+    (ölçüldü: PCB'siz `simple_hierchical`, yan klasördeki `m2_emmc`'nin
+    board'uyla PnP / PCB / 3D üretti). Kardeş klasör düzeni etkilenmez — orada
+    referans vardır ve 1. adım çözer.
+
+    TAHMİN edilen dosyalar `_pick_pcbdoc`'ta şematikle designator örtüşmesi
+    denetiminden geçer; geçemeyen reddedilir.
 
     @param project_path Altium proje dosyası (.PrjPcb) yolu
     @param log Log mesajı callback'i (str alır)
-    @return PcbDoc yollarının listesi (Path), tekrarsız.
+    @return (yollar, tahmin_mi): yollar tekrarsız Path listesi; tahmin_mi True
+            ise yollar PrjPcb'nin gösterdiği yerde DEĞİL, aranarak bulundu.
     """
     base = Path(project_path).parent
 
-    # 1) PrjPcb metnini parse et
-    try:
-        text = Path(project_path).read_text(encoding="utf-8", errors="ignore")
-        refs = re.findall(r"DocumentPath\s*=\s*(.+\.PcbDoc)", text, re.IGNORECASE)
-        resolved = []
-        for ref in refs:
-            rel = ref.strip().replace("\\", "/")
-            candidate = (base / rel)
-            if candidate.exists():
-                resolved.append(candidate.resolve())
-            else:
-                # case-insensitive arama (base + üst dizin)
-                name = Path(rel).name.lower()
-                for root in (base, base.parent):
-                    match = next((p for p in root.rglob("*.PcbDoc")
-                                 if p.name.lower() == name), None)
-                    if match:
-                        resolved.append(match)
-                        break
-        seen = set()
-        unique = []
-        for p in resolved:
-            key = str(p).lower()
+    def unique(paths):
+        seen, out = set(), []
+        for q in paths:
+            key = str(q).lower()
             if key not in seen:
                 seen.add(key)
-                unique.append(p)
-        if unique:
-            log(tr('  · PrjPcb referanslarından {a0} PcbDoc çözüldü (path normalize edildi).').format(a0=len(unique)))
-            return unique
+                out.append(q)
+        return out
+
+    try:
+        text = Path(project_path).read_text(encoding="utf-8", errors="ignore")
     except Exception as e:
         log(tr('  · PrjPcb PcbDoc için parse edilemedi: {a0}').format(a0=e))
+        text = None
 
-    # 2) Son çare: klasör + üst dizin taraması (kardeş klasörler dahil)
+    if text is not None:
+        refs = re.findall(r"DocumentPath\s*=\s*(.+\.PcbDoc)", text, re.IGNORECASE)
+        if not refs:
+            log(tr("  · PrjPcb'de PcbDoc referansı yok — proje PCB'siz kabul edildi."))
+            return [], False
+        exact, guessed = [], []
+        for ref in refs:
+            rel = ref.strip().replace("\\", "/")
+            candidate = base / rel
+            if candidate.exists():
+                exact.append(candidate.resolve())
+                continue
+            name = Path(rel).name.lower()
+            for root in (base, base.parent):
+                match = next((q for q in root.rglob("*.PcbDoc")
+                              if q.name.lower() == name), None)
+                if match:
+                    guessed.append(match.resolve())
+                    break
+        if exact:
+            # Kesin referans varsa tahmine gerek yok: var olmayan dosyalara
+            # işaret eden eski referanslar (bunny_brain'de 6 adet) düşer.
+            exact = unique(exact)
+            log(tr('  · PrjPcb referanslarından {a0} PcbDoc çözüldü (path normalize edildi).').format(a0=len(exact)))
+            return exact, False
+        if guessed:
+            guessed = unique(guessed)
+            log(tr("  ! PrjPcb'deki PcbDoc yolunda dosya yok; aynı adlı dosya bulundu: {a0} (şematikle doğrulanacak).").format(a0=", ".join(str(q) for q in guessed)))
+            return guessed, True
+
+    # Referans var ama hiçbiri bulunamadı (ya da PrjPcb okunamadı): son çare tarama.
     found = sorted(base.rglob("*.PcbDoc"))
     if not found and base.parent != base:
         found = sorted(base.parent.rglob("*.PcbDoc"))
-    return found
+    if found:
+        log(tr("  ! PrjPcb'deki PcbDoc bulunamadı; klasör taramasıyla {a0} aday bulundu (şematikle doğrulanacak).").format(a0=len(found)))
+    return found, bool(found)
+
+
+def _sch_designators(project_path):
+    """@brief Projenin şematik komponent designator'ları (PCB doğrulaması için).
+
+    @details Yalnız TAHMİN edilen PcbDoc doğrulanırken çağrılır; SchDoc'lar
+    render edilmeden yalnız komponent listesi için açılır. Yer tutucu
+    designator'lar (`C?`) atlanır — anotasyonsuz tasarımda eşleşme ölçütü yok.
+
+    @param project_path Altium proje dosyası (.PrjPcb) yolu
+    @return Designator kümesi (okunamazsa boş küme)
+    """
+    out = set()
+    try:
+        project = AltiumPrjPcb(project_path)
+        for sch_path in _resolve_schdoc_paths(project, project_path, lambda _m: None):
+            try:
+                for c in AltiumSchDoc(sch_path).get_components():
+                    d = get_comp_field(c, ["designator", "logical_designator", "ref"], "")
+                    if d and not d.endswith("?"):
+                        out.add(d)
+            except Exception:
+                continue
+    except Exception:
+        pass
+    return out
+
+
+def _pcb_matches_schematic(pcb, sch_desigs):
+    """@brief PCB komponentleri şematikle örtüşüyor mu (yanlış board koruması).
+
+    @details `_merge_netlist_with_pcb`'deki kuralın aynısı: PCB designator'larının
+    en az yarısı şematikte (tam ya da kanal soneki atılmış tabanıyla) bulunmalı.
+
+    @param pcb AltiumPcbDoc
+    @param sch_desigs Şematik designator kümesi
+    @return (eşleşti_mi, eşleşen sayısı, PCB designator sayısı)
+    """
+    def base(d):
+        return re.sub(r"_\d+$", "", d)
+
+    pcb_desigs = {str(getattr(c, "designator", "") or "") for c in (pcb.components or [])}
+    pcb_desigs.discard("")
+    if not pcb_desigs:
+        return False, 0, 0
+    sch_bases = {base(d) for d in sch_desigs}
+    hit = sum(1 for d in pcb_desigs if d in sch_desigs or base(d) in sch_bases)
+    return hit >= len(pcb_desigs) * 0.5, hit, len(pcb_desigs)
 
 
 # --- Doğru PcbDoc'u seçme + tek seferlik parse -----------------------------
@@ -1364,10 +1438,11 @@ def _pick_pcbdoc(project_path, log):
     if ckey in _PCB_PICK_CACHE:
         return _PCB_PICK_CACHE[ckey]
 
-    paths = _resolve_pcbdoc_paths(project_path, log)
+    paths, guessed = _resolve_pcbdoc_paths(project_path, log)
     if not paths:
         _PCB_PICK_CACHE[ckey] = (None, None)
         return (None, None)
+    sch_desigs = _sch_designators(project_path) if guessed else None
 
     best, best_doc, best_score, notes = None, None, (-1, -1), []
     for p in paths:
@@ -1376,6 +1451,14 @@ def _pick_pcbdoc(project_path, log):
         except Exception as e:
             log(tr('  · {a0} okunamadı: {a1}').format(a0=p.name, a1=e))
             continue
+        if guessed:
+            # Aranarak bulunan dosya başka bir projenin board'u olabilir.
+            ok, hit, total = _pcb_matches_schematic(doc, sch_desigs)
+            if not ok:
+                log(tr('  ! {a0} reddedildi: komponentleri şematikle örtüşmüyor ({a1}/{a2}), başka bir projenin board dosyası olabilir.').format(a0=p, a1=hit, a2=total))
+                _PCB_DOC_CACHE.pop(str(Path(p).resolve()).lower(), None)
+                continue
+            log(tr('  · {a0} kabul edildi: komponentlerin {a1}/{a2} şematikte var.').format(a0=p.name, a1=hit, a2=total))
         score = (len(getattr(doc, "components", []) or []),
                  len(getattr(doc, "pads", []) or []))
         notes.append(f"{p.name}: {score[0]} komponent")

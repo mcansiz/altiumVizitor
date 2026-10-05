@@ -5,7 +5,7 @@ Wavenumber'ın ticari "viz sch 1.0" ürününün açık-kaynak alternatifi.
 [altium_monkey](https://github.com/wavenumber-eng/altium_monkey) kütüphanesi
 (Eli Hughes / Wavenumber) üzerine kurulu.
 
-**Mevcut sürüm**: `APP_VERSION` sabiti **`viewer.py`'de** tutulur (şu an 2.33.0);
+**Mevcut sürüm**: `APP_VERSION` sabiti **`viewer.py`'de** tutulur (şu an 2.33.1);
 `gui.py` oradan import eder (v2.9.29'da taşındı — HTML çıktıları da sürümü
 gösterebilsin diye, tek kaynak). Yeni özellik/düzeltme ekleyince bu sabiti
 güncelle (semver: major.minor.patch). Sürüm pencere başlığında, alt durum
@@ -320,16 +320,19 @@ DiskUltimate deposundaki düzenin karşılığı. Üç iş akışı (`.github/wo
 deposunun herkese açık örneklerini SABİT commit + SHA-256 ile indirir
 (`tools/fetch_samples.py` → `.tmp/samples/`): `m2_emmc` (şematik + PCB + 3D,
 BOM/PnP, IC haritası, MCU=U1) ve `simple_hierchical` (PCB'siz hiyerarşi).
-Her örnek kendi `<ad>/proj/` klasöründe durur — kardeş klasörde dururlarsa
-PcbDoc'suz projenin üst dizin taraması BAŞKA örneğin PcbDoc'unu alıyor
-(ölçüldü; bkz. Bilinen Kısıtlar).
+Her örnek kendi `<ad>/proj/` klasöründe durur (v2.33.0'da PcbDoc'suz projenin
+üst dizin taraması BAŞKA örneğin board'unu alıyordu; v2.33.1'de düzeldi, ama
+yerleşim testleri birbirinden bağımsız tutmak için böyle kaldı).
 
 **Testler** (`tests/`, unittest, yerelde ~30 s): `test_static` (deps,
 requirements↔deps uyumu, `check_html_i18n`, sözdizimi), `test_gui` (offscreen
 self-test, `_BTN_LABELS`↔gui.ui, eksik çeviri), `test_generation` (iki örnekte
 YEDİ üreticinin hepsi; HTML'lerde ⟪⟫ kalıntısı yok, satır-içi script'ler —
 birleşik kabuğun gzip'li iç HTML'leri dahil — `node --check`'ten geçer, EN
-üretim, not yazma/okuma, CSV/xlsx içerik). Yerelde ağ/node yoksa ilgili testler
+üretim, not yazma/okuma, CSV/xlsx içerik), `test_pcb_resolution` (örnekleri
+geçici klasörlerde beş düzende kurar: yan yana iki proje, `PCB PROJECT/` +
+`PCB/` + `SCHEMATIC/` kardeş düzeni, taşınmış PcbDoc, bozuk referansla başka
+projenin board'u, eski + geçerli referans). Yerelde ağ/node yoksa ilgili testler
 ATLANIR; CI'da `SCHVIZ_REQUIRE_SAMPLES=1` / `SCHVIZ_REQUIRE_NODE=1` ile düşer.
 
 ```bash
@@ -989,18 +992,38 @@ mesajına bak.
 ## Bilinen Kısıtlar
 
 - Net adı bir komponent designator ile çakışırsa net önceliği var (uncommon).
-- **PcbDoc'u olmayan proje, kardeş klasördeki BAŞKA bir projenin PcbDoc'unu
-  kullanabilir**: `_resolve_pcbdoc_paths` PrjPcb'de referans bulamayınca proje
-  klasörünü VE bir üst dizini (kardeş klasörler dahil) tarıyor (v2.9.1'de
-  `PCB PROJECT/` ↔ `PCB/` düzeni için bilerek eklendi). Ölçüldü (v2.33.0):
-  `simple_hierchical` örneği yan klasördeki `m2_emmc.PcbDoc`'u alıp PCB/PnP
-  üretti. Düzeltilmedi — kardeş-klasör düzenini bozmadan ayırt etmek için
-  ölçüt gerekiyor (ör. designator örtüşmesi, `_merge_netlist_with_pcb`'deki %50
-  kuralı gibi).
 - BOM/PnP `AltiumDesign` API'sine bağlı; çok eski altium_monkey sürümlerinde
   bu API olmayabilir (graceful fallback var, "veri yok" der).
 
 ## Çözülen Sorunlar (tarihçe)
+
+- **PCB'si olmayan proje, yan klasördeki BAŞKA bir projenin board'unu
+  kullanıyordu (v2.33.1, v2.33.0'daki CI örneklerini kurarken ölçüldü)**:
+  `_resolve_pcbdoc_paths` PrjPcb'de PcbDoc bulamayınca proje klasörünü VE bir
+  üst dizini (tüm kardeş klasörler) tarayıp ilk `*.PcbDoc`'u alıyordu. Bu
+  tarama v2.9.1'de `PCB PROJECT/` ↔ `PCB/` düzeni için eklenmişti; ama o
+  düzende PrjPcb zaten `..\PCB\x.PcbDoc` referansını taşır ve aynı sürümde
+  eklenen referans çözümü onu buluyor — tarama o senaryo için gerekli değildi.
+  **Ölçülen etki** (PCB'siz `simple_hierchical`, `m2_emmc`'nin yanında):
+  PnP CSV'ye m2_emmc'nin **31 parçası** girdi, `has_pnp` true oldu, PCB
+  görüntüleyici ve birleşik görünümün PCB/3D paneli m2_emmc'nin board'unu
+  gösterdi; uyarı yoktu. Netlist bozulmadı (`_merge_netlist_with_pcb`'nin %50
+  designator örtüşme koruması PCB'yi reddetti) — diğer çıktılarda bu koruma
+  yoktu. Ortak designator'larda (`J1`) şematik popup'ın PCB konumu da aynı
+  seçimden geldiği için yanlış board'dan okunuyordu (aynı kod yolu, ölçülmedi).
+  **Çözüm**: (1) PrjPcb'de **hiç PcbDoc referansı yoksa tarama yapılmaz** —
+  proje Altium'da PCB'siz demektir; (2) referans var ama o yolda dosya yoksa
+  aynı adlı dosya aranır / son çare tarama yapılır, ama bulunanlar TAHMİN
+  sayılır ve `_pick_pcbdoc`'ta şematikle **%50 designator örtüşmesi**
+  (`_pcb_matches_schematic`, netlist korumasıyla aynı kural) sağlamazsa
+  reddedilir; (3) iki durum da log'a açıkça yazılır. Var olmayan dosyaları
+  gösteren eski referanslar (bunny_brain'de 6 adet) geçerli bir referans
+  varken artık hiç aranmıyor.
+  **Kapsam ölçümü**: altium_monkey'in 7 örnek projesinden PcbDoc'u olan 6'sı
+  da referanslıyor; referanssız tek proje gerçekten PCB'siz olan
+  `simple_hierchical`. BRK-210 (kardeş düzen) ve Smart_MCU JSON çıktıları eski
+  ve yeni kodla **bit bit aynı**. `test_pcb_resolution` 5/5; eski kodla aynı
+  testlerden hatayı temsil eden ikisi düşüyor.
 
 - **Linux paketinde 3D üretimi çalışmıyordu — `strip` numpy'nin OpenBLAS'ını
   bozuyordu (v2.33.0, CI'daki AppImage duman testi yakaladı)**: Spec Linux'ta

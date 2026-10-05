@@ -314,6 +314,16 @@ _EN_LOG = {
         "  · {a0} SchDoc resolved from PrjPcb references (paths normalized).",
     "  · PrjPcb referanslarından {a0} PcbDoc çözüldü (path normalize edildi).":
         "  · {a0} PcbDoc resolved from PrjPcb references (paths normalized).",
+    "  · PrjPcb'de PcbDoc referansı yok — proje PCB'siz kabul edildi.":
+        "  · PrjPcb references no PcbDoc — project treated as having no PCB.",
+    "  ! PrjPcb'deki PcbDoc yolunda dosya yok; aynı adlı dosya bulundu: {a0} (şematikle doğrulanacak).":
+        "  ! No file at the PcbDoc path in the PrjPcb; found a file with the same name: {a0} (will be checked against the schematic).",
+    "  ! PrjPcb'deki PcbDoc bulunamadı; klasör taramasıyla {a0} aday bulundu (şematikle doğrulanacak).":
+        "  ! PcbDoc from the PrjPcb not found; folder scan found {a0} candidate(s) (will be checked against the schematic).",
+    "  ! {a0} reddedildi: komponentleri şematikle örtüşmüyor ({a1}/{a2}), başka bir projenin board dosyası olabilir.":
+        "  ! {a0} rejected: its components do not match the schematic ({a1}/{a2}); it may belong to another project.",
+    "  · {a0} kabul edildi: komponentlerin {a1}/{a2} şematikte var.":
+        "  · {a0} accepted: {a1}/{a2} of its components are in the schematic.",
     "  · PrjPcb parse edilemedi: {a0}": "  · PrjPcb could not be parsed: {a0}",
     "  · PrjPcb PcbDoc için parse edilemedi: {a0}":
         "  · PrjPcb could not be parsed for PcbDoc: {a0}",

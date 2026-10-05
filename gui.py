@@ -1211,6 +1211,22 @@ def run_selftest(report_path, project_path=None) -> int:
             return {"tr": src, "en": en}
         step("dil", lang)
 
+        def imports():
+            # Bağımlılık kapısı yalnız find_spec'e bakar (modülü çalıştırmaz);
+            # pakette bozuk bir .so ancak gerçek import'ta patlar. Hepsi tek tek
+            # denenir ki rapor İLK değil TÜM hataları göstersin.
+            import importlib
+            bad = {}
+            for mod in ("numpy", "PIL.Image", "lxml.etree", "openpyxl", "altium_monkey",
+                        "trimesh", "cascadio"):
+                try:
+                    importlib.import_module(mod)
+                except BaseException as exc:
+                    bad[mod] = f"{type(exc).__name__}: {exc}"
+            assert not bad, bad
+            return "tamam"
+        step("importlar", imports)
+
         if project_path:
             with tempfile.TemporaryDirectory() as tmp:
                 out_json = Path(tmp) / "selftest.json"

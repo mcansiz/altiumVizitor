@@ -30,7 +30,7 @@ class TestGui(unittest.TestCase):
         code = self.gui.run_selftest(str(report))
         data = json.loads(report.read_text(encoding="utf-8"))
         self.assertEqual(code, 0, data.get("error"))
-        self.assertEqual([s["step"] for s in data["steps"]], ["arayuz", "dil"])
+        self.assertEqual([s["step"] for s in data["steps"]], ["arayuz", "dil", "importlar"])
 
     def test_button_labels_match_ui(self):
         """_BTN_LABELS gui.ui'deki kaynak etiketlerle birebir (üretimden sonra geri yazılır)."""

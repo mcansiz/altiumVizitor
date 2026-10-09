@@ -5,7 +5,7 @@ Wavenumber'ın ticari "viz sch 1.0" ürününün açık-kaynak alternatifi.
 [altium_monkey](https://github.com/wavenumber-eng/altium_monkey) kütüphanesi
 (Eli Hughes / Wavenumber) üzerine kurulu.
 
-**Mevcut sürüm**: `APP_VERSION` sabiti **`viewer.py`'de** tutulur (şu an 2.33.1);
+**Mevcut sürüm**: `APP_VERSION` sabiti **`viewer.py`'de** tutulur (şu an 2.35.2);
 `gui.py` oradan import eder (v2.9.29'da taşındı — HTML çıktıları da sürümü
 gösterebilsin diye, tek kaynak). Yeni özellik/düzeltme ekleyince bu sabiti
 güncelle (semver: major.minor.patch). Sürüm pencere başlığında, alt durum
@@ -498,6 +498,88 @@ birleşik kabuk) enjekte edilir — f-string'lerde `{_GESTURE_JS}`, 3D'nin raw
    DOM'dan KOPAR; kopuk düğüme gönderilen olay window'a bubble ETMEZ
    (not/kutu taşıma bu yüzden hiç ilerlemiyordu).
 
+### Telefon düzeni — v2.34.0 (telefon emülasyonuyla ölçülerek kuruldu)
+
+- **Görünür alan** (`fitArea()` şematik / `viewArea()` PCB): sığdırma ve
+  ortalama, kanvasın üstünde YÜZEN öğeleri düşerek yapılır — viewport'un
+  İÇİNDEKİ toolbar, dar ekranda kanvasa binen katlanmış panel (< 60 px) ve
+  alttan açılan komponent kartı (`popupSheetH()`). Birleşik görünümde toolbar
+  kabuğa taşındığı için hiçbir şey düşülmez. AÇIK panel düşülmez (geçici).
+- **Açılış görünümü sığdırılır** (`initialFit`): eskiden sabit 0.30x idi →
+  telefonda sayfa sol üstte küçücük, yarısı toolbar altındaydı. Dar ekranda
+  ilk sayfa, genişte tüm sayfalar. Panel gizliyse ResizeObserver'da ertelenir.
+  `fitAll(instant)` / `fitToSheet(id, instant)`: onclick'e DOĞRUDAN `fitAll`
+  verme (olay nesnesi `instant` sanılır) — `() => fitAll()`.
+- **"⋯" taşma menüsü**: ikincil düğmeler `tb-more`, menü düğmesi `more-btn`;
+  `@media (max-width:820px)` içinde `#toolbar:not(.more-open) .tb-more` gizli.
+  Toggle kendi `parentElement`'ine bakar → çubuk birleşik kabuğa taşınınca da
+  çalışır; kabuk aynı kuralları `#pane-tools .ptools` için TEKRARLAR (iframe
+  stil sayfası orada geçersiz). Ölçüm: şematik toolbar 105 → 40 px; birleşik
+  üst çubuk SCH 145 → 95 px, Böl 215 → 140 px.
+- **Katlanmış panel şerit bırakmaz** (dar ekran): genişlik 0, sol üstte yüzen
+  40×40 düğme. Tablette (geniş + dokunmatik) şerit 44 px (düğme kırpılmasın).
+- **Dokunma hedefleri** `@media (pointer:coarse)`: ≥ 40 px; arama kutusu
+  16 px yazı (iOS daha küçükte odakta sayfayı zoom'luyor).
+- **Komponent detayı alttan açılan kart** (`.sheet-mode`): dar ekranda düğüm
+  panelden `<body>`'ye TAŞINIR (katlanmış panelin çocukları
+  `display:none !important`), panel kapanır; genişleyince geri döner.
+  Kaydet klonunda kart panele geri konur. Seçili kutu kartın altında kalırsa
+  `revealAboveSheet()` görünümü dikeyde kaydırır — **süren geçişin HEDEFİNİ**
+  (`smoothTarget`) okur: `smoothT` ilk adımı SENKRON çalıştırıp `tx/ty`'yi
+  başlangıç değerine çektiği için ara değeri okuyan kod odaklama geçişini
+  iptal ediyordu (yol boyunca yakalandı).
+- **Yakın dokunuş** (yalnız dokunuşta): yazıya değmeyen dokunuşta ≤ 24 px
+  içindeki en yakın `clickable-net` / `block-link` / `comp-designator` span'ına
+  tıklama yönlendirilir (1.5x zoom'da designator kutusu ~4×4 px). Dokunmatikte
+  `TL_MIN_SCALE` 0.85 → 0.35 (sığdırılmış sayfa ~0.5x).
+- **Son işaretçi türü** `lastPtrType`: dokunuştan sonra hover balonu (`#svg-tip`)
+  açılmaz (compat mouseover onu açıp asılı bırakıyordu); gerçek fare hareketi
+  türü geri alır.
+- **Dik ekranda Böl modu üst / alt** (`#split.vert`, `sizeSplit()`, ayraç
+  dikey sürüklenir) — yan yana 390 px iki ~190 px sütundu.
+- Yardım penceresinde `h3.touch-h` bölümü dokunmatikte en üste alınır; PCB ve
+  3D alt bilgi şeridi dokunmatikte parmak terimleriyle yazılır.
+
+### Gezgin / Özellikler bölümleri — v2.35.0 (şematik + PCB)
+
+**Kural: SEÇİM yalnız İÇERİĞİ günceller; panellerin açık/kapalı durumunu
+yalnız KULLANICI değiştirir ve tercih saklanır.** (Kullanıcı bildirimi:
+"özellikleri kapatıyorum, başka komponente tıklayınca tekrar açılıyor" ve
+telefonda alttan kartın her dokunuşta şemayı daraltması.) Eskiden
+`showCompPopup` / `showComp` her seçimde paneli zorla açıyordu.
+
+- İki bağımsız bölüm: **Gezgin** (şematik: hiyerarşi/Comps/Nets · PCB:
+  katmanlar/netler/komponentler/BOM) ve **Özellikler** (komponent detayı).
+  Açıkken üstte yatay `#sb-head` düğmeleri, katlanınca kenarda dikey
+  `#sb-rail` düğmeleri (`writing-mode` + 180° döndürme, JetBrains/Altium
+  şeridi). Kapalı Özellikler düğmesi seçili designator'ı gösterir
+  (`Özellikler · IC3`) ve seçimde kısa parıltı verir (`pingProp`).
+- Durum tek fonksiyonda: `applyPanels()` (sidebar `collapsed` / `nav-off`,
+  popup `open`, şerit etiketi, telefon çipi). Değiştirenler: `setNavOpen`,
+  `setPropOpen`, `toggleSidebarAll` (ok / `B`: tümünü katla, açınca önceki
+  bölümler döner), `I` kısayolu. `setSidebarOpen(x)` artık Gezgin'i açar
+  (arama `/`, `H` için).
+- Tercih **masaüstü / telefon AYRI**: `propPref.d` (varsayılan açık) /
+  `propPref.m` (varsayılan KAPALI). Şematikte `schviz-ui`'nin `propD`/`propM`
+  alanları, PCB'de `schviz-pcb-ui`. Kip `isNarrow()` (iframe genişliği < 820)
+  → 1600 px ekranda Böl modundaki paneller de "telefon" kipindedir (çip).
+- Telefon: Özellikler kapalıyken sağ altta **çip** (`#prop-chip`, `ⓘ IC3
+  değer`); dokununca alttan kart açılır, açık bırakılırsa sonraki seçimlerde
+  açık kalır. Çip görünürken `body.has-chip` (zoom göstergesi sola kayar,
+  PCB alt bilgi şeridi gizlenir).
+- Masaüstünde seçim yokken boş Özellikler bölümü yalnız Gezgin de kapalıysa
+  görünür (yer tutucu metinle); aksi halde listenin altında boş kutu dururdu.
+- **×** yalnız Özellikler'i kapatır (seçim/vurgu kalır — PCB'de eskiden
+  seçimi de siliyordu). **Esc** seçimi temizler, bölüm tercihine dokunmaz
+  (eskiden önce popup'ı kapatıyordu — tercih modelinde bu kalıcı kapatma
+  olurdu).
+- Doğrulama (headless Edge + CDP, 16/16): masaüstü şematik × sonrası yeni
+  seçimde kapalı kalma, katlı panelde seçimde katlı kalma + şeritte
+  designator, şeritten yalnız Özellikler açma, yeniden yüklemede tercih,
+  Esc · telefon şematik çip → kart → açık kalma → × → çip · PCB masaüstü ve
+  telefon aynı senaryo · birleşik görünümde karşı panelden gelen seçim de
+  kapalı bölümü açmıyor.
+
 ## Kritik Kurallar
 
 ### PyQt6 değil, PyQt5
@@ -852,6 +934,20 @@ Sol panelde dört sekme: **Katmanlar · Netler · Komponentler · BOM · Montaj*
 - **Katmanlar**: aç/kapa, ↑ ile katmanı en üste getir (`topLayer` en sona
   çizilir — canvas'ta sonra çizilen üstte; tekrar basınca normal sıraya döner),
   Üst/Alt (`T`), Hepsi, Temizle.
+  **Katman kimliği ve adı (v2.35.1)**: kimlik eski tek baytlık `o.layer`
+  DEĞİL, `o.layer_ref().v7_saved_layer_id`'dir — Altium Mech 17…1024'ü eski
+  alana "Mechanical 16" (72) diye yazar; eski alanla gruplanınca ayrı
+  katmanlar tek satırda birleşiyordu. Görünen ad board kaydındaki Altium
+  tablosundan (`LAYER_V8_<i>LAYERID` → `LAYER_V8_<i>NAME`; yoksa
+  `LAYER<n>NAME`): "Int1 (GND)", "Top Courtyard", "Route Tool Path"… — KiCad'in
+  gösterdiği adlar. Sıra: fiziksel yığın (tablo sırası), sonra mekanikler
+  numaraya göre. Her katmanda değişmeyen iç anahtar `k` (TOP, TOP_OVERLAY,
+  MULTI_LAYER, MECHANICAL_29…) vardır: **3D doku (`_build_surface_from_
+  geometry`) ve Üst/Alt düğmesi ada DEĞİL `k`'ya bakar** (görünen ad
+  projeden projeye değişir; "Top Courtyard" da Top ile başlar ama Üst/Alt
+  mekaniklere dokunmaz). Dosyada nesnesi olmayan katmanlar listelenmez
+  (KiCad'in kendi eklediği Adhesive/User.*/Margin ve boş Bottom Paste /
+  Bottom Solder bu yüzden yok).
 - **Netler**: net adı + pad/iz sayısı, ara, Güç/GND/Sinyal filtrele, tıkla →
   net tüm katmanlarda vurgulanır (bakır ize çift tıklamakla aynı sonuç).
   Çoklu net vurgusu `selNets` + Set tabanlı filtreyle (`drawLayer(li, netSet)`)
@@ -996,6 +1092,63 @@ mesajına bak.
   bu API olmayabilir (graceful fallback var, "veri yok" der).
 
 ## Çözülen Sorunlar (tarihçe)
+
+- **PCB'de `.Designator` / `.PCBCODE` özel dizgeleri ham basılıyordu (v2.35.2,
+  kullanıcı bildirimi: Mech 29 montaj çiziminde her komponentin yerinde
+  ".designator" yazıyor, KiCad'de D4 / R55 / C95)**: Altium footprint'teki
+  `.Designator` yazısını O komponentin adıyla, `.PCBCODE` gibi dizgeleri proje
+  parametresiyle değiştirerek çizer; `extract_pcb_geometry` `render_pcb_text`'e
+  ham `text_content` veriyordu. BRK-213'te **855 `.Designator`** (hepsi
+  komponente bağlı, çoğu Mech 29) + 1 `.PCBCODE`. Çözüm: kütüphanenin KENDİ
+  `substitute_pcb_special_strings`'i (harf duyarsız, `'a' + .B` birleştirmesi,
+  çözülemeyen dizge aynen kalır) komponent bağlamıyla çağrılır — designator,
+  comment (komponentin comment yazısından, `=Value` dolaylısı çözülerek),
+  description, footprint/pattern, komponentin tüm parametreleri + proje
+  parametreleri (`_project_parameters(project_path)`, iki çağrı noktası da
+  geçirir) — sonuç `render_pcb_text(..., text_override=)` ile çizilir.
+  `is_designator` yazısı ATLANIR: içeriği zaten komponentin adıdır (BRK-213'te
+  ".PCB1" adlı logo komponenti var — özel dizge sanılmamalı).
+  **Doğrulama**: 856 dizge çözüldü, tarayıcıda D4 / C95 / R54 / R55 / J4 / D5 /
+  FB16 / FB17 KiCad ekranıyla aynı; `.PCBCODE` → `BRK-210-2600010_D000`;
+  süre değişmedi; testler geçiyor. **Açık kalan**: o `.PCBCODE` ters (inverted)
+  TrueType yazı; kutu genişliği dosyada sabit (636 mil) ve "Bahnschrift
+  SemiLight" ile çizilen metin kutudan ~2 karakter taşıyor — font ağırlığı /
+  metriği farkı (kütüphanenin TrueType çizimi), yamalanmadı.
+
+- **PCB katman listesi KiCad'den eksik görünüyordu: Mech 17+ katmanlar
+  "Mechanical 16"da birleşiyor, Altium adları kullanılmıyordu (v2.35.1,
+  kullanıcı bildirimi: BRK-209 projesinde KiCad'de daha fazla katman var)**:
+  BRK-213-2600010'da ölçüldü — eski `layer` alanı "Mechanical 16" diyen
+  4 300+ nesnenin gerçek katmanları: Bottom Courtyard (Mech 16) 1 365, Mech 29
+  3 645 (732 yazı dahil), Route Tool Path (Mech 50) 43, Bottom Assembly
+  (Mech 20) 38, Bottom 3D Body (Mech 23) 32, Dimensions (Mech 19) 2. Yazılarda
+  `v7_layer_id` alanı YOK; `layer_ref()` her nesne türünde (yazı dahil) V7
+  kimliği verir. Adların kaynağı board kaydının `LAYER_V8_*` tablosu ("Route
+  Tool Path" = Mech 50 burada kesin; `LAYERV7_<n>NAME` / mekanik tür
+  tablosundan tahmin edilseydi Mech 33 çıkardı). **Sonuç**: 19 → **24
+  katman**, adlar KiCad ile aynı, nesne toplamları değişmedi; m2_emmc'de de
+  iki gizli katman (Mech 25, Mech 29) ayrıştı. **Regresyon kanıtı**: 3D doku
+  (üst + alt) iki projede de eski kodla **bayt bayt AYNI**; çıkarma süresi
+  aynı (BRK-213 17.6 s; 30 bin `layer_ref()` çağrısı 0.15 s); Üst/Alt
+  semantiği korunuyor; birim testleri geçiyor.
+
+- **Telefon kullanılabilirliği + komponent değerinde `=Value` (v2.34.0,
+  kullanıcı isteği: "html çıktılarını mobil webde çalıştırarak kontrol
+  edebilir misin")**: headless Edge'de 390×844 dokunmatik emülasyonla üç
+  proje ölçüldü (ayrıntı: "Telefon düzeni" bölümü). Yan bulgu masaüstünü de
+  etkiliyordu: Altium Comment alanı `=Value` ise "Value parametresini göster"
+  demektir; `_collect_data` ham değeri alıyordu → komponent listesi, popup,
+  JSON `value` ve **PCB BOM · Montaj gruplaması** (m2_emmc'de 0.1µF / 1µF /
+  2.2µF kondansatörler TEK "9 × =Value" satırı) bozuktu. `resolve_indirect_text`
+  parametreden çözer (harf duyarsız, en çok 3 adım zincir, bulunamazsa metin
+  aynen). BOM/PnP CSV'si kütüphaneden geldiği için zaten doğruydu.
+  **Doğrulama**: telefon — 44 px altı hedef 16 → 0, sayfa açılışta 12..378 px
+  (390 px ekran) sığıyor ve toolbar altında kalmıyor, yakın dokunuş (yazının
+  10 px yanı) designator seçiyor, kart alttan açılıyor ve seçili kutu kartın
+  üstünde, Böl dikte üst/alt + ayraç sürüklemesi, 0 JS hatası · masaüstü
+  (1366×768) — ⋯ gizli, tüm araçlar görünür, popup panelde, birleşik üst çubuk
+  34/62 px (değişmedi) · birim testleri 34 + `resolve_indirect_text` testi ·
+  `check_html_i18n` temiz.
 
 - **PCB'si olmayan proje, yan klasördeki BAŞKA bir projenin board'unu
   kullanıyordu (v2.33.1, v2.33.0'daki CI örneklerini kurarken ölçüldü)**:

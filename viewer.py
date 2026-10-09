@@ -91,7 +91,7 @@ from altium_monkey.altium_schdoc import AltiumSchDoc
 
 # Uygulama sürümü — tek kaynak burası; gui.py buradan import eder.
 # HTML çıktılarında sağ üst köşedeki rozette görünür (build saati yerine).
-APP_VERSION = "2.33.1"
+APP_VERSION = "2.35.2"
 
 # Önerilen minimum altium_monkey sürümü. Bu sürümden öncesinde:
 #   · 2026.6.21 öncesi — STM32 gibi IC'lerde dikey pin adları yatay çiziliyordu.
@@ -620,6 +620,36 @@ def get_component_parameters(c) -> dict:
         except Exception:
             pass
     return result
+
+
+def resolve_indirect_text(text: str, params: dict, depth: int = 3) -> str:
+    """@brief Altium'un dolaylı metnini (`=ParamAdı`) parametre değerine çözer.
+
+    @details Altium'da Comment alanı `=Value` ise "Value parametresini göster"
+    demektir; kütüphane alanı ham haliyle (`=Value`) döndürür. Çözülmezse
+    komponent listesi, popup, BOM · Montaj gruplaması ve JSON'daki `value`
+    hepsi `=Value` olur — 0.1µF ile 2.2µF kondansatörler TEK grupta görünür.
+    Ad eşleştirmesi büyük/küçük harf duyarsızdır (Altium da öyledir); zincir
+    (`=A` → `=B` → değer) en çok `depth` adım izlenir, döngü kendiliğinden
+    kesilir. Parametre bulunamazsa metin AYNEN döner (veri uydurulmaz).
+
+    @param text Ham alan metni
+    @param params Komponent parametreleri {ad: değer}
+    @param depth En çok kaç dolaylı adım izleneceği
+    @return Çözülmüş metin (çözülemezse girdi)
+    """
+    s = text or ""
+    if not params:
+        return s
+    low = {str(k).lower(): v for k, v in params.items()}
+    for _ in range(depth):
+        if not (s.startswith("=") and len(s) > 1):
+            break
+        v = low.get(s[1:].strip().lower())
+        if not v or v == s:
+            break
+        s = str(v)
+    return s
 
 
 def strip_aspect_ratio(svg_str: str) -> str:
@@ -1661,14 +1691,17 @@ def _collect_data(project_path: str, log, with_pcb=False, progress=None,
                                        round((fb.y2_mils - fb.y1_mils) / 10, 2)]
                         except Exception:
                             sch_box = None
+                    params = get_component_parameters(c)
                     components.append({
                         "designator": get_comp_field(c, ["designator", "logical_designator", "ref"], "?"),
-                        "value": get_comp_field(c, ["comment", "value"], ""),
+                        # '=Value' gibi dolaylı Comment'ler parametreden çözülür
+                        "value": resolve_indirect_text(
+                            get_comp_field(c, ["comment", "value"], ""), params),
                         "description": get_comp_field(c, ["description"], ""),
                         "footprint": get_comp_field(c, ["footprint", "current_footprint"], ""),
                         "library_reference": get_comp_field(c, ["library_reference", "lib_ref"], ""),
                         "library_name": get_comp_field(c, ["library_name"], ""),
-                        "parameters": get_component_parameters(c),
+                        "parameters": params,
                         "unique_id": getattr(c, "unique_id", "") or "",
                         "part_id": part_id,
                         "part_count": part_count or 1,
@@ -2981,8 +3014,10 @@ def _build_surface_from_geometry(geo, log=print):
         W, H = float(geo["w"]), float(geo["h"])
         if W <= 0 or H <= 0:
             return None
-        idx = {l["name"]: l["i"] for l in geo["layers"]}
-        multi = idx.get("Multi-Layer (Pads)", -1)
+        # Görünen adlar artık Altium'un adları (projeden projeye değişir) →
+        # katmanlar değişmeyen iç anahtarla (`k`: TOP, MULTI_LAYER…) bulunur.
+        idx = {l.get("k", l["name"]): l["i"] for l in geo["layers"]}
+        multi = idx.get("MULTI_LAYER", -1)
         n = lambda v: ("%.4f" % v).rstrip("0").rstrip(".")
 
         def poly_d(pts):
@@ -3095,8 +3130,8 @@ def _build_surface_from_geometry(geo, log=print):
                    % (n(W), n(H), "".join(out)))
             return base64.b64encode(gzip.compress(svg.encode("utf-8"), 8)).decode()
 
-        top = side("Top Copper", "Top Silkscreen")
-        bot = side("Bottom Copper", "Bottom Silkscreen")
+        top = side("TOP", "TOP_OVERLAY")
+        bot = side("BOTTOM", "BOTTOM_OVERLAY")
     except Exception as e:
         log(tr('  · geometriden yüzey dokusu üretilemedi: {a0}').format(a0=e))
         return None
@@ -3106,7 +3141,21 @@ def _build_surface_from_geometry(geo, log=print):
     return {"top": top, "bot": bot, "gz": 1, "ok": 1 if geo.get("obb") else 0,
             "cx": 0.0, "cy": 0.0, "w": round(W, 3), "h": round(H, 3)}
 
-def extract_pcb_geometry(pcb, log=print):
+def _project_parameters(project_path) -> dict:
+    """@brief PrjPcb'nin proje parametreleri ({ad: değer}); okunamazsa boş.
+
+    @details PCB yazılarındaki `.PCBCODE` gibi özel dizgeler bunlardan çözülür.
+    @param project_path Altium proje dosyası (.PrjPcb) yolu
+    @return Parametre sözlüğü
+    """
+    try:
+        from altium_monkey.altium_prjpcb import AltiumPrjPcb
+        return dict(AltiumPrjPcb(str(project_path)).parameters or {})
+    except Exception:
+        return {}
+
+
+def extract_pcb_geometry(pcb, log=print, project_params=None):
     """@brief PCB'nin HAM GEOMETRİSİNİ kompakt JSON'a çıkar (canvas görüntüleyici).
 
     @details
@@ -3124,6 +3173,7 @@ def extract_pcb_geometry(pcb, log=print):
 
     @param pcb AltiumPcbDoc nesnesi
     @param log Log mesajı callback'i
+    @param project_params Proje parametreleri (`.PCBCODE` gibi özel dizgeler için)
     @return Geometri sözlüğü (JSON'a hazır) veya {"available": False}
     """
     try:
@@ -3165,16 +3215,63 @@ def extract_pcb_geometry(pcb, log=print):
     def YM(y_mm):
         return round(by1 * MM - float(y_mm), 4)
 
-    # --- Katman kaydı: numerik id → sıralı indeks ---
+    # --- Katman adları + sırası: Altium'un KENDİ tablosu ---
+    # Board kaydı her katman için `LAYER_V8_<i>LAYERID` (V7 katman kimliği) ve
+    # `LAYER_V8_<i>NAME` (kullanıcının verdiği ad: "Int1 (GND)", "Top
+    # Courtyard", "Route Tool Path"…) taşır; eski dosyalarda yalnız
+    # `LAYER<n>NAME` (eski numara) bulunur. KiCad'in gösterdiği adlar bunlar.
+    v8_names, v8_order, legacy_names = {}, {}, {}
+    try:
+        groups = {}
+        for k, v in pcb.board.raw_record.items():
+            m = re.match(r"^LAYER_V8_(\d+)_?(LAYERID|NAME)$", str(k))
+            if m:
+                groups.setdefault(int(m.group(1)), {})[m.group(2)] = v
+                continue
+            m = re.match(r"^LAYER(\d+)NAME$", str(k))
+            if m and str(v).strip():
+                legacy_names[int(m.group(1))] = str(v).strip()
+        for gi, g in groups.items():
+            try:
+                lid = int(g.get("LAYERID"))
+            except (TypeError, ValueError):
+                continue
+            if str(g.get("NAME") or "").strip():
+                v8_names[lid] = str(g["NAME"]).strip()
+                v8_order[lid] = gi
+    except Exception:
+        pass
+
+    # --- Katman kaydı: katman kimliği → sıralı indeks ---
+    # Kimlik eski tek baytlık `layer` alanı DEĞİL, `layer_ref()`'in V7 kimliğidir:
+    # Altium 16'dan sonraki mekanik katmanları (Mech 17…1024) eski alana
+    # "Mechanical 16" diye yazar. Eski alanla gruplanınca BRK-213'te altı ayrı
+    # katman (Bottom Courtyard, Mech 29, Route Tool Path, Bottom 3D Body,
+    # Bottom Assembly, Dimensions — 4 300+ nesne) TEK "Mechanical 16" satırında
+    # birleşiyordu; KiCad hepsini ayrı gösteriyordu.
     layers, lidx = [], {}
 
-    def layer_of(num):
-        if num in lidx:
-            return lidx[num]
+    def layer_of(o):
+        legacy = getattr(o, "layer", None)
         try:
-            nm = PcbLayer(int(num)).name
+            ref = o.layer_ref()
         except Exception:
-            nm = f"LAYER_{num}"
+            ref = None
+        v7 = int(getattr(ref, "v7_saved_layer_id", 0) or 0) if ref is not None else 0
+        key = v7 or int(legacy or 0)          # V7 kimlikleri > 2^24, eski no < 256
+        if key in lidx:
+            return lidx[key]
+        lg = getattr(ref, "legacy_layer", None) if ref is not None else None
+        fam = str(getattr(getattr(ref, "family", None), "value", "") or "")
+        if lg is not None:
+            nm = lg.name
+        elif fam == "mechanical" and getattr(ref, "number", None):
+            nm = f"MECHANICAL_{int(ref.number)}"        # Mech 17+ (eski karşılığı yok)
+        else:
+            try:
+                nm = PcbLayer(int(legacy)).name
+            except Exception:
+                nm = f"LAYER_{legacy}"
         st = _GEO_LAYER_STYLE.get(nm)
         if st is None:
             if nm.startswith("MID"):
@@ -3189,22 +3286,37 @@ def extract_pcb_geometry(pcb, log=print):
             else:
                 st = (nm.replace("_", " ").title(), "other",
                       _gen_distinct_color(len(layers) + 11), False)
+        # Görünen ad: Altium'un kendi adı (V7 tablosu → eski tablo → genel ad).
+        # Mech 17+ için eski tablo kullanılmaz (eski numarası Mech 16'nınki).
+        disp = v8_names.get(v7) if v7 else None
+        if not disp and lg is not None:
+            disp = legacy_names.get(int(lg.value))
+        # Sıra: önce fiziksel yığın (Altium tablosunun sırası — macun, baskı,
+        # maske, bakırlar), sonra mekanikler NUMARAYA göre. Tablo yoksa rol sırası.
+        mech_no = int(nm.rsplit("_", 1)[1]) if nm.startswith("MECHANICAL_") else None
+        if mech_no is not None:
+            order = (1, mech_no)
+        elif v7 in v8_order:
+            order = (0, v8_order[v7])
+        else:
+            order = (0, 1000 + _GEO_ROLE_ORDER.get(st[1], 9))
         i = len(layers)
-        lidx[num] = i
-        layers.append({"i": i, "num": int(num), "name": st[0], "role": st[1],
-                       "color": st[2], "on": bool(st[3])})
+        lidx[key] = i
+        layers.append({"i": i, "num": int(legacy or 0), "k": nm,
+                       "name": disp or st[0], "role": st[1],
+                       "color": st[2], "on": bool(st[3]), "_o": order})
         return i
 
     ni = lambda o: (o.net_index if getattr(o, "net_index", None) is not None else -1)
     ci = lambda o: (o.component_index
                     if getattr(o, "component_index", None) is not None else -1)
 
-    tracks = [[layer_of(t.layer), X(t.start_x_mils), Y(t.start_y_mils),
+    tracks = [[layer_of(t), X(t.start_x_mils), Y(t.start_y_mils),
                X(t.end_x_mils), Y(t.end_y_mils), D(t.width_mils), ni(t), ci(t)]
               for t in pcb.tracks]
     # Yay: Altium açıları saat yönünün TERSİ ve Y yukarı; Y ters çevrildiği için
     # canvas'ta açılar da terslenir → JS tarafında -a2..-a1 aralığı çizilir.
-    arcs = [[layer_of(a.layer), X(a.center_x_mils), Y(a.center_y_mils),
+    arcs = [[layer_of(a), X(a.center_x_mils), Y(a.center_y_mils),
              D(a.radius_mils), round(float(a.start_angle), 2),
              round(float(a.end_angle), 2), D(a.width_mils), ni(a), ci(a)]
             for a in (getattr(pcb, "arcs", None) or [])]
@@ -3218,7 +3330,7 @@ def extract_pcb_geometry(pcb, log=print):
             h = D(p.top_height / 10000.0)
         except Exception:
             continue
-        pads.append([layer_of(p.layer), X(p.x_mils), Y(p.y_mils), w, h,
+        pads.append([layer_of(p), X(p.x_mils), Y(p.y_mils), w, h,
                      int(getattr(p, "effective_top_shape", 1) or 1),
                      round(-float(getattr(p, "rotation", 0) or 0), 1),   # Y ters → açı ters
                      D(p.hole_size_mils), ni(p), ci(p),
@@ -3240,7 +3352,7 @@ def extract_pcb_geometry(pcb, log=print):
                 hp.append(Y(v.y_raw / 10000.0))
             if len(hp) >= 6:
                 holes.append(hp)
-        regions.append([layer_of(r.layer), ni(r), vs, holes])
+        regions.append([layer_of(r), ni(r), vs, holes])
 
     # --- Metinler: Altium iki ayrı yolla çizer, İKİSİ DE gerekli ---
     #  • TrueType  → `characters` (glif poligonları)  → dolgu olarak çizilir
@@ -3249,6 +3361,58 @@ def extract_pcb_geometry(pcb, log=print):
     #    STROKE'tur; yalnız `characters` işlenirse silkscreen yazıları TAMAMEN
     #    kaybolur (BRK-210'da 966 metnin 660'ı stroke).
     texts, stexts, t_err = [], [], 0
+
+    # --- Özel dizgeler: `.Designator`, `.Comment`, `.PCBCODE`… ---
+    # Altium (ve KiCad) footprint'teki `.Designator` yazısını O komponentin
+    # adıyla, `.PCBCODE` gibi dizgeleri proje parametresiyle değiştirerek çizer;
+    # ham basılınca BRK-213'te 855 yazı (çoğu Mech 29 montaj çizimi) "D4", "R55"
+    # yerine ".designator" görünüyordu (kullanıcı bildirimi). Çözüm kütüphanenin
+    # KENDİ fonksiyonuyla yapılır (büyük/küçük harf duyarsız, `'a' + .B`
+    # birleştirmesi, çözülemeyen dizge AYNEN kalır); biz yalnız komponent
+    # bağlamını sağlarız: designator, comment, description, footprint ve
+    # komponentin tüm parametreleri (+ proje parametreleri).
+    try:
+        from altium_monkey.altium_pcb_special_strings import (
+            substitute_pcb_special_strings as _subst)
+    except Exception:
+        _subst = None
+    base_ci = {str(k).strip().lower(): str(v)
+               for k, v in (project_params or {}).items()
+               if k is not None and v is not None and str(k).strip()}
+    comment_by_ci = {}
+    for t in pcb.texts:
+        if getattr(t, "is_comment", False):
+            c0 = getattr(t, "component_index", None)
+            if c0 is not None and c0 not in comment_by_ci:
+                comment_by_ci[c0] = t.text_content or ""
+    comp_ci_cache = {}
+
+    def special_params(cidx):
+        if cidx is None or not (0 <= cidx < len(pcb.components)):
+            return base_ci
+        p = comp_ci_cache.get(cidx)
+        if p is None:
+            c = pcb.components[cidx]
+            cpar = {}
+            try:
+                cpar = {str(k): str(v) for k, v in (getattr(c, "parameters", None) or {}).items()
+                        if k is not None and v is not None}
+            except Exception:
+                cpar = {}
+            p = dict(base_ci)
+            for k, v in cpar.items():
+                if k.strip():
+                    p[k.strip().lower()] = v
+            fp = getattr(c, "footprint", "") or ""
+            for k, v in (("designator", getattr(c, "designator", "")),
+                         ("comment", resolve_indirect_text(comment_by_ci.get(cidx, ""), cpar)),
+                         ("description", getattr(c, "description", "")),
+                         ("footprint", fp), ("pattern", fp)):
+                if v:
+                    p[k] = str(v)
+            comp_ci_cache[cidx] = p
+        return p
+    n_subst = 0
     try:
         from altium_monkey import altium_text_to_polygon as _ttp
         for t in pcb.texts:
@@ -3266,8 +3430,17 @@ def extract_pcb_geometry(pcb, log=print):
                 # yazıları kaybolur. Doğrusu `name_on`.
                 if getattr(t, "is_designator", False) and not getattr(comp, "name_on", True):
                     continue
+            # Designator yazısının içeriği zaten komponentin ADIDIR (ör. ".PCB1"
+            # adlı bir logo komponenti) — özel dizge sayılmaz.
+            override = None
+            raw_txt = t.text_content or ""
+            if _subst and "." in raw_txt and not getattr(t, "is_designator", False):
+                new_txt = _subst(raw_txt, special_params(cidx))
+                if new_txt != raw_txt:
+                    override = new_txt
+                    n_subst += 1
             try:
-                res = _ttp.render_pcb_text(t)
+                res = _ttp.render_pcb_text(t, text_override=override)
             except Exception:
                 t_err += 1
                 continue
@@ -3294,7 +3467,7 @@ def extract_pcb_geometry(pcb, log=print):
                             if len(pts) >= 6:
                                 polys.append(pts)
                 if polys:
-                    texts.append([layer_of(t.layer), polys])
+                    texts.append([layer_of(t), polys])
             elif getattr(res, "lines", None):
                 segs = []
                 for ln in res.lines:
@@ -3302,7 +3475,7 @@ def extract_pcb_geometry(pcb, log=print):
                     segs.append(XM(x1)); segs.append(YM(y1))
                     segs.append(XM(x2)); segs.append(YM(y2))
                 if segs:
-                    stexts.append([layer_of(t.layer),
+                    stexts.append([layer_of(t),
                                    round(float(res.stroke_width_mm or 0.15), 3), segs])
     except Exception as e:
         log(tr('  · metin poligonları atlandı: {a0}').format(a0=e))
@@ -3355,7 +3528,7 @@ def extract_pcb_geometry(pcb, log=print):
     except Exception:
         outline = [0, 0, round(W, 3), 0, round(W, 3), round(H, 3), 0, round(H, 3)]
 
-    layers.sort(key=lambda l: _GEO_ROLE_ORDER.get(l["role"], 9))
+    layers.sort(key=lambda l: l.pop("_o"))
     remap = {l["i"]: k for k, l in enumerate(layers)}
     for k, l in enumerate(layers):
         l["i"] = k
@@ -3372,6 +3545,8 @@ def extract_pcb_geometry(pcb, log=print):
         a0=len(tracks), a1=len(arcs), a2=len(pads), a3=len(vias),
         a4=len(regions), a5=len(stexts), a6=len(layers))
         + (tr(" ({a0} metin atlandı)").format(a0=t_err) if t_err else ""))
+    if n_subst:
+        log(tr("  · {a0} özel dizge çözüldü (.Designator, proje parametreleri…)").format(a0=n_subst))
     return {
         "available": True, "w": round(W, 3), "h": round(H, 3), "obb": obb,
         "layers": layers, "nets": [getattr(n, "name", "") for n in pcb.nets],
@@ -3656,7 +3831,8 @@ def generate_combined_viewer(
     # 2) PCB paneli: geometri (canvas) görüntüleyici
     prog(60, tr('PCB geometrisi çıkarılıyor'))
     pcb_path, pcb_doc = _pick_pcbdoc(project_path, log)
-    geo = extract_pcb_geometry(pcb_doc, log) if pcb_doc else {"available": False}
+    geo = (extract_pcb_geometry(pcb_doc, log, _project_parameters(project_path))
+           if pcb_doc else {"available": False})
     have_pcb = bool(geo.get("available"))
     if have_pcb:
         pcb_html = build_pcb_canvas_html(geo, comp_info, timestamp,
@@ -3723,6 +3899,11 @@ def build_3d_html(d3d, timestamp, project_name):
           pointer-events:none;}
   #err3d{position:absolute;inset:0;display:flex;align-items:center;
          justify-content:center;color:#888;font-size:13px;text-align:center;padding:20px;}
+  /* Dar ekran: araçlar sarar, alt bilgi tam genişlikte sarılı satır olur */
+  @media (max-width:820px){ #tb3d{flex-wrap:wrap;justify-content:flex-end;left:8px;}
+    #info3d{right:8px;line-height:1.4;} }
+  /* Dokunmatik: parmak hedefleri >= 40 px */
+  @media (pointer:coarse){ .b3d{min-height:40px;min-width:40px;font-size:12px;} }
 </style></head><body>
 <canvas id="c3d"></canvas>
 <div id="tb3d">
@@ -3737,6 +3918,11 @@ def build_3d_html(d3d, timestamp, project_name):
 <div id="info3d">⟪Sürükle / tek parmak: döndür · Tekerlek / iki parmak: imlecin olduğu yere zoom · Sağ-sürükle veya iki parmak kaydır: taşı · Tıkla: komponent⟫</div>
 <script>__THREE__</script>
 <script>
+// Dokunmatikte alt bilgi fare terimleri (Tekerlek, Sağ-sürükle) yerine
+// parmak hareketlerini anlatır.
+if (window.matchMedia && matchMedia('(pointer: coarse)').matches)
+  document.getElementById('info3d').textContent =
+    '⟪Tek parmak: döndür · İki parmak: yakınlaştır + kaydır · Dokun: komponent⟫';
 const D = __DATA__;
 const canvas = document.getElementById('c3d');
 function fail(msg){ const e=document.createElement('div'); e.id='err3d'; e.textContent=msg;
@@ -4411,6 +4597,26 @@ def build_combined_shell(sch_html, pcb_html, timestamp, project_name, have_pcb,
                padding:6px 9px; font-size:12px; }}
     .vm-btn {{ padding:9px 14px; font-size:12px; }}
     #divider {{ width:12px; }}
+    /* "⋯": iframe'lerin stil sayfası burada geçersiz → taşma menüsü kuralları
+       taşınan çubuklar için TEKRARLANIR (SCH modunda 3, Böl'de 5 satıra
+       sarıyordu; ekranın %17-25'i). */
+    #pane-tools .ptools .more-btn {{ display:inline-block; }}   /* özgüllük: aşağıdaki gizleme kuralını yener */
+    #pane-tools .ptools:not(.more-open) .tb-more {{ display:none !important; }}
+  }}
+  #pane-tools .more-btn {{ display:none; }}
+  /* Dik telefon ekranında Böl modu yan yana değil ÜST / ALT bölünür: 390 px
+     iki ~190 px'lik sütuna bölününce iki panel de kullanılamıyordu. */
+  #split.vert {{ flex-direction:column; }}
+  #split.vert .pane {{ width:100% !important; }}
+  #split.vert #pane-pcb {{ flex:1; min-height:0; }}
+  #split.vert #divider {{ width:100%; height:12px; cursor:row-resize; }}
+  #split.vert #divider::after {{ content:'⋯'; }}
+  /* Dokunmatik: parmak hedefleri ≥ 40 px */
+  @media (pointer: coarse) {{
+    #pane-tools .tool-btn, #pane-tools .tb, #pane-tools .b3d {{
+               min-height:40px; min-width:40px; }}
+    #pane-tools .color-input {{ width:40px; height:40px; }}
+    .vm-btn {{ min-height:40px; min-width:40px; }}
   }}
 </style>
 </head>
@@ -4583,6 +4789,11 @@ window.addEventListener('message', ev => {{
 }});
 
 // === Sürüklenebilir ayraç ===
+// Dik telefon ekranında Böl modu ÜST / ALT bölünür (yan yana 390 px iki
+// ~190 px sütun olup ikisi de kullanılamıyordu); ayraç da dikey sürüklenir.
+const vertQ = window.matchMedia
+  ? matchMedia('(max-width: 820px) and (orientation: portrait)') : null;
+function isVert() {{ return !!(vertQ && vertQ.matches); }}
 const divider = document.getElementById('divider');
 const paneSch = document.getElementById('pane-sch');
 const split = document.getElementById('split');
@@ -4601,9 +4812,12 @@ let lastSplitPct = 50;
   divider.addEventListener('pointermove', e => {{
     if (!on) return;
     const rect = split.getBoundingClientRect();
-    let pct = ((e.clientX - rect.left) / rect.width) * 100;
+    const vert = isVert();
+    let pct = vert ? ((e.clientY - rect.top) / rect.height) * 100
+                   : ((e.clientX - rect.left) / rect.width) * 100;
     pct = Math.max(15, Math.min(85, pct));
-    paneSch.style.width = pct + '%'; lastSplitPct = pct;
+    lastSplitPct = pct;
+    if (vert) paneSch.style.height = pct + '%'; else paneSch.style.width = pct + '%';
   }});
   function fin(e) {{
     if (!on) return;
@@ -4641,7 +4855,7 @@ function setViewMode(mode) {{
     // son seçili komponenti 3D'ye ilet (yüklendikten sonra)
     if (lastSel) setTimeout(() => postTo(frame3d, {{type:'xprobe',source:'sch',designator:lastSel}}), 350);
   }} else if (mode === 'sch') {{
-    paneSchEl.style.display=''; paneSchEl.style.width='100%';
+    paneSchEl.style.display='';
     panePcbEl.style.display='none'; dividerEl.style.display='none';
     paneShown(frameSch);
   }} else if (mode === 'pcb') {{
@@ -4651,13 +4865,28 @@ function setViewMode(mode) {{
     paneShown(framePcb);
   }} else {{ // both
     ensurePcbLoaded();
-    paneSchEl.style.display=''; paneSchEl.style.width=lastSplitPct + '%';
+    paneSchEl.style.display='';
     panePcbEl.style.display=''; dividerEl.style.display='';
     paneShown(frameSch); paneShown(framePcb);
   }}
+  sizeSplit();
   applyPaneTools();   // o moda ait panelin araçları gösterilir
   Object.entries(vmButtons).forEach(([k, b]) => b && b.classList.toggle('active', k === mode));
 }}
+// Panel boyutları: Böl modunda son ayraç oranı (dikte yükseklik, yatayda
+// genişlik); diğer modlarda şematik paneli tam boy.
+function sizeSplit() {{
+  const vert = isVert();
+  split.classList.toggle('vert', vert);
+  if (curMode !== 'both') {{ paneSchEl.style.width = '100%'; paneSchEl.style.height = ''; return; }}
+  if (vert) {{ paneSchEl.style.width = '100%'; paneSchEl.style.height = lastSplitPct + '%'; }}
+  else {{ paneSchEl.style.height = ''; paneSchEl.style.width = lastSplitPct + '%'; }}
+}}
+if (vertQ) {{
+  if (vertQ.addEventListener) vertQ.addEventListener('change', sizeSplit);
+  else if (vertQ.addListener) vertQ.addListener(sizeSplit);
+}}
+sizeSplit();
 // Klavye: 1=Şematik 2=Böl 3=PCB 4=3D (odak kabuktayken)
 document.addEventListener('keydown', e => {{
   if (e.key === '1') setViewMode('sch');
@@ -4715,7 +4944,34 @@ __MOBILE_META__
              display:flex; flex-direction:column; flex-shrink:0; position:relative;
              overflow:hidden; transition:width .18s ease; }
   #sidebar.collapsed { width:26px; }
-  #sidebar.collapsed > *:not(#sb-toggle) { display:none !important; }
+  #sidebar.collapsed > *:not(#sb-toggle):not(#sb-rail) { display:none !important; }
+  /* === Gezgin / Özellikler: iki bağımsız bölüm (şematikle aynı model) ===
+     Katlanınca kenarda dikey düğmeler kalır; açıkken üstte yatay. Komponent
+     seçimi paneli ASLA açmaz — yalnız içeriği günceller (applyPanels). */
+  #sb-rail { display:none; }
+  #sidebar.collapsed #sb-rail { display:flex; flex-direction:column; align-items:center;
+      gap:8px; margin-top:10px; }
+  .rail-btn { writing-mode:vertical-rl; transform:rotate(180deg); background:#1a1a1a;
+      border:1px solid #333; color:#999; font-family:inherit; font-size:11px;
+      letter-spacing:1px; padding:10px 3px; border-radius:3px; cursor:pointer;
+      white-space:nowrap; }
+  .rail-btn:hover { color:#4ec9b0; border-color:#4ec9b0; }
+  .rail-sel { color:#4ec9b0; font-weight:bold; }
+  .rail-btn.ping, .sec-btn.ping, #prop-chip.ping { animation:railping 0.6s ease 2; }
+  @keyframes railping { 50% { border-color:#4ec9b0; color:#4ec9b0; box-shadow:0 0 10px #4ec9b0; } }
+  #sb-head { display:flex; gap:4px; padding:6px 8px 0; flex-shrink:0; }
+  .sec-btn { flex:1; background:#1a1a1a; border:1px solid #333; color:#777;
+      font-family:inherit; font-size:11px; padding:4px 6px; border-radius:3px;
+      cursor:pointer; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .sec-btn:hover { color:#ccc; border-color:#666; }
+  .sec-btn.on { color:#4ec9b0; border-color:#4ec9b0; background:#1f2f38; }
+  #sidebar.nav-off h2, #sidebar.nav-off .sub, #sidebar.nav-off #search-box,
+  #sidebar.nav-off .sb-tabs, #sidebar.nav-off #chips, #sidebar.nav-off .panel {
+      display:none !important; }
+  #sidebar.nav-off #sb-head { padding-right:36px; padding-top:9px; }
+  #sidebar.nav-off #popup { flex:1 1 auto; max-height:none; margin-top:6px; }
+  .pempty { color:#666; font-style:italic; line-height:1.6; }
+  #prop-chip { display:none; }
   #sb-toggle { position:absolute; top:9px; right:8px; width:20px; height:20px;
                padding:0; background:#1a1a1a; border:1px solid #333; color:#888;
                font-size:11px; line-height:18px; text-align:center; cursor:pointer;
@@ -4831,19 +5087,83 @@ __MOBILE_META__
             font-family:Consolas,monospace; font-size:11px; color:#fff; }
   .cls { margin-top:14px; padding:6px 14px; background:#1a1a1a; color:#ddd;
          border:1px solid #555; border-radius:3px; cursor:pointer; font-family:inherit; }
+  /* "⋯" taşma düğmesi: dar ekranda ikincil araçlar bunun arkasına gizlenir
+     (şematikteki desenin aynısı). Geniş ekranda düğme hiç görünmez. */
+  .more-btn { display:none; }
   @media (max-width: 820px) {
     #sidebar { position:absolute; left:0; top:0; height:100%; z-index:300;
                width:80vw; max-width:320px; box-shadow:0 0 26px rgba(0,0,0,0.75); }
-    #sidebar.collapsed { width:26px; }
+    /* Katlanınca şerit KALMAZ (26 px board'un ve alt bilgi şeridinin solunu
+       örtüyordu); yalnız sol üstte yüzen, parmakla basılabilir düğme kalır. */
+    #sidebar.collapsed { width:0; border:none; box-shadow:none; }
+    #sidebar.collapsed #sb-toggle { position:fixed; top:10px; left:10px; margin:0;
+        width:40px; height:40px; font-size:15px; line-height:38px;
+        background:rgba(30,30,30,0.92); border:1px solid #444; color:#ccc;
+        border-radius:6px; z-index:310; }
+    #toolbar { left:60px; right:10px; max-width:none; }
     .tb { padding:8px 11px; }
+    .more-btn { display:inline-block; }
+    #toolbar:not(.more-open) .tb-more { display:none !important; }
+    /* Telefonda panel yalnız Gezgin'dir (Özellikler alttan kart / çip) */
+    #sidebar #sb-head, #sidebar.collapsed #sb-rail { display:none !important; }
+    #prop-chip.show { display:flex; position:fixed; right:12px; bottom:12px; z-index:320;
+        max-width:72vw; align-items:center; gap:7px; min-height:40px; padding:0 14px;
+        background:rgba(28,38,46,0.96); border:1px solid #4ec9b0; color:#ddd;
+        border-radius:20px; font-family:inherit; font-size:12px; cursor:pointer;
+        box-shadow:0 4px 14px rgba(0,0,0,0.5); }
+    #prop-chip b { color:#4ec9b0; }
+    #prop-chip span { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; color:#999; }
+    body.has-chip #info { display:none; }
+    /* Alt bilgi şeridi: tek satıra sığmıyordu ve yanındaki istatistik
+       kutusuyla çakışıyordu → sarar, istatistik gizlenir. */
+    #info { right:10px; font-size:11px; line-height:1.4; }
+    #stat { display:none; }
   }
+  /* Dokunmatik: parmak hedefleri ≥ 40 px; arama kutusu 16 px (iOS odakta
+     sayfayı yakınlaştırmasın). */
+  @media (pointer: coarse) {
+    .tb { min-height:40px; min-width:40px; }
+    #sb-toggle { width:36px; height:36px; font-size:14px; line-height:34px; }
+    #sidebar h2 { padding-right:52px; min-height:52px; }
+    .sec-btn { min-height:36px; }
+    #sidebar.nav-off #sb-head { padding-right:48px; }
+    .sb-tab { min-height:40px; }
+    #search-box input { min-height:40px; font-size:16px; }
+    .ltop { min-width:34px; min-height:34px; font-size:14px; }
+    .layer-item, .row { min-height:40px; }
+    .chip { min-height:34px; font-size:11px; }
+    #bom-prog button { min-height:36px; padding:0 10px; }
+    .brow { padding:9px 6px; }
+    .bchk { width:24px; height:24px; }
+    .px { min-width:44px; min-height:40px; font-size:22px; }
+    .cls { min-height:44px; min-width:96px; }
+  }
+  /* Tablet (geniş + dokunmatik): katlanmış şerit büyüyen düğmeyi kırpmasın */
+  @media (pointer: coarse) and (min-width: 820px) {
+    #sidebar.collapsed { width:44px; }
+  }
+  /* Telefonda komponent detayı ALTTAN AÇILAN KART olur (JS `.sheet-mode`'u
+     dar ekranda ekler ve düğümü panelden <body>'ye taşır): panel içinde
+     kaldığında açık panel board'un büyük kısmını örtüyordu. */
+  #popup.sheet-mode { position:fixed; left:0; right:0; bottom:0; max-height:42vh;
+      z-index:450; border-radius:12px 12px 0 0; border-top:1px solid #3a3a3a;
+      box-shadow:0 -8px 28px rgba(0,0,0,0.6); }
+  #popup.sheet-mode .ph { border-radius:12px 12px 0 0; }
 </style>
 </head>
 <body>
 <div id="app">
   <div id="sidebar">
     <button id="sb-toggle" title="⟪Paneli gizle ( B )⟫">&#9666;</button>
+    <div id="sb-rail">
+      <button class="rail-btn sec-nav" title="⟪Gezgin: katmanlar, netler, komponentler, BOM⟫">⟪Gezgin⟫</button>
+      <button class="rail-btn sec-prop" title="⟪Seçili komponentin özellikleri ( I )⟫">⟪Özellikler⟫<span class="rail-sel"></span></button>
+    </div>
     <h2>PCB · __PCBNAME__</h2>
+    <div id="sb-head">
+      <button class="sec-btn sec-nav" title="⟪Gezgin: katmanlar, netler, komponentler, BOM⟫">⟪Gezgin⟫</button>
+      <button class="sec-btn sec-prop" title="⟪Seçili komponentin özellikleri ( I )⟫">⟪Özellikler⟫</button>
+    </div>
     <div class="sub" id="dims"></div>
     <div id="search-box"><input id="q" placeholder="⟪Komponent / net ara...⟫"></div>
     <div class="sb-tabs">
@@ -4884,22 +5204,24 @@ __MOBILE_META__
       <div class="pb" id="pbody"></div>
     </div>
   </div>
+  <button id="prop-chip" title="⟪Özellikleri göster⟫"></button>
   <div id="wrap">
     <canvas id="cv"></canvas>
     <div id="toolbar">
       <button class="tb" id="b-in">+</button>
       <button class="tb" id="b-out">&minus;</button>
       <button class="tb" id="b-fit">⟪Sığdır⟫</button>
-      <button class="tb" id="b-rot" title="⟪90° döndür ( R )⟫">&#10227;</button>
-      <button class="tb" id="b-mir" title="⟪Alt yüzden bakış / ayna ( X )⟫">⟪Çevir⟫</button>
+      <button class="tb tb-more" id="b-rot" title="⟪90° döndür ( R )⟫">&#10227;</button>
+      <button class="tb tb-more" id="b-mir" title="⟪Alt yüzden bakış / ayna ( X )⟫">⟪Çevir⟫</button>
       <button class="tb" id="b-flip" title="⟪Üst / alt katman setini değiştir ( T )⟫">⟪Üst/Alt⟫</button>
-      <button class="tb" id="b-all" title="⟪Tüm katmanları göster⟫">⟪Hepsi⟫</button>
-      <button class="tb" id="b-none" title="⟪Tüm katmanları gizle⟫">⟪Temizle⟫</button>
-      <button class="tb" id="b-meas" title="⟪Ölçüm ( M )⟫">⟪Ölç⟫</button>
-      <button class="tb active" id="b-pin" title="⟪Pad no + net ( P )⟫">Pin</button>
-      <button class="tb" id="b-bg" title="⟪Zemin rengi⟫">⟪Zemin⟫</button>
-      <button class="tb" id="b-png" title="⟪Görünümü PNG indir⟫">PNG</button>
-      <button class="tb" id="b-help" title="⟪Yardım ( ? )⟫">?</button>
+      <button class="tb more-btn" id="more-btn" title="⟪Diğer araçlar⟫">⋯</button>
+      <button class="tb tb-more" id="b-all" title="⟪Tüm katmanları göster⟫">⟪Hepsi⟫</button>
+      <button class="tb tb-more" id="b-none" title="⟪Tüm katmanları gizle⟫">⟪Temizle⟫</button>
+      <button class="tb tb-more" id="b-meas" title="⟪Ölçüm ( M )⟫">⟪Ölç⟫</button>
+      <button class="tb active tb-more" id="b-pin" title="⟪Pad no + net ( P )⟫">Pin</button>
+      <button class="tb tb-more" id="b-bg" title="⟪Zemin rengi⟫">⟪Zemin⟫</button>
+      <button class="tb tb-more" id="b-png" title="⟪Görünümü PNG indir⟫">PNG</button>
+      <button class="tb tb-more" id="b-help" title="⟪Yardım ( ? )⟫">?</button>
     </div>
     <div id="info">⟪Sürükle / tek parmak: kaydır · Tekerlek / iki parmak: zoom · Tıkla: komponent · Çift tık: net⟫</div>
     <div id="stat"></div>
@@ -4913,10 +5235,11 @@ __MOBILE_META__
         <tr><td><kbd>M</kbd></td><td>⟪Ölçüm (mm/mil, pad merkezine yapışır)⟫</td></tr>
         <tr><td><kbd>R</kbd> / <kbd>X</kbd></td><td>⟪Döndür / çevir (ayna)⟫</td></tr>
         <tr><td><kbd>P</kbd> · <kbd>T</kbd></td><td>⟪Pad etiketleri · Üst/Alt katman seti⟫</td></tr>
+        <tr><td><kbd>I</kbd></td><td>⟪Özellikler bölümünü aç / kapat⟫</td></tr>
         <tr><td><kbd>F</kbd> · <kbd>B</kbd> · <kbd>Esc</kbd> · <kbd>?</kbd></td>
             <td>⟪Sığdır · panel · temizle · yardım⟫</td></tr>
       </table>
-      <h3>⟪Dokunmatik⟫</h3>
+      <h3 class="touch-h">⟪Dokunmatik⟫</h3>
       <table>
         <tr><td>⟪Tek parmak⟫</td><td>⟪Kaydır⟫</td></tr>
         <tr><td>⟪İki parmak⟫</td><td>⟪Yakınlaştır + kaydır⟫</td></tr>
@@ -4947,7 +5270,36 @@ const wrap = document.getElementById('wrap');
 const info = document.getElementById('info');
 const stat = document.getElementById('stat');
 const popup = document.getElementById('popup');
+const COARSE = !!(window.matchMedia && matchMedia('(pointer: coarse)').matches);
+// Dokunmatikte alt bilgi şeridi fare terimleri (Tekerlek, Çift tık) yerine
+// parmak hareketlerini anlatır.
+if (COARSE) document.querySelectorAll('h3.touch-h').forEach(h => {
+  const t = h.nextElementSibling, p = h.parentElement;
+  if (!t) return;
+  p.insertBefore(t, p.firstChild); p.insertBefore(h, t);
+});
+if (COARSE) info.textContent = '⟪Tek parmak: kaydır · İki parmak: yakınlaştır · Dokun: komponent · Çift dokun: net⟫';
 const INFO_DEFAULT = info.textContent;
+const isNarrow = () => window.innerWidth < 820;
+// Telefonda komponent detayı alttan açılan kart: düğüm panelden <body>'ye
+// taşınır (katlanmış panelin çocukları display:none !important). Genişleyince
+// (döndürme) panele geri döner.
+function placePopup() {
+  const sbEl = document.getElementById('sidebar');
+  if (isNarrow()) {
+    if (popup.parentNode !== document.body) document.body.appendChild(popup);
+    popup.classList.add('sheet-mode');
+  } else {
+    if (popup.parentNode !== sbEl) sbEl.appendChild(popup);
+    popup.classList.remove('sheet-mode');
+  }
+}
+// Alttaki kartın kapladığı yükseklik: ortalama / sığdırma bunun ÜSTÜNDE yapılır
+function popupSheetH() {
+  return (popup.classList.contains('open') && popup.classList.contains('sheet-mode'))
+    ? popup.offsetHeight : 0;
+}
+window.addEventListener('resize', () => applyPanels());
 
 // === Görünüm dönüşümü: ekran = t + s·R(rot)·diag(mir,1)·p  (p: mm) ===
 let scale = 4, tx = 0, ty = 0, rot = 0, mir = 1;
@@ -4963,17 +5315,39 @@ function s2w(cx, cy) {
   const c = Math.cos(rad()), s = Math.sin(rad());
   return { x: (dx * c + dy * s) * mir, y: -dx * s + dy * c };
 }
-function centerOn(x, y) {
+// Sığdırma / ortalama için GÖRÜNÜR alan (wrap koordinatında): kanvasın üstünde
+// yüzen araç çubuğu, dar ekranda kanvasın üstüne binen katlanmış panel şeridi
+// ve telefonda alttan açılan komponent kartı düşülür (şematikteki fitArea'nın
+// karşılığı). Birleşik görünümde toolbar kabuğa taşındığından düşülmez.
+function viewArea() {
   const r = wrap.getBoundingClientRect();
+  let x = 0, y = 0, w = r.width, h = r.height;
+  const tb = document.getElementById('toolbar');
+  if (tb && wrap.contains(tb) && tb.offsetParent) {
+    const b = tb.getBoundingClientRect();
+    if (b.height && b.height < h * 0.5) { const d = b.bottom - r.top + 4; y += d; h -= d; }
+  }
+  const sb = document.getElementById('sidebar');
+  if (sb) {
+    const b = sb.getBoundingClientRect();
+    const ov = Math.min(b.right, r.right) - Math.max(b.left, r.left);
+    if (ov > 0 && ov < 60) { x += ov; w -= ov; }
+  }
+  h -= popupSheetH();
+  return { x: x, y: y, w: Math.max(w, 40), h: Math.max(h, 40) };
+}
+function centerOn(x, y) {
+  const a = viewArea();
   const c = Math.cos(rad()), s = Math.sin(rad()), mx = x * mir;
-  tx = r.width / 2 - scale * (mx * c - y * s);
-  ty = r.height / 2 - scale * (mx * s + y * c);
+  tx = a.x + a.w / 2 - scale * (mx * c - y * s);
+  ty = a.y + a.h / 2 - scale * (mx * s + y * c);
 }
 function fit() {
   const r = wrap.getBoundingClientRect();
   if (!r.width || !G) return;
+  const a = viewArea(), m = Math.min(40, a.w * 0.06);
   const RW = (rot % 180 === 0) ? G.w : G.h, RH = (rot % 180 === 0) ? G.h : G.w;
-  scale = Math.min((r.width - 60) / RW, (r.height - 60) / RH);
+  scale = Math.min((a.w - m) / RW, (a.h - m) / RH);
   centerOn(G.w / 2, G.h / 2);
   draw();
 }
@@ -5280,7 +5654,7 @@ wrap.addEventListener('click', e => {
   if (c) { showComp(c.d); crossOut(c.d); }
   else {
     const had = selComp || selComps.length, hadNet = selNets.length > 0;
-    selComp = null; selComps = []; selNet = -1; selNets = []; popup.classList.remove('open');
+    selComp = null; selComps = []; selNet = -1; selNets = []; propSel = null; applyPanels();
     info.textContent = INFO_DEFAULT; renderNets(); draw();
     if (had) crossOut(null);      // diğer paneller de seçimi bıraksın
     if (hadNet) crossNet(null);   // şematikteki net seçimi de bırakılsın
@@ -5396,7 +5770,7 @@ function selectNets(idxs, emit) {
   selNets = (idxs || []).filter(i => i >= 0);
   selNet = selNets.length ? selNets[0] : -1;
   selComp = null; selComps = [];
-  popup.classList.remove('open');
+  propSel = null; applyPanels();
   if (selNets.length)
     info.textContent = 'Net: ' + selNets.map(i => G.nets[i]).join(' + ') + ' · ⟪Esc temizler⟫';
   else info.textContent = INFO_DEFAULT;
@@ -5413,7 +5787,10 @@ function showComp(d) {
   const c = G.comps.find(x => x.d === d);
   if (!c) return;
   selComp = d; selComps = [d]; selNet = -1; selNets = [];
-  setSb(true);
+  // Seçim paneli AÇMAZ: yalnız içerik güncellenir, görünürlük kullanıcının
+  // Özellikler tercihine bağlı. Telefonda Gezgin kaplaması kapanır.
+  propSel = d;
+  if (isNarrow() && navOpen) { navOpen = false; uiSet({ nav: false }); }
   document.getElementById('pd').textContent = d;
   const inf = COMP_INFO[d] || {};
   const row = (k, v) => v ? '<div class="pr"><span class="pk">' + k + '</span><span class="pv">' + esc(v) + '</span></div>' : '';
@@ -5422,23 +5799,92 @@ function showComp(d) {
     + row('Footprint', c.fp) + row('⟪Katman⟫', c.l)
     + row('Konum (mm)', 'X=' + c.x.toFixed(2) + ' Y=' + c.y.toFixed(2))
     + (c.r ? row('⟪Dönüş⟫', c.r + '°') : '');
-  popup.classList.add('open');
-  // görünürde değilse ortala
-  const s = w2s(c.x, c.y), r = wrap.getBoundingClientRect();
-  if (s.x < 0 || s.y < 0 || s.x > r.width || s.y > r.height) centerOn(c.x, c.y);
+  applyPanels();
+  pingProp();
+  // görünürde değilse ortala (telefonda alttaki kartın altında kalan da sayılır)
+  const s = w2s(c.x, c.y), a = viewArea();
+  if (s.x < a.x || s.y < a.y || s.x > a.x + a.w || s.y > a.y + a.h) centerOn(c.x, c.y);
   renderComps(); bomMark(d); draw();
 }
-document.getElementById('pclose').onclick = () => {
-  popup.classList.remove('open'); selComp = null; selComps = []; draw();
-};
+// × : Özellikler bölümünü KAPAT (tercih saklanır; seçim ve vurgu kalır)
+document.getElementById('pclose').onclick = () => setPropOpen(false);
 
 // === Toolbar / kısayollar =================================================
 const sb = document.getElementById('sidebar');
-function setSb(open) {
-  sb.classList.toggle('collapsed', !open);
-  document.getElementById('sb-toggle').textContent = open ? '\u25C2' : '\u25B8';
+// === Gezgin / Özellikler (şematikteki modelin aynısı) ===
+// Kural: SEÇİM yalnız İÇERİĞİ günceller; bölümlerin açık/kapalı durumunu
+// yalnız KULLANICI değiştirir ve tercih saklanır (masaüstü / telefon ayrı;
+// telefonda varsayılan kapalı — alttan kart her dokunuşta board'u daraltıyordu).
+const UI_KEY = 'schviz-pcb-ui';
+function uiGet() { try { return JSON.parse(localStorage.getItem(UI_KEY) || '{}'); } catch (e) { return {}; } }
+function uiSet(p) { try { localStorage.setItem(UI_KEY, JSON.stringify(Object.assign(uiGet(), p))); } catch (e) {} }
+let navOpen = true, propSel = null, panelsMem = null;
+const propPref = { d: true, m: false };
+const propIsOpen = () => isNarrow() ? propPref.m : propPref.d;
+function applyPanels() {
+  const narrow = isNarrow(), pOpen = propIsOpen();
+  placePopup();
+  if (!propSel) {
+    document.getElementById('pd').textContent = '';
+    document.getElementById('pbody').innerHTML = '<div class="pempty">⟪Komponent seçilmedi — board üzerinde bir komponente ya da listede bir satıra tıkla.⟫</div>';
+  }
+  const showProp = narrow ? (pOpen && !!propSel) : (pOpen && (!!propSel || !navOpen));
+  popup.classList.toggle('open', showProp);
+  const sbOpen = navOpen || (!narrow && showProp);
+  sb.classList.toggle('collapsed', !sbOpen);
+  sb.classList.toggle('nav-off', !navOpen);
+  document.getElementById('sb-toggle').textContent = sbOpen ? '\u25C2' : '\u25B8';
+  document.querySelectorAll('.sec-nav').forEach(b => b.classList.toggle('on', navOpen));
+  document.querySelectorAll('.sec-prop').forEach(b => b.classList.toggle('on', pOpen));
+  document.querySelectorAll('.rail-sel').forEach(x => { x.textContent = propSel ? ' · ' + propSel : ''; });
+  const chip = document.getElementById('prop-chip');
+  const showChip = narrow && !pOpen && !!propSel;
+  chip.classList.toggle('show', showChip);
+  document.body.classList.toggle('has-chip', showChip);
+  if (showChip) {
+    const v = (COMP_INFO[propSel] || {}).value;
+    chip.innerHTML = '\u24D8 <b>' + esc(propSel) + '</b>' + (v ? '<span>' + esc(v) + '</span>' : '');
+  }
 }
-document.getElementById('sb-toggle').onclick = () => setSb(sb.classList.contains('collapsed'));
+function setPropOpen(open) {
+  if (isNarrow()) propPref.m = !!open; else propPref.d = !!open;
+  uiSet({ propD: propPref.d, propM: propPref.m });
+  applyPanels();
+}
+function setNavOpen(open) { navOpen = !!open; uiSet({ nav: navOpen }); applyPanels(); }
+// Ok düğmesi / B: TÜM paneli katlar; açarken katlamadan önceki bölümler döner
+function toggleSidebarAll() {
+  const narrow = isNarrow();
+  if (!sb.classList.contains('collapsed')) {
+    panelsMem = { nav: navOpen, prop: propPref.d };
+    navOpen = false;
+    if (!narrow) propPref.d = false;
+  } else {
+    const m = panelsMem || { nav: true, prop: propPref.d };
+    navOpen = narrow || m.nav || !m.prop;
+    if (!narrow) propPref.d = m.prop;
+  }
+  uiSet({ nav: navOpen, propD: propPref.d });
+  applyPanels();
+}
+function setSb(open) { setNavOpen(open); }
+function pingProp() {
+  if (propIsOpen()) return;
+  document.querySelectorAll('.rail-btn.sec-prop, .sec-btn.sec-prop, #prop-chip').forEach(b => {
+    b.classList.remove('ping'); void b.offsetWidth; b.classList.add('ping'); });
+}
+document.getElementById('sb-toggle').onclick = toggleSidebarAll;
+document.querySelectorAll('.sec-nav').forEach(b => b.addEventListener('click', () =>
+  setNavOpen(b.classList.contains('rail-btn') ? true : !navOpen)));
+document.querySelectorAll('.sec-prop').forEach(b => b.addEventListener('click', () =>
+  setPropOpen(b.classList.contains('rail-btn') ? true : !propIsOpen())));
+document.getElementById('prop-chip').addEventListener('click', () => setPropOpen(true));
+// "⋯": dar ekranda gizlenen ikincil araçları aç / kapat (araç çubuğu birleşik
+// görünümün üst çubuğuna taşınsa da çalışır — kendi düğümüne bakar).
+document.querySelectorAll('.more-btn').forEach(b => b.addEventListener('click', () => {
+  const open = b.parentElement.classList.toggle('more-open');
+  b.classList.toggle('active', open);
+}));
 function zoomBy(f) {
   const r = wrap.getBoundingClientRect(), old = scale;
   scale = Math.max(0.2, Math.min(400, scale * f));
@@ -5480,7 +5926,10 @@ let showingTop = true;
 document.getElementById('b-flip').onclick = () => {
   showingTop = !showingTop;
   G.layers.forEach((l, i) => {
-    const n = l.name.toUpperCase();
+    // İç anahtara bakılır (TOP, TOP_OVERLAY, BOTTOM_SOLDER…): görünen ad
+    // Altium'unkidir ve "Top Courtyard" gibi mekanikler de Top ile başlar —
+    // onlara dokunulmaz (eski semantik).
+    const n = (l.k || l.name).toUpperCase();
     if (n.startsWith('TOP')) vis[i] = showingTop;
     else if (n.startsWith('BOTTOM')) vis[i] = !showingTop;
   });
@@ -5516,13 +5965,14 @@ window.addEventListener('keydown', e => {
     if (help.classList.contains('open')) { help.classList.remove('open'); return; }
     if (measureOn) { setMeasure(false); return; }
     const hadNet = selNets.length > 0;
-    selComp = null; selComps = []; selNet = -1; selNets = []; popup.classList.remove('open');
+    selComp = null; selComps = []; selNet = -1; selNets = []; propSel = null; applyPanels();
     info.textContent = INFO_DEFAULT; renderNets(); draw();
     crossOut(null);      // şematik/3D panelindeki seçim de bırakılsın
     if (hadNet) crossNet(null);
   }
   else if (k === 'f') fit();
-  else if (k === 'b') setSb(sb.classList.contains('collapsed'));
+  else if (k === 'b') toggleSidebarAll();
+  else if (k === 'i' && !e.ctrlKey && !e.metaKey) setPropOpen(!propIsOpen());
   else if (k === 'm') setMeasure(!measureOn);
   else if (k === 'r') setOrient(rot + 90, mir);
   else if (k === 'x') setOrient(rot, -mir);
@@ -5600,7 +6050,7 @@ document.getElementById('bom-list').addEventListener('click', e => {
   row.classList.add('sel');
   if (g.desigs.length === 1) { showComp(g.desigs[0]); crossOut(g.desigs[0]); return; }
   selComps = g.desigs.slice(); selComp = null; selNet = -1; selNets = [];
-  popup.classList.remove('open');
+  propSel = null; applyPanels();
   let x0 = 1e9, y0 = 1e9, x1 = -1e9, y1 = -1e9;   // grubun tamamini kapsa
   selComps.forEach(d => {
     const c = G.comps.find(x => x.d === d);
@@ -5724,7 +6174,7 @@ window.addEventListener('message', ev => {
   let n = d.designator;
   if (!n) {      // "seçimi temizle" bildirimi (şematik/3D'de boşluğa tıklandı)
     pendingXpComp = null;   // bekleyen seçim de düşsün (panel açılınca canlanmasın)
-    selComp = null; selComps = []; popup.classList.remove('open');
+    selComp = null; selComps = []; propSel = null; applyPanels();
     renderComps(); draw();
     return;
   }
@@ -5758,7 +6208,13 @@ async function gunzipB64(b64) {
     + G.nets.filter(Boolean).length + ' net';
   bomBuild();
   renderLayers(); renderNets(); renderComps(); bomRender();
-  if (window.innerWidth < 820) setSb(false);
+  {
+    const st = uiGet();
+    if (st.propD !== undefined) propPref.d = !!st.propD;
+    if (st.propM !== undefined) propPref.m = !!st.propM;
+    navOpen = st.nav !== undefined ? !!st.nav : window.innerWidth >= 820;
+    applyPanels();
+  }
   fit();
   new ResizeObserver(() => { applyPendingXp(0); draw(); }).observe(wrap);
 })();
@@ -5817,7 +6273,7 @@ def generate_pcb_canvas_viewer(project_path, output_path, log=print, progress=No
         return False
     log(tr('\nPCB (geometri): {a0}').format(a0=pcb_path.name))
     prog(35, tr('Geometri çıkarılıyor'))
-    geo = extract_pcb_geometry(pcb, log)
+    geo = extract_pcb_geometry(pcb, log, _project_parameters(project_path))
     if not geo.get("available"):
         log(tr('! Geometri çıkarılamadı.'))
         return False
@@ -7196,7 +7652,7 @@ def build_html(sheets, net_list, components, timestamp,
               transition:width .18s ease, min-width .18s ease, padding .18s ease; }}
   /* Sol panel tamamen katlanabilir — dar bir şerit + ▸ butonu kalır */
   #sidebar.collapsed {{ width:26px; min-width:26px; padding:6px 2px; }}
-  #sidebar.collapsed > *:not(#sidebar-toggle) {{ display:none !important; }}
+  #sidebar.collapsed > *:not(#sidebar-toggle):not(#sb-rail) {{ display:none !important; }}
   /* Küçük ok butonu — panelin sağ üst köşesinde */
   #sidebar-toggle {{ position:absolute; top:8px; right:8px; width:20px; height:20px;
                      padding:0; background:#1a1a1a; border:1px solid #333;
@@ -7557,24 +8013,129 @@ def build_html(sheets, net_list, components, timestamp,
      Dar ekranda 320px'lik sabit sol panel kanvastan geriye hiçbir şey
      bırakmıyordu → panel kanvasın ÜSTÜNE kayan katman olur (kapalıyken yine
      26px şerit). Araç çubuğu sarar, dokunma hedefleri büyür. */
+  /* === Gezgin / Özellikler: iki bağımsız bölüm (v2.35.0) =====================
+     Panel KATLANINCA kenarda dikey "Gezgin" ve "Özellikler" düğmeleri kalır
+     (JetBrains / Altium panel şeridi); açıkken aynı iki düğme üstte yatay
+     durur ve bölümleri tek tek açıp kapatır. Komponent seçimi paneli ASLA
+     açmaz — yalnız içeriği günceller (bkz. applyPanels). */
+  #sb-rail {{ display:none; }}
+  #sidebar.collapsed #sb-rail {{ display:flex; flex-direction:column;
+      align-items:center; gap:8px; margin-top:10px; }}
+  .rail-btn {{ writing-mode:vertical-rl; transform:rotate(180deg);
+      background:#1a1a1a; border:1px solid #333; color:#999;
+      font-family:inherit; font-size:11px; letter-spacing:1px;
+      padding:10px 3px; border-radius:3px; cursor:pointer; white-space:nowrap; }}
+  .rail-btn:hover {{ color:{inter_color}; border-color:{inter_color}; }}
+  .rail-sel {{ color:{inter_color}; font-weight:bold; }}
+  .rail-btn.ping, .sec-btn.ping {{ animation:railping 0.6s ease 2; }}
+  @keyframes railping {{ 50% {{ border-color:{inter_color}; color:{inter_color};
+      box-shadow:0 0 10px {inter_color}; }} }}
+  #sb-head {{ display:flex; gap:4px; margin:0 30px 8px 0; flex-shrink:0; }}
+  .sec-btn {{ flex:1; background:#1a1a1a; border:1px solid #333; color:#777;
+      font-family:inherit; font-size:11px; padding:4px 6px; border-radius:3px;
+      cursor:pointer; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }}
+  .sec-btn:hover {{ color:#ccc; border-color:#666; }}
+  .sec-btn.on {{ color:{inter_color}; border-color:{inter_color}; background:#1f2f38; }}
+  #sidebar.nav-off .stat, #sidebar.nav-off .tabs, #sidebar.nav-off #type-chips,
+  #sidebar.nav-off #search-wrap, #sidebar.nav-off .list-container {{
+      display:none !important; }}
+  /* Yalnız Özellikler açıkken tüm yüksekliği o alır */
+  #sidebar.nav-off #comp-popup {{ flex:1 1 auto; height:auto !important;
+      max-height:none; margin-top:0; }}
+  #sidebar.nav-off #popup-resize {{ display:none; }}
+  .popup-empty {{ color:#666; font-style:italic; padding:10px 2px; line-height:1.6; }}
+  /* Telefonda Özellikler kapalıyken seçili komponenti gösteren küçük çip */
+  #prop-chip {{ display:none; }}
+  /* "⋯" taşma düğmesi: dar ekranda ikincil araçlar (not/kutu, renkler, PNG,
+     Clear, ?) bunun arkasına gizlenir — telefonda araç çubuğu 3 satıra sarıp
+     şemanın üstünü örtüyordu. Geniş ekranda düğme hiç görünmez. */
+  .more-btn {{ display:none; }}
   @media (max-width: 820px) {{
     #sidebar {{ position:absolute; left:0; top:0; height:100%; z-index:300;
                 width:82vw; min-width:0; max-width:340px;
                 box-shadow:0 0 26px rgba(0,0,0,0.75); }}
-    #sidebar.collapsed {{ width:26px; min-width:26px; }}
+    /* Katlanınca şerit KALMAZ (26 px şemanın solunu örtüyordu); yalnız sol
+       üstte yüzen, parmakla basılabilir bir düğme kalır. */
+    #sidebar.collapsed {{ width:0; min-width:0; padding:0; border:none;
+                          box-shadow:none; }}
+    #sidebar.collapsed #sidebar-toggle {{ position:fixed; top:8px; left:8px;
+        width:40px; height:40px; margin:0; font-size:15px; line-height:38px;
+        background:rgba(40,40,40,0.95); border:1px solid #444; color:#ccc;
+        border-radius:6px; z-index:310; }}
     #toolbar {{ flex-wrap:wrap; justify-content:flex-end; gap:4px;
-                max-width:calc(100vw - 46px); }}
+                left:56px; max-width:none; }}
     .tool-btn {{ padding:8px 11px; font-size:12px; }}
+    .more-btn {{ display:inline-block; }}
+    #toolbar:not(.more-open) .tb-more {{ display:none !important; }}
+    /* Telefonda panel yalnız Gezgin'dir (Özellikler alttan kart / çip) */
+    #sidebar #sb-head, #sidebar.collapsed #sb-rail {{ display:none !important; }}
+    #prop-chip.show {{ display:flex; position:fixed; right:12px; bottom:12px;
+        z-index:320; max-width:72vw; align-items:center; gap:7px;
+        min-height:40px; padding:0 14px; background:rgba(28,38,46,0.96);
+        border:1px solid {inter_color}; color:#ddd; border-radius:20px;
+        font-family:inherit; font-size:12px; cursor:pointer;
+        box-shadow:0 4px 14px rgba(0,0,0,0.5); }}
+    #prop-chip b {{ color:{inter_color}; }}
+    #prop-chip span {{ overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
+        color:#999; }}
+    /* Çip görünürken zoom göstergesi sola kayar (üst üste biniyordu) */
+    body.has-chip #zoom-info {{ left:12px; transform:none; }}
     #shortcuts, #brand {{ display:none; }}
     #current-net {{ max-width:150px; font-size:11px; }}
     .modal-content {{ min-width:0; width:92vw; padding:14px 16px; }}
   }}
+  /* Dokunmatik: parmak hedefleri ≥ 40 px (önerilen 44; araç çubuğu yine
+     tek satıra sığsın diye 40). Arama kutusu 16 px: iOS daha küçük yazılı
+     kutuya odaklanınca sayfayı kendiliğinden yakınlaştırıyor. */
+  @media (pointer: coarse) {{
+    .tool-btn {{ min-height:40px; min-width:40px; }}
+    .color-input {{ width:40px; height:40px; }}
+    #sidebar-toggle {{ width:36px; height:36px; font-size:14px; line-height:34px; }}
+    .stat {{ padding-right:44px; min-height:36px; }}
+    #sb-head {{ margin-right:44px; }}
+    .sec-btn {{ min-height:36px; }}
+    .tab {{ min-height:40px; }}
+    #search {{ min-height:40px; font-size:16px; }}
+    .hier-btn {{ min-height:38px; }}
+    .hier-btn.icon {{ flex:0 0 40px; }}
+    .chip {{ min-height:34px; font-size:11px; }}
+    .net-item, .comp-item {{ padding:9px 8px; font-size:12px; }}
+    .popup-header {{ min-height:44px; }}
+    .popup-collapse, .popup-close {{ min-width:40px; min-height:40px; font-size:18px; }}
+    .popup-copy {{ min-width:36px; min-height:36px; font-size:15px; }}
+    .modal-close {{ min-height:44px; min-width:96px; }}
+  }}
+  /* Tablet (geniş + dokunmatik): katlanmış şerit büyüyen düğmeyi kırpmasın */
+  @media (pointer: coarse) and (min-width: 820px) {{
+    #sidebar.collapsed {{ width:44px; min-width:44px; }}
+  }}
+  /* Telefonda komponent detayı ALTTAN AÇILAN KART olur (JS `.sheet-mode`'u
+     dar ekranda ekler ve düğümü panelden <body>'ye taşır). Panelde kalsaydı
+     açık panel ekranın %82'sini kaplayıp vurgulanan komponenti örtüyordu;
+     paneli kapatınca da detay kayboluyordu. */
+  #comp-popup.sheet-mode {{ position:fixed; left:0; right:0; bottom:0;
+      margin:0; height:42vh; max-height:85vh; z-index:450;
+      border-radius:12px 12px 0 0; border-bottom:none; font-size:12px;
+      box-shadow:0 -8px 28px rgba(0,0,0,0.6); }}
+  #comp-popup.sheet-mode #popup-resize {{ height:22px; position:relative;
+      background:#1a1a1a; border-radius:12px 12px 0 0; }}
+  #comp-popup.sheet-mode #popup-resize::after {{ content:''; position:absolute;
+      left:50%; top:8px; width:44px; height:5px; margin-left:-22px;
+      border-radius:3px; background:#555; }}
   /* Sürükleme tutamacı: dokunuşta tarayıcı kaydırması devreye girmesin */
   #popup-resize {{ touch-action:none; }}
 </style>
 </head><body>
 <aside id="sidebar">
   <button id="sidebar-toggle" title="⟪Paneli gizle ( B )⟫">◂</button>
+  <div id="sb-rail">
+    <button class="rail-btn sec-nav" title="⟪Gezgin: hiyerarşi, komponent ve net listeleri⟫">⟪Gezgin⟫</button>
+    <button class="rail-btn sec-prop" title="⟪Seçili komponentin özellikleri ( I )⟫">⟪Özellikler⟫<span class="rail-sel"></span></button>
+  </div>
+  <div id="sb-head">
+    <button class="sec-btn sec-nav" title="⟪Gezgin: hiyerarşi, komponent ve net listeleri⟫">⟪Gezgin⟫</button>
+    <button class="sec-btn sec-prop" title="⟪Seçili komponentin özellikleri ( I )⟫">⟪Özellikler⟫</button>
+  </div>
   <div class="stat">{len(sheets)} sheets · {len(net_list)} nets · {len(components)} comps</div>
   <div class="tabs">
     <button class="tab active" data-tab="hier" title="⟪Şematik hiyerarşi ( H )⟫">⟪Hiyerarşi⟫</button>
@@ -7613,6 +8174,7 @@ def build_html(sheets, net_list, components, timestamp,
     <div class="popup-body" id="popup-body"></div>
   </div>
 </aside>
+<button id="prop-chip" title="⟪Özellikleri göster⟫"></button>
 <div id="viewport">
   <canvas id="sheet-canvas"></canvas>
   <div id="canvas">
@@ -7626,31 +8188,32 @@ def build_html(sheets, net_list, components, timestamp,
     <button class="tool-btn" id="zoom-in" title="⟪Yaklaş ( + )⟫">+</button>
     <button class="tool-btn" id="zoom-out" title="⟪Uzaklaş ( − )⟫">−</button>
     <button class="tool-btn" id="fit-all" title="⟪Tüm sayfaları sığdır⟫">⟪Tümü⟫</button>
-    <div class="toolbar-sep"></div>
-    <label class="color-input" title="⟪Sayfalar arası yay rengi⟫">
+    <button class="tool-btn more-btn" id="more-btn" title="⟪Diğer araçlar⟫">⋯</button>
+    <div class="toolbar-sep tb-more"></div>
+    <label class="color-input tb-more" title="⟪Sayfalar arası yay rengi⟫">
       <input type="color" id="inter-color-picker" value="{inter_color}">
     </label>
-    <label class="color-input" title="⟪Sayfa içi eğri rengi⟫">
+    <label class="color-input tb-more" title="⟪Sayfa içi eğri rengi⟫">
       <input type="color" id="intra-color-picker" value="{intra_color}">
     </label>
-    <div class="toolbar-sep"></div>
-    <button class="tool-btn" id="anno-note"
+    <div class="toolbar-sep tb-more"></div>
+    <button class="tool-btn tb-more" id="anno-note"
             title="⟪Not ekle: butona bas, şemada istediğin yere tıkla ve DOĞRUDAN yaz (dışına tıkla = bitir, Enter = yeni satır). Sonradan: çift tık düzenle · sürükle taşı · KÖŞE TUTAMACIYLA ya da A−/A+ ile yazı boyutu · seç + Del sil · Ctrl+C / Ctrl+V kopyala-yapıştır⟫">⟪Not⟫</button>
-    <button class="tool-btn" id="anno-box"
+    <button class="tool-btn tb-more" id="anno-box"
             title="⟪Kutu içine al: butona bas, sürükleyerek çerçeve çiz (Esc iptal). Sonradan: kenarına tıkla seç → sürükle taşı · köşe tutamaçlarıyla boyutlandır · Del sil · −/+ kenar kalınlığı · Ctrl+C / Ctrl+V kopyala-yapıştır. İÇİNE YAZI: kutuya çift tık ya da mini bardaki T (yazı kutuyla gruplanır)⟫">⟪Kutu⟫</button>
-    <button class="tool-btn" id="anno-sel"
+    <button class="tool-btn tb-more" id="anno-sel"
             title="⟪Dikdörtgen seçim: butona bas, sürükleyerek birden çok not/kutuyu birlikte seç (soldan sağa: yalnız tamamen içeride kalanlar · sağdan sola: dokunan her şey). Seçim bitince araç kapanır. Aynısı her an Shift + sürükle ile de yapılır. Sonra hepsi birlikte taşınır, Ctrl+C ile kopyalanır, Del ile silinir, Ctrl+G ile gruplanır⟫">⟪Seç⟫</button>
-    <button class="tool-btn" id="anno-save"
+    <button class="tool-btn tb-more" id="anno-save"
             title="⟪Not ve kutuları HTML dosyasının içine göm ve kaydet. Chromium'da AÇIK DOSYANIN ÜSTÜNE yazabilir (ilk kayıtta dosyayı seç; aynı oturumda sonrakiler sessiz). Firefox'ta kopya indirir. Paylaşınca/başka bilgisayarda da görünür⟫">⟪Kaydet⟫</button>
-    <button class="tool-btn" id="anno-exp"
+    <button class="tool-btn tb-more" id="anno-exp"
             title="⟪Notları dosyaya aktar (proje_notlar.json iner). Yeniden üretilen HTML e ya da başka bilgisayara taşımanın tarayıcıdan bağımsız yolu — localStorage taşınmaz⟫">⟪Dışa⟫</button>
-    <button class="tool-btn" id="anno-imp"
+    <button class="tool-btn tb-more" id="anno-imp"
             title="⟪Notları dosyadan yükle: _notlar.json VEYA notları gömülü eski bir HTML seçilebilir. Mevcut notlar silinmez, üzerine eklenir⟫">⟪İçe⟫</button>
     <input type="file" id="anno-file" accept=".json,.html,.htm" hidden>
-    <div class="toolbar-sep"></div>
-    <button class="tool-btn" id="shortcut-btn" title="⟪Kısayollar (?)⟫">?</button>
-    <button class="tool-btn" id="export-png">PNG</button>
-    <button class="tool-btn" id="clear-sel">Clear</button>
+    <div class="toolbar-sep tb-more"></div>
+    <button class="tool-btn tb-more" id="shortcut-btn" title="⟪Kısayollar (?)⟫">?</button>
+    <button class="tool-btn tb-more" id="export-png">PNG</button>
+    <button class="tool-btn tb-more" id="clear-sel">Clear</button>
   </div>
   <div id="zoom-info">Zoom <span id="zoom-val">0.30x</span></div>
   <div id="shortcuts">Esc clear · / search · 0 reset · F fit · H ⟪hiyerarşi⟫ · Alt+⌫ ⟪üst sayfa⟫ · <kbd style="background:#1a1a1a;padding:1px 4px;border:1px solid #555;border-radius:2px;color:#aaa">?</kbd> ⟪tüm kısayollar⟫</div>
@@ -7669,6 +8232,7 @@ def build_html(sheets, net_list, components, timestamp,
       <tr><td><kbd>/</kbd></td><td>⟪Arama kutusuna git⟫</td></tr>
       <tr><td><kbd>Enter</kbd></td><td>⟪Aramada ilk sonucu seç⟫</td></tr>
       <tr><td><kbd>B</kbd></td><td>⟪Sol paneli gizle / göster⟫</td></tr>
+      <tr><td><kbd>I</kbd></td><td>⟪Özellikler bölümünü aç / kapat⟫</td></tr>
       <tr><td><kbd>0</kbd></td><td>⟪Görünümü sıfırla⟫</td></tr>
       <tr><td><kbd>F</kbd></td><td>⟪Son sayfaya fit zoom⟫</td></tr>
       <tr><td><kbd>+</kbd> / <kbd>-</kbd></td><td>Zoom in / out</td></tr>
@@ -7706,13 +8270,15 @@ def build_html(sheets, net_list, components, timestamp,
       <tr><td>⟪Seçiliyken Del · mini bar −/+⟫</td><td>⟪Sil · yazı boyutu / kenar kalınlığı (seçili hepsine)⟫</td></tr>
       <tr><td>⟪Nota çift tık⟫</td><td>⟪Yerinde düzenle (boş bırak = sil)⟫</td></tr>
     </table>
-    <h3>⟪Dokunmatik (telefon / tablet)⟫</h3>
+    <h3 class="touch-h">⟪Dokunmatik (telefon / tablet)⟫</h3>
     <table>
       <tr><td>⟪Tek parmak sürükle⟫</td><td>⟪Kanvası kaydır (pan)⟫</td></tr>
       <tr><td>⟪İki parmak (pinch)⟫</td><td>⟪Parmakların ortasına zoom + aynı anda kaydır⟫</td></tr>
       <tr><td>⟪Tek dokunuş⟫</td><td>⟪Fare tıklaması ile aynı (net / designator / block)⟫</td></tr>
       <tr><td>⟪Çift dokunuş⟫</td><td>⟪Çift tıklama ile aynı (sayfayı sığdır, notu düzenle)⟫</td></tr>
       <tr><td>⟪Not / kutu araçları⟫</td><td>⟪Parmakla da çalışır (yaz, çiz, taşı, boyutlandır)⟫</td></tr>
+      <tr><td>⟪Yazının yakınına dokun⟫</td><td>⟪Yeterli — en yakın net / designator / block seçilir⟫</td></tr>
+      <tr><td>⋯</td><td>⟪Dar ekranda gizlenen araçlar (not, kutu, renk, PNG…)⟫</td></tr>
     </table>
     <h3>⟪Renk Pickers⟫</h3>
     <table>
@@ -7793,7 +8359,11 @@ let schMarkerBox = null;   // {{x,y,w,h,label}}
 const TITLE_H = 30;              // .sheet-title yüksekliği (CSS ile AYNI olmalı)
 const TEXT_MIN_PX = 3.2;         // ekranda bundan küçük yazı çizilmez
 const HAIR_MIN_PX = 0.35;        // en ince çizgi en az bu kadar piksel görünür
-const TL_MIN_SCALE = 0.85;       // metin katmanı bu zoom'un ÜSTÜNDE kurulur
+// Metin katmanı bu zoom'un ÜSTÜNDE kurulur. Dokunmatikte daha erken: telefonda
+// sayfayı sığdırınca zoom ~0.5 oluyor ve katman olmadan HİÇBİR yazıya
+// dokunulamıyordu (span'lar yine TEXT_MIN_PX ile süzülür, sayı sınırlı kalır).
+const TL_MIN_SCALE = (window.matchMedia && matchMedia('(pointer: coarse)').matches)
+  ? 0.35 : 0.85;
 const TL_MAX_SHEETS = 6;         // aynı anda en çok bu kadar sayfa için span
 const schCv = document.getElementById('sheet-canvas');
 const schCtx = schCv.getContext('2d');
@@ -8213,9 +8783,13 @@ applyT();
 // JS'te yapılması ŞART — yoksa DOM overlay animasyonla kayarken kanvas anında
 // hedefe atlar ve ikisi 350 ms boyunca birbirinden ayrı düşer.
 // Fare tekerleği/pan doğrudan applyT kullanır (gecikme hissi olmasın).
+// Süren geçişin HEDEFİ: geçiş boyunca tx/ty/scale ara değerlerdir (ilk adım
+// senkron çalışır), hedefe göre hesap yapan kod (revealAboveSheet) bunu okur.
+let smoothTarget = null;
 function smoothT() {{
   const from = {{ tx: viewApplied.tx, ty: viewApplied.ty, s: viewApplied.s }}, to = {{ tx: tx, ty: ty, s: scale }};
   if (smoothRaf) cancelAnimationFrame(smoothRaf);
+  smoothTarget = to;
   if (Math.abs(from.tx - to.tx) < 0.5 && Math.abs(from.ty - to.ty) < 0.5
       && Math.abs(from.s - to.s) < 1e-4) {{ applyT(); return; }}
   const t0 = performance.now(), DUR = 350;
@@ -8227,7 +8801,7 @@ function smoothT() {{
     scale = from.s + (to.s - from.s) * e;
     applyT();
     if (u < 1) smoothRaf = requestAnimationFrame(step);
-    else {{ smoothRaf = 0; tx = to.tx; ty = to.ty; scale = to.s; applyT(); }}
+    else {{ smoothRaf = 0; smoothTarget = null; tx = to.tx; ty = to.ty; scale = to.s; applyT(); }}
   }})(performance.now());
 }}
 
@@ -8341,18 +8915,42 @@ viewport.addEventListener('click', e => {{
   crossProbeOut(null);      // PCB/3D panellerindeki seçim de bırakılsın
 }});
 
-function fitToSheet(sheetId) {{
+// Sığdırma / ortalama için GÖRÜNÜR alan (viewport koordinatında). Kanvasın
+// üstünde YÜZEN öğeler düşülür: araç çubuğu (telefonda 2-3 satıra sarıp
+// sayfanın üstünü örtüyordu) ve dar ekranda kanvasın ÜSTÜNE binen katlanmış
+// panel şeridi. AÇIK panel düşülmez: geçici bir katmandır, düşülseydi sığdırma
+// 70 px'lik bir şeride sıkışırdı. Birleşik görünümde toolbar kabuğa taşındığı
+// için (viewport'un içinde değil) hiçbir şey düşülmez.
+function fitArea() {{
+  const r = viewport.getBoundingClientRect();
+  let x = 0, y = 0, w = r.width, h = r.height;
+  const tb = document.getElementById('toolbar');
+  if (tb && viewport.contains(tb) && tb.offsetParent) {{
+    const b = tb.getBoundingClientRect();
+    if (b.height && b.height < h * 0.5) {{
+      const d = b.bottom - r.top + 6; y += d; h -= d;
+    }}
+  }}
+  const sb = document.getElementById('sidebar');
+  if (sb) {{
+    const b = sb.getBoundingClientRect();
+    const ov = Math.min(b.right, r.right) - Math.max(b.left, r.left);
+    if (ov > 0 && ov < 60) {{ x += ov; w -= ov; }}
+  }}
+  return {{ x, y, w: Math.max(w, 40), h: Math.max(h, 40), ok: !!(r.width && r.height) }};
+}}
+function fitToSheet(sheetId, instant) {{
   const sp = sheetPos[sheetId];
   if (!sp) return;
-  const r = viewport.getBoundingClientRect();
+  const a = fitArea();
   // Panel gizliyken (birleşik görünümün tek-panel modları) ölçü 0 gelir;
   // hesaplasaydık scale=0 olur ve görünüm tamamen bozulurdu.
-  if (!r.width || !r.height) return;
-  const padding = 0.9;
-  scale = Math.min(r.width * padding / sp.w, r.height * padding / sp.h);
-  tx = r.width / 2 - (sp.x + sp.w / 2) * scale;
-  ty = r.height / 2 - (sp.y + sp.h / 2) * scale;
-  smoothT();
+  if (!a.ok) return;
+  const padding = 0.94;
+  scale = Math.min(a.w * padding / sp.w, a.h * padding / sp.h);
+  tx = a.x + a.w / 2 - (sp.x + sp.w / 2) * scale;
+  ty = a.y + a.h / 2 - (sp.y + sp.h / 2) * scale;
+  if (instant) applyT(); else smoothT();
   // Hiyerarşi imleci + sayfa geçmişi: hangi yoldan gelinirse gelinsin izlesin
   // (hierReady false iken — modül kurulmadan — no-op).
   noteSheetVisit(sheetId);
@@ -8368,9 +8966,9 @@ function zoomBy(f) {{
   smoothT();
 }}
 // Tüm sayfaları tek bakışta sığdır
-function fitAll() {{
-  const r = viewport.getBoundingClientRect();
-  if (!r.width || !r.height) return;   // gizli panel: ölçü 0 → scale 0 olurdu
+function fitAll(instant) {{
+  const a = fitArea();
+  if (!a.ok) return;                   // gizli panel: ölçü 0 → scale 0 olurdu
   let x1 = 1e12, y1 = 1e12, x2 = -1e12, y2 = -1e12;
   Object.values(sheetPos).forEach(sp => {{
     x1 = Math.min(x1, sp.x); y1 = Math.min(y1, sp.y);
@@ -8378,10 +8976,10 @@ function fitAll() {{
   }});
   if (x1 > x2) return;
   const w = x2 - x1, h = y2 - y1;
-  scale = Math.min(r.width * 0.92 / w, r.height * 0.92 / h);
-  tx = r.width / 2 - (x1 + w / 2) * scale;
-  ty = r.height / 2 - (y1 + h / 2) * scale;
-  smoothT();
+  scale = Math.min(a.w * 0.94 / w, a.h * 0.94 / h);
+  tx = a.x + a.w / 2 - (x1 + w / 2) * scale;
+  ty = a.y + a.h / 2 - (y1 + h / 2) * scale;
+  if (instant) applyT(); else smoothT();
 }}
 
 let lastFitSheetId = null;
@@ -8473,15 +9071,18 @@ function updateSchMarkerMetrics() {{
 }}
 // Komponente yumuşak yakınlaş + ortala (PCB focusBox benzeri)
 function focusCanvasBox(x, y, w, h) {{
-  const r = viewport.getBoundingClientRect();
-  if (!r.width || !r.height) return;
+  const a = fitArea();
+  if (!a.ok) return;
   const cx = x + w / 2, cy = y + h / 2;
   // kutu kısa kenarın ~%35'i kadar görünsün (çevresi bağlam olarak kalsın)
-  let ns = (Math.min(r.width, r.height) * 0.35) / Math.max(w, h, 1);
+  let ns = (Math.min(a.w, a.h) * 0.35) / Math.max(w, h, 1);
   ns = Math.max(0.5, Math.min(2.2, ns));
   scale = ns;
-  tx = r.width / 2 - cx * scale;
-  ty = r.height / 2 - cy * scale;
+  // Telefonda komponent kartı alttan açılır (bkz. .sheet-mode) → kutu kartın
+  // ÜSTÜNDE kalan alanda ortalanır.
+  const sheetH = (typeof popupSheetH === 'function') ? popupSheetH() : 0;
+  tx = a.x + a.w / 2 - cx * scale;
+  ty = a.y + (a.h - sheetH) / 2 - cy * scale;
   smoothT();
 }}
 
@@ -8582,7 +9183,11 @@ function renderPopupRow(k, v) {{
 function showCompPopup(comp) {{
   const popup = document.getElementById('comp-popup');
   if (!popup) return;
-  setSidebarOpen(true);  // popup sidebar'a dock'lu — panel kapalıysa aç
+  // Seçim paneli AÇMAZ (v2.35.0): yalnız içerik güncellenir; görünürlük
+  // kullanıcının Özellikler tercihine bağlı (applyPanels). Telefonda listeden
+  // seçim yapıldıysa Gezgin kaplaması kapanır ki komponent görünsün.
+  propSel = comp;
+  if (isNarrow() && navOpen) {{ navOpen = false; lsSet({{ sidebar: false }}); }}
   document.getElementById('popup-title').textContent = comp.designator;
   // Multi-part ise kaç parça/sayfa olduğunu göster
   const places = comp.placements || [];
@@ -8639,9 +9244,9 @@ function showCompPopup(comp) {{
   if (PCB.available && PCB.components[comp.designator]) {{
     drawPcbMap(comp.designator);
   }}
-  popup.classList.add('open');
-  popup.classList.remove('collapsed');
-  document.getElementById('popup-collapse').textContent='▾';
+  applyPanels();
+  pingProp();             // Özellikler kapalıysa: seçim alındı işareti
+  revealAboveSheet();     // telefonda: seçili komponent kartın altında kalmasın
 }}
 
 // PCB mini haritası: board + TÜM komponentler (yerleşim görüntüsü) +
@@ -8697,9 +9302,8 @@ function drawPcbMap(designator) {{
       </div>
     </div>`;
 }}
-document.getElementById('popup-close').onclick = () => {{
-  document.getElementById('comp-popup').classList.remove('open');
-}};
+// × : Özellikler bölümünü KAPAT (tercih saklanır; seçim ve vurgu kalır)
+document.getElementById('popup-close').onclick = () => setPropOpen(false);
 // Katla / aç (sol üstteki ok) — simge durumuna küçült
 document.getElementById('popup-collapse').onclick = () => {{
   const pp=document.getElementById('comp-popup');
@@ -8756,14 +9360,90 @@ document.getElementById('search').addEventListener('input', e => renderActive(e.
 // === Katlanabilir sol panel ===
 const sidebarEl = document.getElementById('sidebar');
 const sidebarToggle = document.getElementById('sidebar-toggle');
-function setSidebarOpen(open) {{
-  sidebarEl.classList.toggle('collapsed', !open);
-  sidebarToggle.textContent = open ? '◂' : '▸';
-  sidebarToggle.title = (open ? 'Paneli gizle' : '⟪Paneli göster⟫') + ' ( B )';
-  if (typeof lsSet === 'function') lsSet({{ sidebar: open }});
+// === Gezgin / Özellikler: iki bağımsız bölüm (v2.35.0) ===
+// Komponent seçimi paneli ARTIK AÇMAZ (kullanıcı bildirimi: "kapatınca her
+// tıklamada tekrar açılıyor, yorucu"; telefonda alttan kart her dokunuşta
+// şemayı daraltıyordu). Kural: SEÇİM yalnız İÇERİĞİ günceller, panellerin
+// açık/kapalı durumunu yalnız KULLANICI değiştirir ve tercih saklanır.
+// Özellikler kapalıyken kenardaki düğme seçili designator'ı gösterir ve kısa
+// bir parıltıyla seçimin alındığını belli eder; telefonda sağ altta çip çıkar.
+// Masaüstü / telefon tercihleri AYRI tutulur: telefonda varsayılan kapalı.
+let navOpen = true;          // Gezgin (hiyerarşi / Comps / Nets) açık mı
+let propSel = null;          // son seçilen komponent (kapalıyken de saklanır)
+const propPref = {{ d: true, m: false }};   // Özellikler: masaüstü / telefon
+let panelsMem = null;        // B / ok ile katlamadan önceki bölüm durumları
+const propIsOpen = () => isNarrow() ? propPref.m : propPref.d;
+function setPropEmpty() {{
+  document.getElementById('popup-title').textContent = '';
+  document.getElementById('popup-sheet').textContent = '';
+  document.getElementById('popup-body').innerHTML =
+    '<div class="popup-empty">⟪Komponent seçilmedi — şemada bir designator yazısına ya da Comps listesinde bir satıra tıkla.⟫</div>';
 }}
-sidebarToggle.addEventListener('click', () =>
-  setSidebarOpen(sidebarEl.classList.contains('collapsed')));
+function applyPanels() {{
+  const narrow = isNarrow(), pOpen = propIsOpen();
+  placeCompPopup();
+  if (!propSel) setPropEmpty();
+  // Masaüstünde seçim yokken boş bölüm yalnız Gezgin de kapalıysa gösterilir
+  // (yoksa listenin altında anlamsız boş bir kutu dururdu).
+  const showProp = narrow ? (pOpen && !!propSel) : (pOpen && (!!propSel || !navOpen));
+  document.getElementById('comp-popup').classList.toggle('open', showProp);
+  const sbOpen = navOpen || (!narrow && showProp);
+  sidebarEl.classList.toggle('collapsed', !sbOpen);
+  sidebarEl.classList.toggle('nav-off', !navOpen);
+  sidebarToggle.textContent = sbOpen ? '◂' : '▸';
+  sidebarToggle.title = (sbOpen ? '⟪Paneli gizle⟫' : '⟪Paneli göster⟫') + ' ( B )';
+  document.querySelectorAll('.sec-nav').forEach(b => b.classList.toggle('on', navOpen));
+  document.querySelectorAll('.sec-prop').forEach(b => b.classList.toggle('on', pOpen));
+  document.querySelectorAll('.rail-sel').forEach(x => {{
+    x.textContent = propSel ? ' · ' + propSel.designator : ''; }});
+  const chip = document.getElementById('prop-chip');
+  const showChip = narrow && !pOpen && !!propSel;
+  chip.classList.toggle('show', showChip);
+  document.body.classList.toggle('has-chip', showChip);
+  if (showChip) chip.innerHTML = 'ⓘ <b>' + escHtml(propSel.designator) + '</b>'
+    + (propSel.value ? '<span>' + escHtml(propSel.value) + '</span>' : '');
+}}
+function setPropOpen(open) {{
+  if (isNarrow()) propPref.m = !!open; else propPref.d = !!open;
+  lsSet({{ propD: propPref.d, propM: propPref.m }});
+  applyPanels();
+  if (open) revealAboveSheet();
+}}
+function setNavOpen(open) {{
+  navOpen = !!open;
+  lsSet({{ sidebar: navOpen }});
+  applyPanels();
+}}
+// Arama ( / ), H ve hiyerarşi gibi Gezgin isteyen yollar
+function setSidebarOpen(open) {{ setNavOpen(open); }}
+// Ok düğmesi / B: TÜM paneli katlar; açarken katlamadan önceki bölümler döner
+function toggleSidebarAll() {{
+  const narrow = isNarrow();
+  if (!sidebarEl.classList.contains('collapsed')) {{
+    panelsMem = {{ nav: navOpen, prop: propPref.d }};
+    navOpen = false;
+    if (!narrow) propPref.d = false;
+  }} else {{
+    const m = panelsMem || {{ nav: true, prop: propPref.d }};
+    navOpen = narrow || m.nav || !m.prop;
+    if (!narrow) propPref.d = m.prop;
+  }}
+  lsSet({{ sidebar: navOpen, propD: propPref.d }});
+  applyPanels();
+}}
+// Seçim kapalı Özellikler düğmesine kısa bir parıltıyla bildirilir
+function pingProp() {{
+  if (propIsOpen()) return;
+  document.querySelectorAll('.rail-btn.sec-prop, .sec-btn.sec-prop, #prop-chip').forEach(b => {{
+    b.classList.remove('ping'); void b.offsetWidth; b.classList.add('ping'); }});
+}}
+sidebarToggle.addEventListener('click', toggleSidebarAll);
+document.querySelectorAll('.sec-nav').forEach(b => b.addEventListener('click', () => {{
+  // Kapalı şeritten tıklama her zaman AÇAR; açık başlıkta aç/kapat
+  setNavOpen(b.classList.contains('rail-btn') ? true : !navOpen); }}));
+document.querySelectorAll('.sec-prop').forEach(b => b.addEventListener('click', () => {{
+  setPropOpen(b.classList.contains('rail-btn') ? true : !propIsOpen()); }}));
+document.getElementById('prop-chip').addEventListener('click', () => setPropOpen(true));
 
 // === Arama kutusu (her zaman görünür; `/` odaklar, Esc bırakır) ===
 const searchInput = document.getElementById('search');
@@ -8802,7 +9482,104 @@ document.querySelectorAll('#type-chips .chip').forEach(ch => {{
 // Hiyerarşi sekmesi (ağaç + arama + ↰ / ⌂ / Alt+Backspace) yeterli.
 document.getElementById('zoom-in').onclick = () => zoomBy(1.35);
 document.getElementById('zoom-out').onclick = () => zoomBy(1 / 1.35);
-document.getElementById('fit-all').onclick = fitAll;
+document.getElementById('fit-all').onclick = () => fitAll();
+// "⋯": dar ekranda gizlenen ikincil araçları aç / kapat. Düğme araç çubuğuyla
+// birlikte birleşik görünümün üst çubuğuna taşındığında da çalışır (kapanış
+// kendi düğümüne bakar, belgeye değil).
+document.querySelectorAll('.more-btn').forEach(b => b.addEventListener('click', () => {{
+  const open = b.parentElement.classList.toggle('more-open');
+  b.classList.toggle('active', open);
+}}));
+
+// === Dokunmatik ayrıntılar ===
+// Son işaretçi türü: 'mouse' | 'touch' | 'pen'. Dokunuştan sonra tarayıcının
+// ürettiği uyumluluk (compat) fare olayları gerçek fareden ayrılsın diye
+// tutulur; gerçek fare hareketi (pointermove · mouse) türü hemen geri alır.
+let lastPtrType = 'mouse';
+document.addEventListener('pointerdown', e => {{ lastPtrType = e.pointerType; }}, true);
+document.addEventListener('pointermove', e => {{
+  if (e.pointerType === 'mouse') lastPtrType = 'mouse';
+}}, true);
+const isNarrow = () => window.innerWidth < 820;
+// Dokunmatik cihazda yardım penceresi klavye kısayollarıyla değil dokunmatik
+// bölümüyle başlasın.
+if (window.matchMedia && matchMedia('(pointer: coarse)').matches)
+  document.querySelectorAll('h3.touch-h').forEach(h => {{
+    const t = h.nextElementSibling, p = h.parentElement;
+    if (!t) return;
+    p.insertBefore(t, p.firstChild); p.insertBefore(h, t);
+  }});
+
+// Parmakla dokunmada yazıların İSABET ALANI genişletilir: 1.5x zoom'da bir
+// designator'un kutusu ~4×4 px (parmak ~40 px) → dokunuş yazıya değmeyince
+// en yakın tıklanabilir yazı (≤ TOUCH_SLOP px) seçilir ve tıklama ona
+// yönlendirilir. Yalnız dokunuşta; fareyle davranış birebir aynı.
+const TOUCH_SLOP = 24;
+const HIT_SEL = '.tl span.clickable-net, .tl span.block-link, .tl span.comp-designator';
+viewport.addEventListener('click', e => {{
+  if (lastPtrType === 'mouse' || panMoved) return;
+  if (typeof annoTool !== 'undefined' && annoTool) return;   // not/kutu aracı
+  const t = e.target;
+  if (!t.closest || t.closest(HIT_SEL) || t.closest('#toolbar')
+      || t.closest('#anno-layer') || t.closest('#anno-bar')
+      || t.closest('#anno-editor')) return;
+  if (window.getSelection && String(window.getSelection()).length > 0) return;
+  let best = null, bd = TOUCH_SLOP;
+  document.querySelectorAll(HIT_SEL).forEach(s => {{
+    const r = s.getBoundingClientRect();
+    if (!r.width) return;
+    const dx = Math.max(r.left - e.clientX, 0, e.clientX - r.right);
+    const dy = Math.max(r.top - e.clientY, 0, e.clientY - r.bottom);
+    const d = Math.hypot(dx, dy);
+    if (d < bd) {{ bd = d; best = s; }}
+  }});
+  if (!best) return;
+  e.stopPropagation(); e.preventDefault();
+  best.dispatchEvent(new MouseEvent('click', {{ bubbles: true, cancelable: true,
+    clientX: e.clientX, clientY: e.clientY, view: window }}));
+}}, true);
+
+// Telefonda komponent detayı alttan açılan kart (`.sheet-mode`): düğüm panelden
+// <body>'ye taşınır (katlanmış panelin çocukları `display:none !important`).
+// Genişleyince (döndürme) panele geri döner.
+function placeCompPopup() {{
+  const pp = document.getElementById('comp-popup');
+  if (!pp) return;
+  if (isNarrow()) {{
+    if (pp.parentNode !== document.body) document.body.appendChild(pp);
+    pp.classList.add('sheet-mode');
+  }} else {{
+    if (pp.parentNode !== sidebarEl) sidebarEl.appendChild(pp);
+    pp.classList.remove('sheet-mode');
+  }}
+}}
+// Alttaki kartın kapladığı yükseklik (ortalama bunun ÜSTÜNDE kalan alanda yapılır)
+function popupSheetH() {{
+  const pp = document.getElementById('comp-popup');
+  return (pp && pp.classList.contains('open') && pp.classList.contains('sheet-mode'))
+    ? pp.offsetHeight : 0;
+}}
+// Seçili komponent kartın altında kaldıysa görünümü yukarı kaydır (yalnız
+// dikey; kullanıcının baktığı yer yatayda oynamasın).
+function revealAboveSheet() {{
+  const h = popupSheetH();
+  if (!h || !schMarkerBox) return;
+  // Odaklama geçişi sürüyorsa onun HEDEFİNE göre hesapla (ara kare değil)
+  const T = (smoothRaf && smoothTarget) ? smoothTarget : {{ tx: tx, ty: ty, s: scale }};
+  const vr = viewport.getBoundingClientRect();
+  const top = vr.top + T.ty + schMarkerBox.y * T.s;
+  const bot = top + schMarkerBox.h * T.s;
+  const limit = window.innerHeight - h - 12;
+  if (bot <= limit) return;
+  const minTop = vr.top + fitArea().y + 8;
+  const dy = Math.min(bot - limit, Math.max(0, top - minTop));
+  if (dy > 0) {{ tx = T.tx; ty = T.ty - dy; scale = T.s; smoothT(); }}
+}}
+window.addEventListener('resize', () => {{
+  // Döndürme / pencere daralması telefon ↔ masaüstü kipini değiştirebilir
+  // (iki kipin Özellikler tercihi ayrı) → bölümleri yeniden uygula.
+  if (typeof applyPanels === 'function') applyPanels();
+}});
 
 // === Hover bilgi balonu (komponent / net / block) ===
 const svgTip = document.getElementById('svg-tip');
@@ -8814,6 +9591,9 @@ function moveTip(e) {{
   svgTip.style.left = x + 'px'; svgTip.style.top = y + 'px';
 }}
 document.addEventListener('mouseover', e => {{
+  // Dokunuşta balon AÇILMAZ: tarayıcının compat mouseover'ı balonu açıp
+  // ("tıkla: …" ipucuyla) ekranda asılı bırakıyordu — parmakta hover yok.
+  if (lastPtrType !== 'mouse') return;
   const t = e.target; if (!t.classList) return;
   let html = null;
   if (t.classList.contains('comp-designator')) {{
@@ -8875,8 +9655,10 @@ function lsSet(patch) {{ try {{
   const st = lsGet();
   // Dar ekranda (telefon) panel varsayılan KAPALI — kanvas tüm genişliği alsın.
   // Kullanıcının kaydedilmiş tercihi varsa ona uyulur.
-  if (st.sidebar === false || (st.sidebar === undefined && window.innerWidth < 820))
-    setSidebarOpen(false);
+  if (st.propD !== undefined) propPref.d = !!st.propD;
+  if (st.propM !== undefined) propPref.m = !!st.propM;
+  navOpen = !(st.sidebar === false || (st.sidebar === undefined && window.innerWidth < 820));
+  applyPanels();
   if (st.inter) {{ NET_COLORS[0] = st.inter;
     document.getElementById('inter-color-picker').value = st.inter; }}
   if (st.intra) {{ INTRA_COLOR = st.intra;
@@ -9129,7 +9911,7 @@ function clearSelection() {{
   currentNetEl.textContent = '';
   detailPanel.classList.remove('open');
   clearCompHighlight();
-  document.getElementById('comp-popup').classList.remove('open');
+  propSel = null; applyPanels();
   crossProbeOut(null);      // PCB/3D panellerindeki seçim de bırakılsın
   crossProbeNet(null);      // PCB'deki net vurgusu da temizlensin
 }}
@@ -9428,18 +10210,14 @@ document.addEventListener('keydown', e => {{
     }}
   }}
   if (e.key === '?') {{ e.preventDefault(); toggleShortcutModal(); }}
-  else if (e.key === 'Escape') {{
-    // Önce popup, sonra seçim
-    const popup = document.getElementById('comp-popup');
-    if (popup.classList.contains('open')) {{
-      popup.classList.remove('open');
-    }} else {{
-      clearSelection();
-    }}
-  }}
+  // Esc seçimi temizler; Özellikler bölümünün açık/kapalı tercihine DOKUNMAZ
+  // (eskiden önce popup'ı kapatıyordu — tercih modelinde bu, bölümü kalıcı
+  // olarak kapatmak anlamına gelirdi).
+  else if (e.key === 'Escape') clearSelection();
   else if (e.key === '/') {{ e.preventDefault(); setSearchOpen(true); }}
   else if (e.key === '0') resetView();
-  else if (e.key === 'b' || e.key === 'B') setSidebarOpen(sidebarEl.classList.contains('collapsed'));
+  else if (e.key === 'b' || e.key === 'B') toggleSidebarAll();
+  else if ((e.key === 'i' || e.key === 'I') && !e.ctrlKey && !e.metaKey) setPropOpen(!propIsOpen());
   else if (e.key === 'h' || e.key === 'H') showHierTab();
   else if (e.key === 'f' || e.key === 'F') {{ if (lastFitSheetId) fitToSheet(lastFitSheetId); }}
   else if (e.key === '+' || e.key === '=') {{
@@ -10381,9 +11159,15 @@ function annoBuildHtml() {{
     const cn = clone.querySelector('#current-net'); if (cn) cn.textContent = '';
     const dp = clone.querySelector('#detail-panel'); if (dp) dp.classList.remove('open');
     const pp = clone.querySelector('#comp-popup');
-    if (pp) {{ pp.classList.remove('open');
+    const sb = clone.querySelector('#sidebar');
+    if (pp) {{ pp.classList.remove('open', 'sheet-mode');
+               // telefonda <body>'ye taşınmış olabilir → panele geri koy
+               if (sb && pp.parentNode !== sb) sb.appendChild(pp);
                const pb = pp.querySelector('#popup-body'); if (pb) pb.innerHTML = ''; }}
-    const sb = clone.querySelector('#sidebar'); if (sb) sb.classList.remove('collapsed');
+    if (sb) sb.classList.remove('collapsed', 'nav-off');
+    const pc = clone.querySelector('#prop-chip');
+    if (pc) {{ pc.classList.remove('show'); pc.innerHTML = ''; }}
+    clone.querySelectorAll('.rail-sel').forEach(x => {{ x.textContent = ''; }});
     const tp = clone.querySelector('#svg-tip');
     if (tp) {{ tp.removeAttribute('style'); tp.innerHTML = ''; }}
     const vp = clone.querySelector('#viewport');
@@ -10519,11 +11303,26 @@ function applyPendingXp(tries) {{
 // Ayrıca görünümün MERKEZİ sabit tutulur (üst-sol köşe değil): panel daralınca
 // o an incelenen / seçili bölge ekrandan kaçmasın.
 let vpW = 0, vpH = 0;
+// Açılış görünümü: eskiden sabit (tx=40, ty=40, 0.30x) idi → telefonda sayfa
+// sol üstte küçücük ve yarısı araç çubuğunun altında kalıyordu. Artık sığdırılır:
+// dar ekranda İLK sayfa (kök — okunabilir boyut), genişte TÜM sayfalar. Panel
+// açılışta gizliyse (birleşik görünüm) ölçü gelene kadar ertelenir.
+let initFitDone = false;
+function initialFit() {{
+  if (initFitDone || !fitArea().ok) return;
+  initFitDone = true;
+  const ids = Object.keys(sheetPos);
+  if (ids.length > 1 && window.innerWidth < 820) {{
+    fitToSheet(ids[0], true); lastFitSheetId = ids[0];
+  }}
+  else fitAll(true);
+}}
 new ResizeObserver(() => {{
   const r = viewport.getBoundingClientRect();
   if (r.width && r.height) {{
     if (vpW && vpH) {{ tx += (r.width - vpW) / 2; ty += (r.height - vpH) / 2; }}
     vpW = r.width; vpH = r.height;   // gizliyken (0) güncelleme YAPMA
+    initialFit();
   }}
   applyT();                          // schDraw + metin katmanı + overlay metrikleri
   applyPendingXp(0);
@@ -10557,7 +11356,7 @@ window.addEventListener('message', ev => {{
   if (!desig) {{     // "seçimi temizle" bildirimi (PCB/3D'de boşluğa tıklandı)
     pendingXpComp = null;      // bekleyen seçim de düşsün (panel açılınca canlanmasın)
     clearCompHighlight();
-    document.getElementById('comp-popup').classList.remove('open');
+    propSel = null; applyPanels();
     return;
   }}
   let comp = compByDesig[desig];
@@ -10603,6 +11402,7 @@ window.addEventListener('message', ev => {{
     i.src = src;
     return i;
   }});
+  initialFit();
   applyT();
   tlUpdate();
   if (document.fonts && document.fonts.ready) {{

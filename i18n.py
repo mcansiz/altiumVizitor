@@ -448,6 +448,8 @@ _EN_LOG = {
         "  ✓ geometry: {a0} tracks · {a1} arcs · {a2} pads · {a3} vias · "
         "{a4}+{a5} regions/texts · {a6} layers",
     " ({a0} metin atlandı)": " ({a0} text(s) skipped)",
+    "  · {a0} özel dizge çözüldü (.Designator, proje parametreleri…)":
+        "  · {a0} special string(s) resolved (.Designator, project parameters…)",
     "  · metin poligonları atlandı: {a0}": "  · text polygons skipped: {a0}",
 
     # --- 3D ----------------------------------------------------------------
@@ -937,6 +939,32 @@ _EN_HTML = {
     "Grubun tamamı seçilir — mini bardaki zincir düğmesi grubu çözer":
         "The whole group is selected — the group button on the mini bar "
         "dissolves it",
+    # Mobil / dokunmatik düzen (v2.34.0)
+    "Diğer araçlar": "More tools",
+    "Tek parmak: kaydır · İki parmak: yakınlaştır · Dokun: komponent · Çift dokun: net":
+        "One finger: pan · Two fingers: zoom · Tap: component · Double-tap: net",
+    "Tek parmak: döndür · İki parmak: yakınlaştır + kaydır · Dokun: komponent":
+        "One finger: rotate · Two fingers: zoom + pan · Tap: component",
+    "Yazının yakınına dokun": "Tap near a label",
+    "Yeterli — en yakın net / designator / block seçilir":
+        "Enough — the nearest net / designator / block is selected",
+    "Dar ekranda gizlenen araçlar (not, kutu, renk, PNG…)":
+        "Tools hidden on narrow screens (note, box, color, PNG…)",
+    # Gezgin / Özellikler bölümleri (v2.35.0)
+    "Gezgin": "Navigator",
+    "Özellikler": "Properties",
+    "Gezgin: hiyerarşi, komponent ve net listeleri":
+        "Navigator: hierarchy, component and net lists",
+    "Gezgin: katmanlar, netler, komponentler, BOM":
+        "Navigator: layers, nets, components, BOM",
+    "Seçili komponentin özellikleri ( I )": "Selected component properties ( I )",
+    "Özellikler bölümünü aç / kapat": "Show / hide the Properties section",
+    "Özellikleri göster": "Show properties",
+    "Paneli gizle": "Hide panel",
+    "Komponent seçilmedi — şemada bir designator yazısına ya da Comps listesinde bir satıra tıkla.":
+        "No component selected — click a designator on the schematic or a row in the Comps list.",
+    "Komponent seçilmedi — board üzerinde bir komponente ya da listede bir satıra tıkla.":
+        "No component selected — click a component on the board or a row in a list.",
 }
 
 _EN.update(_EN_HTML)

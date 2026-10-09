@@ -83,6 +83,11 @@ class _ProjectBase:
         self.assertEqual(s["has_pnp"], self.HAS_PCB)
         conns = [c for n in data["nets"] for c in n.get("connections", [])]
         self.assertTrue(conns, "hiçbir net'te pin bağlantısı yok")
+        # Altium'un dolaylı metni ('=Value') parametreden çözülmeli: çözülmezse
+        # BOM · Montaj paneli 0.1µF ile 2.2µF'ı tek grupta topluyordu.
+        vals = [c.get("value", "") for sh in data["sheets"] for c in sh["components"]]
+        unresolved = [v for v in vals if v.startswith("=")]
+        self.assertEqual(unresolved, [], "çözülmemiş dolaylı değer")
 
     # --- HTML görüntüleyiciler ----------------------------------------------
     def test_schematic_viewer(self):

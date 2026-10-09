@@ -43,6 +43,17 @@ class TestStatic(unittest.TestCase):
                            errors="replace", cwd=ROOT)
         self.assertEqual(r.returncode, 0, r.stdout[-3000:] + r.stderr[-2000:])
 
+    def test_resolve_indirect_text(self):
+        """'=Param' Altium dolaylı metni: harf duyarsız, zincir, döngü, eksik parametre."""
+        from viewer import resolve_indirect_text as r
+        self.assertEqual(r("=Value", {"Value": "0.1µF"}), "0.1µF")
+        self.assertEqual(r("=value", {"VALUE": "10k"}), "10k")
+        self.assertEqual(r("=A", {"A": "=B", "B": "1nF"}), "1nF")
+        self.assertEqual(r("=A", {"A": "=A"}), "=A")              # döngü
+        self.assertEqual(r("=Value", {}), "=Value")               # parametre yok
+        self.assertEqual(r("100nF", {"Value": "x"}), "100nF")     # dolaysız
+        self.assertEqual(r("=", {"": "x"}), "=")
+
     def test_python_sources_compile(self):
         """Depodaki her .py dosyası derleniyor (sözdizimi hatası yok)."""
         files = [p for p in ROOT.glob("*.py")] + list((ROOT / "tools").glob("*.py")) \

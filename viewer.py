@@ -91,7 +91,7 @@ from altium_monkey.altium_schdoc import AltiumSchDoc
 
 # Uygulama sürümü — tek kaynak burası; gui.py buradan import eder.
 # HTML çıktılarında sağ üst köşedeki rozette görünür (build saati yerine).
-APP_VERSION = "2.35.2"
+APP_VERSION = "2.36.0"
 
 # Önerilen minimum altium_monkey sürümü. Bu sürümden öncesinde:
 #   · 2026.6.21 öncesi — STM32 gibi IC'lerde dikey pin adları yatay çiziliyordu.
@@ -875,8 +875,281 @@ def _dl_pt(m, x, y):
     return (m[0] * x + m[2] * y + m[4], m[1] * x + m[3] * y + m[5])
 
 
+# ===========================================================================
+# Şematik renk temaları (KiCad tarzı) — v2.36.0
+# ===========================================================================
+# Altium SVG'si renkleri HAM taşır (tel #000080, gövde dolgusu #FFFFB0 …);
+# KiCad gibi "tel / pin / gövde / etiket" bazında tema uygulayabilmek için her
+# çizim öğesinin NE olduğunu bilmek gerekir. SVG'de bu bilgi yok ama her
+# nesnenin `<g id>`'si Altium UniqueId'sidir ve SchDoc nesnesinin `unique_id`'si
+# ile birebir eşleşir (m2_emmc: 621/623). Böylece nesne SINIFINDAN bir rol
+# çıkarılıp draw-list stillerine eklenir; tarayıcı seçilen temaya göre rolü
+# renge çevirir. "Altium (orijinal)" seçiliyken roller yok sayılır → çizim
+# eskisiyle BİREBİR aynı.
+#
+# Rol adları doğrudan KiCad tema anahtarlarıdır (wire, pin_name, …) + birkaç
+# yardımcı ("graphic_fill", "label_fill"; JS takma ad tablosu çözer).
+#
+# Tema değerleri KiCad 10'un "KiCad Default" teması (kullanıcının kendi
+# %APPDATA%/kicad/10.0/colors/user.json'ı) ve pointhi/kicad-color-schemes
+# deposundan (CC0) olduğu gibi alındı; eksik iki anahtar doldurulur
+# (worksheet ← note, sheet_background ← saydam).
+_SCH_ROLE_BY_CLASS = {
+    "AltiumSchWire": "wire", "AltiumSchBus": "bus", "AltiumSchBusEntry": "bus",
+    "AltiumSchSignalHarness": "bus", "AltiumSchJunction": "junc",
+    "AltiumSchNetLabel": "nlab", "AltiumSchPort": "port",
+    "AltiumSchCrossSheetConnector": "port", "AltiumSchPowerPort": "pwr",
+    "AltiumSchComponent": "comp", "AltiumSchDesignator": "des",
+    "AltiumSchPin": "pin", "AltiumSchSheetSymbol": "ssym",
+    "AltiumSchSheetName": "sname", "AltiumSchFileName": "sfile",
+    "AltiumSchSheetEntry": "sent", "AltiumSchSheetSymbolChildLabel": "sname",
+    "AltiumSchNoErc": "noerc", "AltiumSchLabel": "note", "AltiumSchNote": "note",
+    "AltiumSchTextFrame": "note", "AltiumSchHyperlink": "note",
+    "AltiumSchSheet": "sheet", "AltiumSchTemplate": "sheet",
+    "AltiumSchParameterSet": "pset", "AltiumSchBlanket": "blanket",
+    "AltiumSchCompileMask": "blanket", "AltiumSchHarnessConnector": "harn",
+    "AltiumSchHarnessEntry": "harn", "AltiumSchHarnessType": "harn",
+    "AltiumSchHarnessComponent": "harn", "AltiumSchImage": "img",
+    "AltiumSchArc": "gfx", "AltiumSchBezier": "gfx", "AltiumSchEllipse": "gfx",
+    "AltiumSchEllipticalArc": "gfx", "AltiumSchLine": "gfx",
+    "AltiumSchPolygon": "gfx", "AltiumSchPolyline": "gfx",
+    "AltiumSchRectangle": "gfx", "AltiumSchRoundedRectangle": "gfx",
+    "AltiumSchPieChart": "gfx", "AltiumSchIeeeSymbol": "gfx",
+}
+
+
+# (id, görünen ad, koyu mu, {KiCad anahtarı: renk}) — sıra = seçim listesindeki
+# sıra (önce açık, sonra koyu). "altium" kimliği ayrılmıştır: orijinal renkler.
+# Kaynak: KiCad 10 "KiCad Default" + github.com/pointhi/kicad-color-schemes (CC0).
+_SCH_THEMES = [
+    ('kicad', 'KiCad', False, {
+        'background': '#f5f4ef', 'wire': '#009600', 'bus': '#000084',
+        'junction': '#009600', 'component_outline': '#840000', 'component_body': '#ffffc2',
+        'pin': '#840000', 'pin_name': '#006464', 'pin_number': '#a90000',
+        'reference': '#006464', 'value': '#006464', 'fields': '#840084',
+        'label_local': '#0f0f0f', 'label_global': '#840000', 'label_hier': '#725600',
+        'sheet': '#840000', 'sheet_background': 'rgba(255,255,255,0)',
+        'sheet_name': '#006464', 'sheet_filename': '#725600', 'sheet_label': '#006464',
+        'no_connect': '#000084', 'note': '#0000c2', 'worksheet': '#840000',
+    }),
+    ('wlight', 'wLight', False, {
+        'background': '#fffcf8', 'wire': '#000080', 'bus': '#0000ff',
+        'junction': '#000080', 'component_outline': '#000000', 'component_body': '#fffed0',
+        'pin': '#000000', 'pin_name': '#000000', 'pin_number': '#808080',
+        'reference': '#000080', 'value': '#000084', 'fields': '#840084',
+        'label_local': '#000080', 'label_global': '#800000', 'label_hier': '#800000',
+        'sheet': '#000000', 'sheet_background': '#c0ffb8', 'sheet_name': '#000080',
+        'sheet_filename': '#000080', 'sheet_label': '#800000', 'no_connect': '#000084',
+        'note': '#008000', 'worksheet': '#000000',
+    }),
+    ('sol-light', 'Solarized Light', False, {
+        'background': '#fdf6e3', 'wire': '#859900', 'bus': '#268bd2',
+        'junction': '#859900', 'component_outline': '#586e75', 'component_body': '#eee8d5',
+        'pin': '#586e75', 'pin_name': '#cb4b16', 'pin_number': '#b58900',
+        'reference': '#268bd2', 'value': '#6c71c4', 'fields': '#93a1a1',
+        'label_local': '#2aa198', 'label_global': '#2aa198', 'label_hier': '#2aa198',
+        'sheet': '#586e75', 'sheet_background': 'rgba(255,255,255,0)',
+        'sheet_name': '#268bd2', 'sheet_filename': '#6c71c4', 'sheet_label': '#cb4b16',
+        'no_connect': '#6c71c4', 'note': '#586e75', 'worksheet': '#dc322f',
+    }),
+    ('nord', 'Nord', False, {
+        'background': '#eceff4', 'wire': '#a3be8c', 'bus': '#81a1c1',
+        'junction': '#a3be8c', 'component_outline': '#4c566a', 'component_body': '#e5e9f0',
+        'pin': '#4c566a', 'pin_name': '#434c5e', 'pin_number': '#434c5e',
+        'reference': '#5e81ac', 'value': '#5e81ac', 'fields': '#5e81ac',
+        'label_local': '#434c5e', 'label_global': '#bf616a', 'label_hier': '#ebcb8b',
+        'sheet': '#b48ead', 'sheet_background': 'rgba(255,255,255,0)',
+        'sheet_name': '#b48ead', 'sheet_filename': '#b48ead', 'sheet_label': '#ebcb8b',
+        'no_connect': '#81a1c1', 'note': '#5e81ac', 'worksheet': '#3b4252',
+    }),
+    ('blue-tone', 'Blue Tone', False, {
+        'background': '#ffffff', 'wire': '#428437', 'bus': '#6e3ba0',
+        'junction': '#428437', 'component_outline': '#313184', 'component_body': '#d2d4ff',
+        'pin': '#3d3384', 'pin_name': '#411d64', 'pin_number': '#5a4eca',
+        'reference': '#3a7384', 'value': '#3a7484', 'fields': '#006784',
+        'label_local': '#000000', 'label_global': '#842784', 'label_hier': '#542682',
+        'sheet': '#523d65', 'sheet_background': 'rgba(0,0,0,0)', 'sheet_name': '#008484',
+        'sheet_filename': '#008484', 'sheet_label': '#552784', 'no_connect': '#5d0084',
+        'note': '#0000c2', 'worksheet': '#00001b',
+    }),
+    ('bw', 'Black/White', False, {
+        'background': '#ffffff', 'wire': '#000000', 'bus': '#000000',
+        'junction': '#000000', 'component_outline': '#000000', 'component_body': '#c0c0c0',
+        'pin': '#000000', 'pin_name': '#000000', 'pin_number': '#000000',
+        'reference': '#000000', 'value': '#000000', 'fields': '#000000',
+        'label_local': '#000000', 'label_global': '#000000', 'label_hier': '#000000',
+        'sheet': '#000000', 'sheet_background': 'rgba(255,255,255,0)',
+        'sheet_name': '#000000', 'sheet_filename': '#000000', 'sheet_label': '#000000',
+        'no_connect': '#000000', 'note': '#000000', 'worksheet': '#000000',
+    }),
+    ('sol-dark', 'Solarized Dark', True, {
+        'background': '#002b36', 'wire': '#859900', 'bus': '#268bd2',
+        'junction': '#859900', 'component_outline': '#93a1a1', 'component_body': '#073642',
+        'pin': '#93a1a1', 'pin_name': '#cb4b16', 'pin_number': '#b58900',
+        'reference': '#268bd2', 'value': '#6c71c4', 'fields': '#586e75',
+        'label_local': '#2aa198', 'label_global': '#2aa198', 'label_hier': '#2aa198',
+        'sheet': '#93a1a1', 'sheet_background': 'rgba(255,255,255,0)',
+        'sheet_name': '#268bd2', 'sheet_filename': '#6c71c4', 'sheet_label': '#cb4b16',
+        'no_connect': '#6c71c4', 'note': '#93a1a1', 'worksheet': '#dc322f',
+    }),
+    ('wdark', 'wDark', True, {
+        'background': '#282c34', 'wire': '#98c379', 'bus': '#61afef',
+        'junction': '#98c379', 'component_outline': '#e06c75', 'component_body': '#545862',
+        'pin': '#e06c75', 'pin_name': '#98c379', 'pin_number': '#e06c75',
+        'reference': '#56b6c2', 'value': '#56b6c2', 'fields': '#56b6c2',
+        'label_local': '#e5c07b', 'label_global': '#e06c75', 'label_hier': '#c678dd',
+        'sheet': '#c678dd', 'sheet_background': '#000000', 'sheet_name': '#c678dd',
+        'sheet_filename': '#c678dd', 'sheet_label': '#c678dd', 'no_connect': '#61afef',
+        'note': '#61afef', 'worksheet': '#7f848e',
+    }),
+    ('behave', 'Behave Dark', True, {
+        'background': '#232932', 'wire': '#8dd272', 'bus': '#4487aa',
+        'junction': '#8dd272', 'component_outline': '#c4626b', 'component_body': '#513c56',
+        'pin': '#c4626b', 'pin_name': '#669696', 'pin_number': '#c4626b',
+        'reference': '#a683e1', 'value': '#669696', 'fields': '#786596',
+        'label_local': '#4487aa', 'label_global': '#c46c2d', 'label_hier': '#c3ae72',
+        'sheet': '#856fa5', 'sheet_background': 'rgba(0,0,0,0)', 'sheet_name': '#669696',
+        'sheet_filename': '#856fa5', 'sheet_label': '#c47a4f', 'no_connect': '#95dbdf',
+        'note': '#4487aa', 'worksheet': '#4487aa',
+    }),
+    ('monokai', 'Monokai', True, {
+        'background': '#3b3a32', 'wire': '#a6e22e', 'bus': '#66d9ef',
+        'junction': '#a6e22e', 'component_outline': '#f92672', 'component_body': '#49483e',
+        'pin': '#f92672', 'pin_name': '#66d9ef', 'pin_number': '#f92672',
+        'reference': '#66d9ef', 'value': '#66d9ef', 'fields': '#ae81ff',
+        'label_local': '#f8f8f2', 'label_global': '#f92672', 'label_hier': '#ffe792',
+        'sheet': '#ae81ff', 'sheet_background': 'rgba(0,0,0,0)', 'sheet_name': '#66d9ef',
+        'sheet_filename': '#ffe792', 'sheet_label': '#ffe792', 'no_connect': '#66d9ef',
+        'note': '#fd971f', 'worksheet': '#635778',
+    }),
+    ('eagle', 'Eagle Dark', True, {
+        'background': '#212121', 'wire': '#00a000', 'bus': '#0060c0',
+        'junction': '#00a000', 'component_outline': '#c00000', 'component_body': '#2c2c2c',
+        'pin': '#c00000', 'pin_name': '#c0c0c0', 'pin_number': '#c00000',
+        'reference': '#c0c0c0', 'value': '#c0c0c0', 'fields': '#8000a0',
+        'label_local': '#c0c0c0', 'label_global': '#00a0e0', 'label_hier': '#a0a000',
+        'sheet': '#8000a0', 'sheet_background': 'rgba(255,255,255,0)',
+        'sheet_name': '#00a0cc', 'sheet_filename': '#a0a000', 'sheet_label': '#a0a000',
+        'no_connect': '#612be0', 'note': '#c0c000', 'worksheet': '#c00000',
+    }),
+]
+
+
+def sch_object_roles(schdoc) -> dict:
+    """@brief SchDoc nesnelerinden `{unique_id: rol etiketi}` haritası kurar.
+
+    @details Etiket, nesne sınıfından gelir (`_SCH_ROLE_BY_CLASS`). İki özel
+    durum: pin etiketi `pin:<numara>` olur (yazının pin ADI mı NUMARASI mı
+    olduğunu draw-list ayırt edebilsin), parametre etiketi `val` (Comment —
+    KiCad'in "value" alanı) ya da `fld` (diğer alanlar) olur.
+    Haritada olmayan grup id'leri rol taşımaz; çizim orijinal renkte kalır.
+
+    @param schdoc AltiumSchDoc örneği
+    @return dict — unique_id → etiket
+    """
+    roles = {}
+    try:
+        objs = list(schdoc.objects)
+    except Exception:
+        return roles
+    for o in objs:
+        uid = getattr(o, "unique_id", None)
+        if not uid:
+            continue
+        cls = type(o).__name__
+        if cls == "AltiumSchPin":
+            roles[uid] = "pin:" + str(getattr(o, "designator", "") or "").strip()
+        elif cls == "AltiumSchParameter":
+            nm = str(getattr(o, "name", "") or "").strip().lower()
+            roles[uid] = "val" if nm in ("comment", "value") else "fld"
+        else:
+            tag = _SCH_ROLE_BY_CLASS.get(cls)
+            if tag:
+                roles[uid] = tag
+    return roles
+
+
+def _dl_lum(c: str) -> float:
+    """@brief '#rrggbb' rengin bağıl parlaklığı (0..1); okunamazsa 0.5."""
+    c = (c or "").strip()
+    if len(c) == 7 and c[0] == "#":
+        try:
+            r, g, b = (int(c[i:i + 2], 16) / 255 for i in (1, 3, 5))
+            return 0.2126 * r + 0.7152 * g + 0.0722 * b
+        except ValueError:
+            pass
+    return 0.5
+
+
+def _dl_role(stack, part, fill="", stroke="", text=None) -> str:
+    """@brief Grup yığınından bir çizim parçasının tema rolünü çıkarır.
+
+    @param stack Açık `<g>`'lerin rol etiketleri (dıştan içe; None = bilinmiyor)
+    @param part 'f' dolgu · 's' çizgi · 't' yazı
+    @param fill Şeklin dolgu rengi (dolgu sınıflandırması için)
+    @param stroke Şeklin çizgi rengi
+    @param text Yazı içeriği (pin adı/numarası ayrımı için)
+    @return KiCad tema anahtarı ya da yardımcı rol; '' = bilinmiyor
+    """
+    tag = None
+    for t in reversed(stack):
+        if t:
+            tag = t
+            break
+    if tag is None:
+        return ""
+    in_comp = "comp" in stack
+
+    def solid(body_role, line_role):
+        # Dolgu çizgiyle aynı renkse (diyot oku, dolu üçgen) ya da koyuysa bu
+        # bir "dolu çizim"dir → çizgi rengini alır; açık renkli dolgu = gövde.
+        if fill and stroke and fill.lower() == stroke.lower():
+            return line_role
+        return body_role if _dl_lum(fill) > 0.55 else line_role
+
+    if tag.startswith("pin:"):
+        if part == "t":
+            num = tag[4:]
+            return "pin_number" if num and (text or "").strip() == num else "pin_name"
+        return "pin"
+    simple = {"wire": "wire", "bus": "bus", "junc": "junction",
+              "noerc": "no_connect", "nlab": "label_local", "des": "reference",
+              "val": "value", "fld": "fields", "sname": "sheet_name",
+              "sfile": "sheet_filename", "pset": "netclass_flag"}
+    if tag in simple:
+        return simple[tag]
+    if tag in ("port", "harn"):
+        lbl = "label_global" if tag == "port" else "label_hier"
+        return "label_fill" if part == "f" else lbl
+    if tag == "pwr":
+        return "value" if part == "t" else solid("component_body", "component_outline")
+    if tag == "sent":
+        return "sheet_background" if part == "f" else "sheet_label"
+    if tag == "ssym":
+        return "sheet_background" if part == "f" else "sheet"
+    if tag == "sheet":
+        return "background" if part == "f" else "worksheet"
+    if tag == "blanket":
+        return "background" if part == "f" else "netclass_flag"
+    if tag == "img":
+        return ""
+    if tag in ("gfx", "comp"):
+        if in_comp:
+            if part == "t":
+                return "fields"
+            if part == "f":
+                return solid("component_body", "component_outline")
+            return "component_outline"
+        if part == "f":
+            return solid("graphic_fill", "note")
+        return "note"
+    if tag == "note":
+        return "graphic_fill" if part == "f" else "note"
+    return ""
+
+
 def svg_to_drawlist(svg_str: str, img_table: dict, font_faces: dict,
-                    used_fonts: set) -> dict:
+                    used_fonts: set, roles: dict = None) -> dict:
     """@brief Bir sayfa SVG'sini kanvas çizim listesine (draw-list) düzleştirir.
 
     @details Çıktı JSON'a serileştirilip gzip'lenerek HTML'e gömülür; tarayıcı
@@ -892,10 +1165,22 @@ def svg_to_drawlist(svg_str: str, img_table: dict, font_faces: dict,
     @param img_table Proje geneli görsel tablosu {href: index} — yerinde güncellenir
     @param font_faces Proje geneli @font-face tablosu {css: family} — yerinde güncellenir
     @param used_fonts Kullanılan font ailesi adları — yerinde güncellenir
+    @param roles `{unique_id: rol etiketi}` (bkz. sch_object_roles) — verilirse
+                 her stile tema rolü eklenir; None ise rol alanları boş kalır
     @return draw-list sözlüğü
     """
     st, st_ix = [], {}      # şekil stilleri: [fill, fillOpacity, stroke, strokeW, hairline, dash]
     ts, ts_ix = [], {}      # metin stilleri: [family, color, weight, style]
+    # Tema rolleri AYRI tablolarda (roles verildiyse): öğeler bu tabloların
+    # indeksini taşır, tablo da temel stile + rollere işaret eder.
+    #   sx  — [stIndex, fillRole, strokeRole]   tsx — [tsIndex, textRole]
+    # Neden temel stile katılmıyor: aynı renkteki çizgiler roller yüzünden ayrı
+    # Path2D paketlerine bölünürse üst üste binen çizgilerin çizim sırası ve
+    # kenar yumuşatması değişiyor (m2_emmc: 459 piksel). Ayrı tabloyla
+    # "Altium (orijinal)" kipi paketlemeyi temel stile göre yapar → eskisiyle
+    # BAYT BAYT aynı kare.
+    sx, sx_ix = [], {}
+    tsx, tsx_ix = [], {}
     ln = []                 # çizgiler   — düz: [si, x1, y1, x2, y2] ×n
     rc = []                 # dikdörtgen — düz: [si, x, y, w, h, rx] ×n
     el = []                 # elips      — düz: [si, cx, cy, rx, ry] ×n
@@ -908,22 +1193,36 @@ def svg_to_drawlist(svg_str: str, img_table: dict, font_faces: dict,
     clip_ids = {}           # clipPath id → cl indeksi
     mt_ix = {}
 
-    def sid(fill, fop, stroke, sw, hair, dash):
+    def sid(fill, fop, stroke, sw, hair, dash, fr="", sr=""):
         k = (fill or "", fop, stroke or "", sw, 1 if hair else 0, dash or "")
         i = st_ix.get(k)
         if i is None:
             i = st_ix[k] = len(st)
             st.append(list(k))
-        return i
+        if roles is None:
+            return i
+        rk = (i, fr if fill else "", sr if stroke else "")
+        j = sx_ix.get(rk)
+        if j is None:
+            j = sx_ix[rk] = len(sx)
+            sx.append(list(rk))
+        return j
 
-    def tid(fam, color, weight, style):
+    def tid(fam, color, weight, style, role=""):
         k = (fam or "sans-serif", color or "#000000", weight or "", style or "")
         i = ts_ix.get(k)
         if i is None:
             i = ts_ix[k] = len(ts)
             ts.append(list(k))
             used_fonts.add(k[0])
-        return i
+        if roles is None:
+            return i
+        rk = (i, role)
+        j = tsx_ix.get(rk)
+        if j is None:
+            j = tsx_ix[rk] = len(tsx)
+            tsx.append(list(rk))
+        return j
 
     def mid(m):
         if m == _DL_IDENT:
@@ -942,13 +1241,18 @@ def svg_to_drawlist(svg_str: str, img_table: dict, font_faces: dict,
         stroke = a.get("stroke", "")
         if stroke.lower() in ("none", ""):
             stroke = ""
+        fr = sr = ""
+        if roles is not None:
+            fr = _dl_role(rstack, "f", fill, stroke) if fill else ""
+            sr = _dl_role(rstack, "s", fill, stroke) if stroke else ""
         return sid(fill, round(_dl_f(a.get("fill-opacity"), 1.0), 3),
                    stroke, _dl_r(_dl_f(a.get("stroke-width"), 1.0), 3),
                    a.get("vector-effect", "").lower() == "non-scaling-stroke",
-                   a.get("stroke-dasharray", ""))
+                   a.get("stroke-dasharray", ""), fr, sr)
 
     vb = [0.0, 0.0, 1000.0, 1000.0]
     ctm = [_DL_IDENT]       # transform yığını (pratikte hep birim)
+    rstack = [None]         # açık <g>'lerin rol etiketleri (ctm ile paralel)
     skip_depth = 0          # <defs> içi: çizilmez
     clip_cur = None         # açık <clipPath id>
     pos = 0
@@ -964,6 +1268,7 @@ def svg_to_drawlist(svg_str: str, img_table: dict, font_faces: dict,
         if closing:
             if tag_l == "g" and len(ctm) > 1:
                 ctm.pop()
+                rstack.pop()
             elif tag_l == "defs" and skip_depth:
                 skip_depth -= 1
             elif tag_l == "clippath":
@@ -973,6 +1278,13 @@ def svg_to_drawlist(svg_str: str, img_table: dict, font_faces: dict,
         a = dict(_DL_ATTR.findall(attrs_raw)) if attrs_raw else {}
 
         if tag_l == "svg":
+            # Sayfa çerçevesi / zone etiketleri / kâğıt dolgusu belge kimliğiyle
+            # (data-doc-id) adlanan grupta çizilir — bir SchDoc nesnesi değil.
+            if roles is not None:
+                roles = dict(roles)
+                roles["BackgroundGroup"] = "sheet"
+                if a.get("data-doc-id"):
+                    roles[a["data-doc-id"]] = "sheet"
             if "viewBox" in a:
                 v = [float(x) for x in _DL_NUM.findall(a["viewBox"])]
                 if len(v) >= 4:
@@ -997,6 +1309,10 @@ def svg_to_drawlist(svg_str: str, img_table: dict, font_faces: dict,
             if not selfclose:
                 ctm.append(_dl_mul(ctm[-1], _dl_parse_transform(a["transform"]))
                            if "transform" in a else ctm[-1])
+                gid = a.get("id", "").strip()
+                if "__" in gid:                 # namespace_svg_ids öneki
+                    gid = gid.split("__", 1)[1]
+                rstack.append(roles.get(gid) if (roles and gid) else None)
             continue
 
         M = ctm[-1]
@@ -1096,15 +1412,20 @@ def svg_to_drawlist(svg_str: str, img_table: dict, font_faces: dict,
                 cix = clip_ids.get(cp[5:].rstrip(")"), -1)
             tx.append([
                 tid(a.get("font-family"), a.get("fill"),
-                    a.get("font-weight"), a.get("font-style")),
+                    a.get("font-weight"), a.get("font-style"),
+                    _dl_role(rstack, "t", text=content) if roles is not None else ""),
                 _dl_r(_dl_f(a.get("x")), 3), _dl_r(_dl_f(a.get("y")), 3),
                 _dl_r(_dl_f(a.get("font-size"), 10.0), 3),
                 _dl_r(rot, 3), cix, mid(M), content,
             ])
 
-    return {"vb": [_dl_r(v, 3) for v in vb], "st": st, "ts": ts, "ln": ln,
+    out = {"vb": [_dl_r(v, 3) for v in vb], "st": st, "ts": ts, "ln": ln,
             "rc": rc, "el": el, "im": im, "pg": pg, "pt": pt, "tx": tx,
             "cl": cl, "mt": mt}
+    if roles is not None:
+        out["sx"] = sx
+        out["tsx"] = tsx
+    return out
 
 
 def collect_net_names_from_sheet(schdoc) -> set:
@@ -1738,10 +2059,11 @@ def _collect_data(project_path: str, log, with_pcb=False, progress=None,
             except Exception as e:
                 log(tr('  ! Block okuma hatası ({a0}): {a1}').format(a0=sheet_name, a1=e))
 
+            # Şematik renk temaları için grup id → nesne rolü (bkz. sch_object_roles)
             sheets_raw.append({
                 "id": sheet_id, "name": sheet_name,
                 "x": cx, "y": cy, "svg": svg, "sheet_nets": sheet_nets,
-                "blocks": blocks_for_sheet,
+                "blocks": blocks_for_sheet, "roles": sch_object_roles(schdoc),
             })
             log(tr('  OK {a0}  ({a1} net, {a2} block)').format(a0=sheet_name, a1=len(sheet_nets), a2=len(blocks_for_sheet)))
 
@@ -1787,6 +2109,7 @@ def _collect_data(project_path: str, log, with_pcb=False, progress=None,
             "x": raw["x"], "y": raw["y"], "w": THUMB_W, "h": THUMB_H,
             "svg": strip_aspect_ratio(raw["svg"]),
             "blocks": raw["blocks"],
+            "roles": raw.get("roles"),
         })
         log(tr('  + {a0}: {a1} kesin pozisyon').format(a0=raw['name'], a1=total_pos))
 
@@ -4523,6 +4846,13 @@ def build_combined_shell(sch_html, pcb_html, timestamp, project_name, have_pcb,
                               padding:0; background:transparent; display:flex;
                               align-items:center; justify-content:center; }}
   #pane-tools .color-input:hover {{ border-color:#888; }}
+  #pane-tools .tool-sel {{ background:rgba(40,40,40,0.95); color:#ccc;
+             border:1px solid #444; padding:2px 3px; cursor:pointer;
+             font-family:inherit; font-size:11px; border-radius:3px;
+             max-width:140px; }}
+  #pane-tools .tool-sel:hover {{ border-color:#4ec9b0; color:#4ec9b0; }}
+  #pane-tools .tool-sel option, #pane-tools .tool-sel optgroup {{
+             background:#222; color:#ccc; }}
   #pane-tools .color-input input[type="color"] {{ width:200%; height:200%;
                               border:none; padding:0; cursor:pointer;
                               transform:translate(-25%, -25%); }}
@@ -4716,7 +5046,14 @@ function hoistTools(frame, srcId, key) {{
     hoisted[key] = tb;
     // Tıklamadan sonra odak KABUKTA kalırsa iframe'in klavye kısayolları
     // (/, B, Del, M, R, Ctrl+C/V/A/G…) çalışmaz → odağı panele geri ver.
-    tb.addEventListener('click', () => {{
+    // Açılır liste (şematik tema seçici) HARİÇ: tıklamada odak taşınırsa
+    // liste açılır açılmaz kapanır — odak seçim yapılınca (change) iade edilir.
+    tb.addEventListener('click', e => {{
+      if (e.target.closest && e.target.closest('select')) return;
+      try {{ frame.contentWindow.focus(); }} catch (e) {{}}
+    }});
+    tb.addEventListener('change', e => {{
+      if (e.target.tagName !== 'SELECT') return;
       try {{ frame.contentWindow.focus(); }} catch (e) {{}}
     }});
     applyPaneTools();
@@ -4889,6 +5226,8 @@ if (vertQ) {{
 sizeSplit();
 // Klavye: 1=Şematik 2=Böl 3=PCB 4=3D (odak kabuktayken)
 document.addEventListener('keydown', e => {{
+  const ae = document.activeElement;
+  if (ae && ae.tagName === 'SELECT') return;   // şematik tema seçicisi
   if (e.key === '1') setViewMode('sch');
   else if (e.key === '2') setViewMode('both');
   else if (e.key === '3') setViewMode('pcb');
@@ -7593,11 +7932,25 @@ def build_html(sheets, net_list, components, timestamp,
     # metrik-uyumlu bir yedek fontu (Arimo) hiç referans edilmese de gömüyor.
     import gzip as _gzip, base64 as _b64
     dl_imgs, dl_faces, dl_used = {}, {}, set()
-    dl_map = {str(s["id"]): svg_to_drawlist(s["svg"], dl_imgs, dl_faces, dl_used)
+    dl_map = {str(s["id"]): svg_to_drawlist(s["svg"], dl_imgs, dl_faces, dl_used,
+                                            s.get("roles") or {})
               for s in sheets}
     draw_gz = _b64.b64encode(_gzip.compress(json.dumps(
         {"s": dl_map, "im": list(dl_imgs.keys())},
         separators=(",", ":")).encode("utf-8"), 6)).decode()
+    # Şematik renk temaları (bkz. _SCH_THEMES): JS tablosu + seçim listesi
+    sch_themes_json = json.dumps([list(t) for t in _SCH_THEMES],
+                                 separators=(",", ":"))
+    _th_opt = lambda t: (f'<option value="{t[0]}">'
+                         + ("⟪KiCad (varsayılan)⟫" if t[0] == "kicad" else t[1])
+                         + '</option>')
+    theme_opts = (
+        '<option value="altium">⟪Altium (orijinal)⟫</option>'
+        '<optgroup label="⟪Açık⟫">'
+        + "".join(_th_opt(t) for t in _SCH_THEMES if not t[2])
+        + '</optgroup><optgroup label="⟪Koyu⟫">'
+        + "".join(_th_opt(t) for t in _SCH_THEMES if t[2])
+        + '</optgroup>')
     _used_low = {f.lower() for f in dl_used}
     font_css = "\n".join(css for css, fam in dl_faces.items()
                          if fam and any(fam.lower() in u for u in _used_low))
@@ -7797,6 +8150,10 @@ def build_html(sheets, net_list, components, timestamp,
   .sheet-card.hit-3 {{ box-shadow: 0 0 0 3px #ffeb3b, 0 0 40px rgba(255,235,59,0.5); }}
   #arc-layer {{ position:absolute; top:0; left:0; pointer-events:none;
                 overflow:visible; z-index:100; }}
+  /* Nete yakınlaşınca etiket yerinde beliren, sönen halka (focusNet) */
+  #arc-layer .net-ping {{ fill:none; animation:netping 2.2s ease-out forwards; }}
+  @keyframes netping {{ 0%{{opacity:0}} 12%{{opacity:1}} 30%{{opacity:0.35}}
+                        48%{{opacity:1}} 75%{{opacity:1}} 100%{{opacity:0}} }}
   /* === Not / kutu (annotation) katmanı — JS'te kurulur, kanvasla transform olur === */
   #anno-layer {{ position:absolute; top:0; left:0; overflow:visible; z-index:120; }}
   #anno-layer .anno {{ pointer-events:auto; cursor:move; }}
@@ -7977,6 +8334,12 @@ def build_html(sheets, net_list, components, timestamp,
   .color-input input[type="color"] {{ width:200%; height:200%; border:none; padding:0;
                                        cursor:pointer; transform:translate(-25%, -25%); }}
   .toolbar-sep {{ width:1px; background:#444; margin:2px 4px; align-self:stretch; }}
+  /* Şematik renk teması seçici */
+  .tool-sel {{ background:rgba(40,40,40,0.95); color:#ccc; border:1px solid #444;
+               padding:4px 4px; cursor:pointer; font-family:inherit; font-size:11px;
+               border-radius:3px; max-width:150px; }}
+  .tool-sel:hover {{ border-color:{inter_color}; color:{inter_color}; }}
+  .tool-sel option, .tool-sel optgroup {{ background:#222; color:#ccc; }}
   /* Kısayol modal */
   #shortcut-modal {{ position:fixed; inset:0; background:rgba(0,0,0,0.75); z-index:1000;
                      display:none; align-items:center; justify-content:center;
@@ -8196,6 +8559,8 @@ def build_html(sheets, net_list, components, timestamp,
     <label class="color-input tb-more" title="⟪Sayfa içi eğri rengi⟫">
       <input type="color" id="intra-color-picker" value="{intra_color}">
     </label>
+    <select class="tool-sel tb-more" id="theme-sel"
+            title="⟪Şematik renk teması (KiCad tarzı) — tercih bu tarayıcıda hatırlanır⟫">{theme_opts}</select>
     <div class="toolbar-sep tb-more"></div>
     <button class="tool-btn tb-more" id="anno-note"
             title="⟪Not ekle: butona bas, şemada istediğin yere tıkla ve DOĞRUDAN yaz (dışına tıkla = bitir, Enter = yeni satır). Sonradan: çift tık düzenle · sürükle taşı · KÖŞE TUTAMACIYLA ya da A−/A+ ile yazı boyutu · seç + Del sil · Ctrl+C / Ctrl+V kopyala-yapıştır⟫">⟪Not⟫</button>
@@ -8370,6 +8735,52 @@ const schCtx = schCv.getContext('2d');
 let DL = null;                   // {{sheetId: draw-list}}
 let DLIMG = [];                  // gömülü görseller (Image nesneleri)
 
+// === Şematik renk temaları (KiCad tarzı, v2.36.0) =========================
+// Draw-list stilleri ham Altium rengini + bir ROL taşır (wire, pin_name,
+// component_body …; bkz. svg_to_drawlist / _dl_role). Tema seçiliyse çizimde
+// rol → tema rengi kullanılır; "Altium (orijinal)" (schTheme = null) seçiliyken
+// roller yok sayılır ve çizim eskisiyle birebir aynıdır.
+const SCH_THEMES = {sch_themes_json};    // [[id, ad, koyu, {{anahtar: renk}}], …]
+// Temada karşılığı olmayan yardımcı roller → KiCad anahtarı
+const TH_ALIAS = {{ graphic_fill: 'component_body', label_fill: 'background',
+                    netclass_flag: 'note', junction: 'wire' }};
+let schTheme = null;
+let thCache = new Map();
+function thLum(c) {{             // '#rrggbb' / 'rgb(a)(…)' → bağıl parlaklık
+  let r, g, b, m;
+  c = String(c || '').trim();
+  if (/^#[0-9a-f]{{6}}$/i.test(c)) {{
+    r = parseInt(c.substr(1, 2), 16); g = parseInt(c.substr(3, 2), 16); b = parseInt(c.substr(5, 2), 16);
+  }} else if ((m = c.match(/rgba?[(]([^)]*)[)]/i))) {{
+    const p = m[1].split(',').map(Number); r = p[0]; g = p[1]; b = p[2];
+  }} else return 0.5;
+  return (0.2126 * r + 0.7152 * g + 0.0722 * b) / 255;
+}}
+function thColor(role, orig) {{
+  if (!schTheme || !orig) return orig;
+  const key = role + '|' + orig;
+  let v = thCache.get(key);
+  if (v !== undefined) return v;
+  const C = schTheme[3];
+  v = role ? (C[role] || C[TH_ALIAS[role]]) : null;
+  if (!v) {{
+    // Rolü bilinmeyen öğe (kütüphanenin yeni bir nesne türü vb.): orijinal
+    // renk temanın zemininde okunuyorsa korunur, okunmuyorsa not rengine düşer
+    // — koyu temada siyah çizgi kaybolmasın.
+    v = Math.abs(thLum(orig) - thLum(C.background)) >= 0.3 ? orig : C.note;
+  }}
+  thCache.set(key, v);
+  return v;
+}}
+function setSchTheme(id, silent) {{
+  schTheme = SCH_THEMES.find(t => t[0] === id) || null;
+  thCache = new Map();
+  const sel = document.getElementById('theme-sel');
+  if (sel) sel.value = schTheme ? schTheme[0] : 'altium';
+  if (!silent) lsSet({{ theme: schTheme ? schTheme[0] : 'altium' }});
+  schDraw();
+}}
+
 function dlFont(ts, fs) {{       // metin stili + boyut → CSS font dizgesi
   const fam = String(ts[0] || 'sans-serif').replace(/["\\\\]/g, '');
   return ((ts[3] || '') + ' ' + (ts[2] || '') + ' ' + fs + 'px "' + fam
@@ -8388,10 +8799,18 @@ function dlRRect(p, x, y, w, h, r) {{
 }}
 // Sayfanın Path2D paketlerini BİR KEZ kur (sonraki kareler bedava).
 function dlPrep(d) {{
-  if (d._p) return d._p;
+  // İki kip ayrı önbellekte: "Altium (orijinal)" paketlemeyi TEMEL stile göre
+  // yapar (eskisiyle bayt bayt aynı kare), tema kipi rol'lü stile göre.
+  const th = !!(schTheme && d.sx);
+  const ck = th ? '_pt' : '_pa';
+  if (d[ck]) return d[ck];
+  const SX = d.sx, TSX = d.tsx;
+  const sBase = i => SX ? SX[i][0] : i;           // öğe stil indeksi → temel stil
+  const tBase = i => TSX ? TSX[i][0] : i;
+  const bagKey = th ? (i => i) : sBase;
   const P = {{ fills: [], strokes: [], paths: [], texts: [] }};
   const bag = new Map();
-  const path = si => {{ let p = bag.get(si); if (!p) {{ p = new Path2D(); bag.set(si, p); }} return p; }};
+  const path = si => {{ const k = bagKey(si); let p = bag.get(k); if (!p) {{ p = new Path2D(); bag.set(k, p); }} return p; }};
   const L = d.ln;
   for (let i = 0; i < L.length; i += 5) {{
     const p = path(L[i]); p.moveTo(L[i + 1], L[i + 2]); p.lineTo(L[i + 3], L[i + 4]);
@@ -8416,26 +8835,29 @@ function dlPrep(d) {{
     for (let i = 3; i < g.length; i += 2) p.lineTo(g[i], g[i + 1]);
     if (!open) p.closePath();
   }});
-  bag.forEach((p, si) => {{
-    const s = d.st[si];
-    if (s[0]) P.fills.push({{ p: p, c: s[0], o: s[1] }});
-    if (s[2]) P.strokes.push({{ p: p, c: s[2], w: s[3], hair: s[4], dash: s[5] }});
+  bag.forEach((p, k) => {{
+    const s = d.st[th ? sBase(k) : k], rr = th ? SX[k] : null;
+    if (s[0]) P.fills.push({{ p: p, c: s[0], o: s[1], r: rr ? rr[1] : '' }});
+    if (s[2]) P.strokes.push({{ p: p, c: s[2], w: s[3], hair: s[4], dash: s[5], r: rr ? rr[2] : '' }});
   }});
   d.pt.forEach(a => {{           // <path> (bu üreticide yalnız yaylar)
-    try {{ P.paths.push({{ p: new Path2D(a[1]), s: d.st[a[0]],
+    const rr = th ? SX[a[0]] : null;
+    try {{ P.paths.push({{ p: new Path2D(a[1]), s: d.st[sBase(a[0])],
+                          fr: rr ? rr[1] : '', sr: rr ? rr[2] : '',
                           m: a.length > 2 ? d.mt[a[2]] : null }}); }} catch (e) {{}}
   }});
   // Yazıları (stil, boyut) ikilisine göre grupla — ctx.font değişimi pahalı
   const tg = new Map();
   d.tx.forEach(t => {{
-    const k = t[0] + '|' + t[3];
+    const k = (th ? t[0] : tBase(t[0])) + '|' + t[3];
     let g = tg.get(k); if (!g) {{ g = []; tg.set(k, g); }} g.push(t);
   }});
   tg.forEach(items => {{
-    const s = d.ts[items[0][0]], fs = items[0][3];
-    P.texts.push({{ font: dlFont(s, fs), c: s[1], fs: fs, items: items }});
+    const s = d.ts[tBase(items[0][0])], fs = items[0][3];
+    P.texts.push({{ font: dlFont(s, fs), c: s[1], r: th ? TSX[items[0][0]][1] : '',
+                    fs: fs, items: items }});
   }});
-  d._p = P;
+  d[ck] = P;
   return P;
 }}
 // Bir sayfayı kanvasa çiz (bx,by,bw,bh = sayfa GÖVDESİNİN ekran dikdörtgeni)
@@ -8449,7 +8871,7 @@ function dlDrawSheet(g, d, bx, by, bw, bh, hlText, hovItem, hovColor) {{
   g.lineCap = 'round'; g.lineJoin = 'round';
   for (let i = 0; i < P.fills.length; i++) {{
     const f = P.fills[i];
-    g.fillStyle = f.c; g.globalAlpha = f.o; g.fill(f.p);
+    g.fillStyle = thColor(f.r, f.c); g.globalAlpha = f.o; g.fill(f.p);
   }}
   g.globalAlpha = 1;
   for (let i = 0; i < P.strokes.length; i++) {{
@@ -8462,7 +8884,7 @@ function dlDrawSheet(g, d, bx, by, bw, bh, hlText, hovItem, hovColor) {{
     // boşluğu kapatamaz ve düz olması gereken oda çerçevesi KESİKLİ görünür.
     let lw = s.hair ? Math.max(s.w, 0.5) * scale / k : s.w;
     if (lw * k < HAIR_MIN_PX) lw = HAIR_MIN_PX / k;
-    g.strokeStyle = s.c; g.lineWidth = lw;
+    g.strokeStyle = thColor(s.r, s.c); g.lineWidth = lw;
     if (s.dash) g.setLineDash(String(s.dash).split(/[\\s,]+/).map(Number).filter(v => v > 0));
     g.stroke(s.p);
     if (s.dash) g.setLineDash([]);
@@ -8470,18 +8892,18 @@ function dlDrawSheet(g, d, bx, by, bw, bh, hlText, hovItem, hovColor) {{
   for (let i = 0; i < P.paths.length; i++) {{
     const a = P.paths[i], s = a.s;
     if (a.m) {{ g.save(); g.transform(a.m[0], a.m[1], a.m[2], a.m[3], a.m[4], a.m[5]); }}
-    if (s[0]) {{ g.fillStyle = s[0]; g.globalAlpha = s[1]; g.fill(a.p); g.globalAlpha = 1; }}
+    if (s[0]) {{ g.fillStyle = thColor(a.fr, s[0]); g.globalAlpha = s[1]; g.fill(a.p); g.globalAlpha = 1; }}
     if (s[2]) {{
       let lw = s[4] ? Math.max(s[3], 0.5) * scale / k : s[3];
       if (lw * k < HAIR_MIN_PX) lw = HAIR_MIN_PX / k;
-      g.strokeStyle = s[2]; g.lineWidth = lw; g.stroke(a.p);
+      g.strokeStyle = thColor(a.sr, s[2]); g.lineWidth = lw; g.stroke(a.p);
     }}
     if (a.m) g.restore();
   }}
   for (let i = 0; i < P.texts.length; i++) {{
     const t = P.texts[i];
     if (t.fs * ky < TEXT_MIN_PX) continue;   // okunmuyor → hiç çizme
-    g.font = t.font; g.fillStyle = t.c;
+    g.font = t.font; g.fillStyle = thColor(t.r, t.c);
     for (let j = 0; j < t.items.length; j++) {{
       const it = t.items[j], cl = it[5] >= 0 ? d.cl[it[5]] : null;
       // Vurgulanan komponentin designator'ı KANVASA çizilir (metin katmanının
@@ -8500,7 +8922,8 @@ function dlDrawSheet(g, d, bx, by, bw, bh, hlText, hovItem, hovColor) {{
         // ve atama sessizce yok sayılırdı.
         if (!/(^|\\s)(bold|[6-9]00)(\\s|$)/i.test(t.font)) g.font = 'bold ' + t.font;
         g.lineWidth = t.fs * 0.3; g.lineJoin = 'round';
-        g.strokeStyle = isHl ? 'rgba(0,229,255,0.5)' : 'rgba(255,255,255,0.85)';
+        g.strokeStyle = isHl ? 'rgba(0,229,255,0.5)'
+          : ((schTheme && schTheme[2]) ? 'rgba(0,0,0,0.75)' : 'rgba(255,255,255,0.85)');
         g.fillStyle = isHl ? '#00e5ff' : hovColor;
       }}
       if (cl) {{ g.beginPath(); g.rect(cl[0], cl[1], cl[2], cl[3]); g.clip(); }}
@@ -8540,7 +8963,7 @@ function schDraw() {{
     const th = TITLE_H * scale;
     const by = sy + th, bh = sh - th;
     if (bh <= 0.5 || sw <= 0.5) continue;
-    g.fillStyle = '#ffffff'; g.fillRect(sx, by, sw, bh);
+    g.fillStyle = schTheme ? schTheme[3].background : '#ffffff'; g.fillRect(sx, by, sw, bh);
     const d = DL[id];
     if (d) dlDrawSheet(g, d, sx, by, sw, bh,
                        (schHlDesig && id === schHlSheet) ? schHlDesig : null,
@@ -8660,7 +9083,7 @@ function tlBuild(id) {{
   const frag = document.createDocumentFragment();
   let n = 0;
   for (let i = 0; i < d.tx.length; i++) {{
-    const t = d.tx[i], st = d.ts[t[0]], fs = t[3];
+    const t = d.tx[i], st = d.ts[d.tsx ? d.tsx[t[0]][0] : t[0]], fs = t[3];
     // Kanvasın çizim eşiğiyle AYNI (dlDrawSheet): ekranda görünen her yazının
     // span'ı da olur → "görüyorsam seçebilirim". Eşik o ANKİ zoom'a bağlı;
     // yakınlaşınca katman tlUpdate'te yeniden kurulur.
@@ -9086,6 +9509,68 @@ function focusCanvasBox(x, y, w, h) {{
   smoothT();
 }}
 
+// Nete yakınlaş + ortala (Nets listesi / aramada Enter / net detay satırı).
+// Konum kaynağı netin ETİKET konumları (net_list occurrences: rx/ry sayfa
+// gövdesine göre oran). Python, SVG'de yazısı bulunamayan net için sayfa
+// MERKEZİNİ (0.5, 0.5) yedek olarak koyar — o bir konum değil, yok sayılır.
+// Sayfa seçimi: verilmişse o; yoksa şu an bakılan sayfa nette varsa o (kullanıcı
+// bulunduğu yerden kopmasın), değilse en çok etiketi olan sayfa.
+function focusNet(net, sheetId) {{
+  const by = {{}};
+  net.occurrences.forEach(o => {{
+    const arr = by[o.sheet_id] || (by[o.sheet_id] = []);
+    if (!(o.rx === 0.5 && o.ry === 0.5)) arr.push(o);
+  }});
+  let sid = sheetId;
+  if (!sid || !by[sid]) {{
+    const cur = curSheetId || lastFitSheetId;
+    sid = (cur && by[cur] && by[cur].length) ? cur : null;
+    if (!sid) {{
+      Object.keys(by).forEach(k => {{
+        if (!sid || by[k].length > by[sid].length) sid = k;
+      }});
+    }}
+  }}
+  const sp = sheetPos[sid];
+  if (!sp) return;
+  lastFitSheetId = sid;
+  const pts = (by[sid] || []).map(o => ({{
+    x: sp.x + o.rx * sp.w, y: sp.y + TITLE_H + o.ry * (sp.h - TITLE_H) }}));
+  if (!pts.length) {{ fitToSheet(sid); return; }}   // konum yok: sayfayı göster
+  const a = fitArea();
+  if (!a.ok) return;
+  let x1 = 1e12, y1 = 1e12, x2 = -1e12, y2 = -1e12;
+  pts.forEach(p => {{
+    x1 = Math.min(x1, p.x); y1 = Math.min(y1, p.y);
+    x2 = Math.max(x2, p.x); y2 = Math.max(y2, p.y);
+  }});
+  const sheetH = (typeof popupSheetH === 'function') ? popupSheetH() : 0;
+  const ah = Math.max(40, a.h - sheetH);
+  // Sayfayı sığdıran ölçeğe göre sınırlar: en fazla 5 kat yakın (tek etiket
+  // ekranın ortasında okunur), en az sayfanın tamamı (geniş yayılan net).
+  const fitS = Math.min(a.w * 0.94 / sp.w, a.h * 0.94 / sp.h);
+  const w = Math.max(x2 - x1, 1), h = Math.max(y2 - y1, 1);
+  scale = Math.max(fitS, Math.min(fitS * 5, a.w * 0.7 / w, ah * 0.7 / h));
+  tx = a.x + a.w / 2 - (x1 + x2) / 2 * scale;
+  ty = a.y + ah / 2 - (y1 + y2) / 2 * scale;
+  const ts = scale;   // smoothT ilk adımı senkron çalışıp scale'i ara değere çeker
+  smoothT();
+  noteSheetVisit(sid);
+  // Etiketlerin yerinde kısa parıltı halkası (tek etiketli netlerde yay
+  // çizilmediği için netin nerede olduğu başka türlü görünmüyordu).
+  const color = NET_COLORS[Math.max(0, selectedNets.findIndex(n => n.name === net.name))];
+  arcLayer.querySelectorAll('.net-ping').forEach(e => e.remove());   // öncekiler
+  pts.forEach(p => {{
+    const c = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+    c.setAttribute('cx', p.x); c.setAttribute('cy', p.y);
+    c.setAttribute('r', 16 / ts);
+    c.setAttribute('stroke-width', 2.5 / ts);
+    c.setAttribute('stroke', color);
+    c.setAttribute('class', 'net-ping');
+    arcLayer.appendChild(c);
+  }});
+}}
+
 document.querySelectorAll('.tab').forEach(b => {{
   b.onclick = () => {{
     document.querySelectorAll('.tab').forEach(x => x.classList.remove('active'));
@@ -9119,7 +9604,12 @@ function renderNets(filter='') {{
     div.className = 'net-item ' + classifyNet(net.name);
     div.innerHTML = `${{escHtml(net.name)}} <span class="badge">${{net.count}}</span>`;
     div.dataset.netName = net.name;
-    div.onclick = (e) => selectNet(net, div, e.shiftKey);
+    // Listeden seçim nete yakınlaşır; Shift+tık (karşılaştırmaya ekle)
+    // görünümü kaydırmaz — kullanıcı birden çok neti yan yana kuruyor.
+    div.onclick = (e) => {{
+      selectNet(net, div, e.shiftKey);
+      if (!e.shiftKey) focusNet(net);
+    }};
     list.appendChild(div);
   }});
   if (!matched.length) {{
@@ -9663,7 +10153,10 @@ function lsSet(patch) {{ try {{
     document.getElementById('inter-color-picker').value = st.inter; }}
   if (st.intra) {{ INTRA_COLOR = st.intra;
     document.getElementById('intra-color-picker').value = st.intra; }}
+  if (st.theme) setSchTheme(st.theme, true);
 }})();
+document.getElementById('theme-sel').addEventListener('change',
+  e => setSchTheme(e.target.value));
 
 // === Şematik hiyerarşi paneli + KiCad tarzı sayfa gezinme =================
 // Ağaç Python'da sheet symbol referanslarından kuruldu (build_sheet_hierarchy).
@@ -10055,7 +10548,7 @@ function updateDetailPanel() {{
       bySheet[o.sheet_id] = bySheet[o.sheet_id] || {{ name: o.sheet_name, count: 0 }};
       bySheet[o.sheet_id].count++;
     }});
-    html += `<div class="net-detail">`;
+    html += `<div class="net-detail" data-net-idx="${{idx}}">`;
     html += `<span class="net-name" style="color:${{color}}">${{escHtml(net.name)}}</span> · ${{net.count}} pin · `;
     Object.entries(bySheet).forEach(([sid, info]) => {{
       html += `<span class="sheet-row" data-sheet-id="${{sid}}">${{escHtml(info.name)}} <span style="color:${{color}}">×${{info.count}}</span></span>`;
@@ -10063,8 +10556,13 @@ function updateDetailPanel() {{
     html += `</div>`;
   }});
   detailContent.innerHTML = html;
+  // Sayfa satırı: o sayfadaki net etiketlerine yakınlaş (eskiden tüm sayfayı
+  // sığdırıyordu — net küçük sayfada kayboluyordu).
   detailContent.querySelectorAll('.sheet-row').forEach(el => {{
-    el.addEventListener('click', () => fitToSheet(el.dataset.sheetId));
+    el.addEventListener('click', () => {{
+      const net = selectedNets[+el.closest('.net-detail').dataset.netIdx];
+      if (net) focusNet(net, el.dataset.sheetId); else fitToSheet(el.dataset.sheetId);
+    }});
   }});
 }}
 
@@ -10154,6 +10652,9 @@ document.addEventListener('keydown', e => {{
     if (e.key === 'Escape') setSearchOpen(false);
     return;
   }}
+  // Odak açılır listedeyse (tema seçici) harfler listede seçenek arar —
+  // B / H / F gibi kısayollar ayrıca tetiklenmesin.
+  if (document.activeElement && document.activeElement.tagName === 'SELECT') return;
   // Modal açıkken Esc kapatsın
   if (shortcutModal.classList.contains('open') && e.key === 'Escape') {{
     toggleShortcutModal();

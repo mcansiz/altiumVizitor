@@ -96,6 +96,39 @@ class _ProjectBase:
             self.assertIn(marker, text)
         assert_js_valid(self, text, f"{self.PROJECT}_sch")
 
+    EXPECT_ROLES = {"wire", "pin", "pin_number", "reference", "worksheet",
+                    "component_outline"}
+
+    def test_schematic_theme_roles(self):
+        """Renk temaları: draw-list stillerinde KiCad rolleri var, bilinmeyen az."""
+        import base64, gzip, re
+        text = self.html("sch")
+        m = re.search(r'const DRAW_GZ = "([^"]+)"', text)
+        self.assertIsNotNone(m, "DRAW_GZ bulunamadı")
+        dl = json.loads(gzip.decompress(base64.b64decode(m.group(1))))["s"]
+        roles, n_all, n_unknown = set(), 0, 0
+        for sid, d in dl.items():
+            self.assertIn("sx", d, f"{sid}: rol tablosu yok")
+            self.assertIn("tsx", d, f"{sid}: yazı rol tablosu yok")
+            for _base, fr, sr in d["sx"]:
+                roles.update(r for r in (fr, sr) if r)
+            roles.update(r for _base, r in d["tsx"] if r)
+            # yazıların rol kapsaması (sayfa çerçevesi dahil hepsi bilinmeli)
+            for t in d["tx"]:
+                n_all += 1
+                n_unknown += not d["tsx"][t[0]][1]
+        missing = self.EXPECT_ROLES - roles
+        self.assertFalse(missing, f"eksik roller: {missing}")
+        self.assertLess(n_unknown, max(1, n_all * 0.05),
+                        f"rolsüz yazı çok: {n_unknown}/{n_all}")
+        # Tema tablosu: her temada tüm anahtarlar dolu; seçicide hepsi var
+        keys = set(self.viewer._SCH_THEMES[0][3])
+        for tid, _name, _dark, colors in self.viewer._SCH_THEMES:
+            self.assertEqual(set(colors), keys, tid)
+            self.assertTrue(all(colors.values()), tid)
+            self.assertIn(f'<option value="{tid}">', text)
+        self.assertIn('<option value="altium">', text)
+
     def test_schematic_viewer_english(self):
         """İngilizce üretim: dil etiketi `en`, işaret kalıntısı yok, JS geçerli."""
         import i18n
@@ -184,6 +217,8 @@ class TestSimpleHierarchical(_ProjectBase, unittest.TestCase):
     PROJECT = "simple_hierchical"
     HAS_PCB = False
     MIN_SHEETS = 2
+    EXPECT_ROLES = _ProjectBase.EXPECT_ROLES | {"sheet", "sheet_label",
+                                                "sheet_name", "sheet_filename"}
 
     def test_hierarchy_tree(self):
         """Hiyerarşi ağacında bir kök ve en az bir alt düğüm var."""

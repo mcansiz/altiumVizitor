@@ -716,6 +716,13 @@ _EN_HTML = {
     "Sığdır · panel · temizle · yardım": "Fit · panel · clear · help",
     "Sayfalar arası yay rengi": "Inter-sheet arc color",
     "Sayfa içi eğri rengi": "Within-sheet curve color",
+    # Şematik renk temaları (v2.36.0)
+    "Şematik renk teması (KiCad tarzı) — tercih bu tarayıcıda hatırlanır":
+        "Schematic color theme (KiCad style) — remembered in this browser",
+    "Altium (orijinal)": "Altium (original)",
+    "KiCad (varsayılan)": "KiCad (default)",
+    "Açık": "Light",
+    "Koyu": "Dark",
     "Yay renklerini anlık değiştir": "Change the arc colors instantly",
     "Toolbar'daki renkli kareler": "The colored squares in the toolbar",
     "tıkla: bağlantı yayları · Shift+tık: karşılaştır":

@@ -5,7 +5,7 @@ Wavenumber'ın ticari "viz sch 1.0" ürününün açık-kaynak alternatifi.
 [altium_monkey](https://github.com/wavenumber-eng/altium_monkey) kütüphanesi
 (Eli Hughes / Wavenumber) üzerine kurulu.
 
-**Mevcut sürüm**: `APP_VERSION` sabiti **`viewer.py`'de** tutulur (şu an 2.35.2);
+**Mevcut sürüm**: `APP_VERSION` sabiti **`viewer.py`'de** tutulur (şu an 2.36.0);
 `gui.py` oradan import eder (v2.9.29'da taşındı — HTML çıktıları da sürümü
 gösterebilsin diye, tek kaynak). Yeni özellik/düzeltme ekleyince bu sabiti
 güncelle (semver: major.minor.patch). Sürüm pencere başlığında, alt durum
@@ -540,6 +540,50 @@ birleşik kabuk) enjekte edilir — f-string'lerde `{_GESTURE_JS}`, 3D'nin raw
 - Yardım penceresinde `h3.touch-h` bölümü dokunmatikte en üste alınır; PCB ve
   3D alt bilgi şeridi dokunmatikte parmak terimleriyle yazılır.
 
+### Şematik renk temaları (KiCad tarzı) — v2.36.0
+
+Şematik toolbar'ında **tema seçici** (`#theme-sel`, `tb-more`): "Altium
+(orijinal)" + 6 açık (KiCad varsayılan, wLight, Solarized Light, Nord, Blue
+Tone, Black/White) + 5 koyu (Solarized Dark, wDark, Behave Dark, Monokai,
+Eagle Dark). Seçim `schviz-ui.theme`'de (tarayıcıya bağlı, üretimde gömülü
+varsayılan YOK). Birleşik görünümde seçici üst çubuğa taşınır, iframe'e etki
+eder. Renkler `_SCH_THEMES`'te: "KiCad" = KiCad 10'un kendi "KiCad Default"
+teması, diğerleri github.com/pointhi/kicad-color-schemes (**CC0**) şematik
+bölümlerinden birebir; eksik `worksheet` ← `note`, `sheet_background` ← saydam.
+
+- **Rol kaynağı**: SVG `<g id>` = Altium UniqueId = SchDoc nesnesinin
+  `unique_id`'si (m2_emmc 621/623 eşleşme). `sch_object_roles(schdoc)` nesne
+  SINIFINDAN etiket çıkarır (`_SCH_ROLE_BY_CLASS`; pin `pin:<numara>`,
+  parametre Comment ise `val` değilse `fld`); `svg_to_drawlist` grup yığınını
+  izleyip `_dl_role()` ile her dolgu/çizgi/yazıya KiCad anahtarı verir
+  (wire, pin, pin_name / pin_number — yazı pin numarasına eşitse numara,
+  component_outline / component_body, reference, value, label_local /
+  label_global, sheet*, no_connect, note, worksheet…). Sayfa çerçevesi bir
+  nesne değil: grup id'si `<svg data-doc-id>` + `BackgroundGroup` → `sheet`.
+  Bileşen içi dolgu: çizgiyle aynı renk ya da koyu → çizgi rengi (diyot oku),
+  açık → gövde. IR gerekmez; `to_svg()` yolunda da çalışır.
+- **Roller AYRI tabloda** (`sx` = [stIndex, fillRole, strokeRole], `tsx` =
+  [tsIndex, role]); öğeler bu tabloların indeksini taşır, `st`/`ts` eski biçim
+  ve sırada kalır. **Neden**: roller temel stile katıldığında aynı renkli
+  çizgiler ayrı Path2D paketlerine bölünüp çizim sırası değişti → m2_emmc'de
+  459 piksel fark. `dlPrep` iki kipi ayrı önbellekler (`_pa` temel stile göre
+  paketler, `_pt` rol'lü stile göre) → **Altium kipinde kare eskisiyle piksel
+  piksel AYNI** (ölçüldü: Smart_MCU + m2_emmc, toolbar şeridi dışında fark 0).
+  `tlBuild` font için `tsx[t[0]][0]` üzerinden temel stile iner.
+- **Bilinmeyen rol** (kütüphanenin yeni nesne türü vb.): orijinal renk tema
+  zemininde okunuyorsa korunur (parlaklık farkı ≥ 0.3), değilse `note`.
+  Gömülü GÖRSELLER (logo, datasheet resmi) renklendirilmez.
+- **İki odak tuzağı**: (1) kabuk toolbar tıklamasında odağı iframe'e veriyordu
+  → açılır liste açılır açılmaz kapanırdı; `select` hariç tutuldu, odak
+  `change`'de iade edilir. (2) Odak listedeyken harf yazmak hem seçenek arar
+  hem B/H/F kısayollarını tetiklerdi → şematik ve kabuk keydown'ı `SELECT`
+  odağında çıkar.
+- Doğrulama (headless Edge + CDP): 11 tema × 3 proje ekran görüntüsü, tercih
+  kalıcılığı + yeniden yükleme, koyu temada net tıklama, birleşik görünümde
+  kabuktan seçim → iframe, `2` tuşu select odaktayken mod değiştirmiyor, 0 JS
+  hatası; `test_schematic_theme_roles` (çekirdek roller var, rolsüz yazı <%5).
+  Boyut: +~10 KB (tema tablosu + roller).
+
 ### Gezgin / Özellikler bölümleri — v2.35.0 (şematik + PCB)
 
 **Kural: SEÇİM yalnız İÇERİĞİ günceller; panellerin açık/kapalı durumunu
@@ -751,6 +795,19 @@ Bir değişiklik yaptıktan sonra:
 - Sol panel sekmeleri (v2.27.1'de sıra değişti — kullanıcı isteği):
   **Hiyerarşi** (VARSAYILAN, aşağıdaki bölüm) · **Comps** ·
   **Nets** (power=orange, ground=green, signal=gray)
+- **Nets listesinden seçim nete yakınlaşır** (v2.36.0, `focusNet`): netin
+  etiket konumlarının (`occurrences` rx/ry) kutusu yumuşak geçişle ortalanır;
+  ölçek sayfa-sığdırma ölçeği ile onun 5 katı arasında. Sayfa: o an bakılan
+  sayfa nette varsa o, yoksa en çok etiketi olan; Python'un yedek konumu
+  (0.5, 0.5 = yazı bulunamadı) konum sayılmaz, yalnız o varsa sayfa sığdırılır.
+  Etiketlerde 2.2 s'lik sönen halka (`.net-ping`; tek etiketli netlerde yay
+  çizilmediği için gerekli). Aramada Enter aynı yoldan geçer; alttaki net
+  detay şeridinde sayfa satırı o sayfadaki nete yakınlaşır (eskiden tüm
+  sayfayı sığdırıyordu). **Shift+tık (karşılaştırmaya ekle) ve şemada net
+  adına tıklama görünümü KAYDIRMAZ.** Halka boyutu için hedef ölçek
+  `smoothT()`'den ÖNCE saklanır (ilk adım senkron çalışıp `scale`'i ara
+  değere çeker). Ölçüldü (Smart_MCU): etiket kutusu merkezi görünür alanın
+  merkezine 0 px sapmayla oturuyor, tüm etiketler ekranda, 0 JS hatası.
 - **Net tipi filtre çipleri** (v2.9.25+): Nets sekmesinde Tümü/Güç/GND/Sinyal;
   aramayla birlikte çalışır, diğer sekmelerde gizlenir (açılışta da gizli).
 - **Arama kutusu HER ZAMAN görünür** (v2.27.1; v2.9.22-v2.27.0 arası "▸ Ara"

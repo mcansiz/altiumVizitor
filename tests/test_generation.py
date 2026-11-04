@@ -128,6 +128,17 @@ class _ProjectBase:
             self.assertTrue(all(colors.values()), tid)
             self.assertIn(f'<option value="{tid}">', text)
         self.assertIn('<option value="altium">', text)
+        # Okunurluk uyarlaması: blok dolgusu = gövde, tüm çizgi/yazı rolleri
+        # zemine (gövde içindekiler gövdeye de) karşı eşiği geçiyor.
+        v = self.viewer
+        for tid, _name, _dark, colors in v._SCH_THEMES:
+            c = v.sch_theme_readable(colors)
+            self.assertEqual(c["sheet_background"], c["component_body"], tid)
+            bg, body = v._th_rgb(c["background"]), v._th_rgb(c["component_body"])
+            for k in v._TH_ON_BG:
+                refs = [bg] + ([body] if k in v._TH_ON_BODY else [])
+                worst = min(v._th_contrast(v._th_rgb(c[k]), r) for r in refs)
+                self.assertGreaterEqual(worst, v._TH_MIN_CONTRAST - 1e-6, f"{tid}.{k}")
 
     def test_schematic_viewer_english(self):
         """İngilizce üretim: dil etiketi `en`, işaret kalıntısı yok, JS geçerli."""

@@ -91,7 +91,7 @@ from altium_monkey.altium_schdoc import AltiumSchDoc
 
 # Uygulama sürümü — tek kaynak burası; gui.py buradan import eder.
 # HTML çıktılarında sağ üst köşedeki rozette görünür (build saati yerine).
-APP_VERSION = "2.36.0"
+APP_VERSION = "2.38.0"
 
 # Önerilen minimum altium_monkey sürümü. Bu sürümden öncesinde:
 #   · 2026.6.21 öncesi — STM32 gibi IC'lerde dikey pin adları yatay çiziliyordu.
@@ -1033,6 +1033,85 @@ _SCH_THEMES = [
         'no_connect': '#612be0', 'note': '#c0c000', 'worksheet': '#c00000',
     }),
 ]
+
+
+# Okunurluk uyarlaması (v2.36.1, kullanıcı bildirimi: "blok tasarımların kutu
+# içi zemin ile aynı renkte kalmış … wdark'ta mor ve siyah göz yoruyor").
+# Tema tablosu kaynakla BİREBİR kalır; uyarlama üretimde uygulanır:
+#  1. Sheet symbol (blok) dolgusu = component_body. KiCad temalarının
+#     `sheet_background`'ı 9 temada saydam (blok zeminle aynı görünüyordu),
+#     wDark'ta siyah, wLight'ta yeşildi — artık bloklar IC'ler gibi dolu.
+#  2. Çizgi/yazı rolleri zemine (ve gövde içindekiler gövde dolgusuna) karşı
+#     WCAG kontrastı en az _TH_MIN_CONTRAST olacak şekilde, TON (hue) ve
+#     doygunluk korunarak yalnız açıklığı kaydırılır. Ölçülen en kötüler:
+#     Nord tel 1.8 / hiyerarşik etiket 1.4, Eagle fields/sheet 1.9, koyu
+#     temalarda komponent çizgisi gövdeye karşı 2.2–2.5.
+_TH_MIN_CONTRAST = 3.0
+_TH_ON_BG = ("wire", "bus", "junction", "component_outline", "pin", "pin_number",
+             "pin_name", "reference", "value", "fields", "label_local",
+             "label_global", "label_hier", "sheet", "sheet_name",
+             "sheet_filename", "sheet_label", "no_connect", "note", "worksheet")
+_TH_ON_BODY = ("component_outline", "pin_name", "sheet", "sheet_label")
+
+
+def _th_rgb(c):
+    """@brief '#rrggbb' → (r, g, b) 0..1; başka biçimde None."""
+    c = (c or "").strip()
+    if len(c) == 7 and c[0] == "#":
+        return tuple(int(c[i:i + 2], 16) / 255 for i in (1, 3, 5))
+    return None
+
+
+def _th_lum(rgb):
+    """@brief WCAG bağıl parlaklık."""
+    f = lambda v: v / 12.92 if v <= 0.03928 else ((v + 0.055) / 1.055) ** 2.4
+    r, g, b = (f(v) for v in rgb)
+    return 0.2126 * r + 0.7152 * g + 0.0722 * b
+
+
+def _th_contrast(a, b):
+    """@brief İki rengin WCAG kontrast oranı (1..21)."""
+    la, lb = _th_lum(a), _th_lum(b)
+    return (max(la, lb) + 0.05) / (min(la, lb) + 0.05)
+
+
+def sch_theme_readable(colors: dict) -> dict:
+    """@brief Tema renklerini okunurluk kuralına göre uyarlanmış KOPYA döndürür.
+
+    @details Bkz. yukarıdaki açıklama. Eşiği zaten geçen renge DOKUNULMAZ;
+    geçmeyen rengin HLS açıklığı zemin açıksa koyulaştırılarak, koyuysa
+    açılarak 0.01 adımlarla kaydırılır (ilk yeten değer — en küçük değişiklik).
+    Zemin ile gövde dolgusu aynı tarafta (ikisi de açık / ikisi de koyu)
+    olduğundan tek yön ikisini birden sağlar.
+
+    @param colors {KiCad anahtarı: renk}
+    @return uyarlanmış yeni sözlük
+    """
+    import colorsys
+    c = dict(colors)
+    c["sheet_background"] = c["component_body"]
+    bg, body = _th_rgb(c["background"]), _th_rgb(c["component_body"])
+    if not bg or not body:
+        return c
+    darken = _th_lum(bg) > 0.18
+    for k in _TH_ON_BG:
+        rgb = _th_rgb(c.get(k))
+        if not rgb:
+            continue
+        refs = [bg] + ([body] if k in _TH_ON_BODY else [])
+        ok = lambda x: min(_th_contrast(x, r) for r in refs) >= _TH_MIN_CONTRAST
+        if ok(rgb):
+            continue
+        h, l, s = colorsys.rgb_to_hls(*rgb)
+        for i in range(1, 101):
+            nl = max(0.0, l - i * 0.01) if darken else min(1.0, l + i * 0.01)
+            # Denetim YUVARLANMIŞ renkle yapılır: #rrggbb'ye yuvarlama kontrastı
+            # eşiğin hemen altına düşürebiliyordu (sol-dark fields 2.998).
+            q = tuple(round(v * 255) for v in colorsys.hls_to_rgb(h, nl, s))
+            if ok(tuple(v / 255 for v in q)) or nl in (0.0, 1.0):
+                c[k] = "#%02x%02x%02x" % q
+                break
+    return c
 
 
 def sch_object_roles(schdoc) -> dict:
@@ -4839,6 +4918,12 @@ def build_combined_shell(sch_html, pcb_html, timestamp, project_name, have_pcb,
              background:#2a4a6a; border-color:#4ec9b0; color:#4ec9b0; }}
   #pane-tools .b3d.on {{ background:#4ec9b0; color:#0a0a0a;
                          border-color:#4ec9b0; }}
+  #pane-tools .hc-box {{ display:none; align-items:center; gap:5px; padding:0 8px;
+               font-size:11px; background:rgba(40,40,40,0.95); border:1px solid #444;
+               border-radius:4px; color:#bbb; }}
+  #pane-tools .hc-box.on {{ display:inline-flex; }}
+  #pane-tools .hc-box input {{ width:70px; margin:0; accent-color:#4ec9b0; cursor:pointer; }}
+  #pane-tools .hc-box span {{ min-width:28px; text-align:right; }}
   #pane-tools .toolbar-sep {{ width:1px; background:#444; margin:2px 3px;
                               align-self:stretch; }}
   #pane-tools .color-input {{ width:22px; height:22px; border:1px solid #444;
@@ -4946,6 +5031,8 @@ def build_combined_shell(sch_html, pcb_html, timestamp, project_name, have_pcb,
     #pane-tools .tool-btn, #pane-tools .tb, #pane-tools .b3d {{
                min-height:40px; min-width:40px; }}
     #pane-tools .color-input {{ width:40px; height:40px; }}
+    #pane-tools .hc-box {{ min-height:40px; }}
+    #pane-tools .hc-box input {{ width:120px; height:32px; }}
     .vm-btn {{ min-height:40px; min-width:40px; }}
   }}
 </style>
@@ -5336,6 +5423,7 @@ __MOBILE_META__
                 border-radius:4px; font-size:12px; user-select:none; }
   .layer-item:hover { background:#222; }
   .layer-item.off { opacity:0.42; }
+  .layer-item.dim .ln { opacity:0.55; font-style:italic; }
   .sw { width:14px; height:14px; border-radius:3px; margin-right:8px;
         border:1px solid #444; flex-shrink:0; }
   .ln { flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
@@ -5396,6 +5484,11 @@ __MOBILE_META__
         font-family:inherit; }
   .tb:hover { border-color:#4ec9b0; color:#4ec9b0; }
   .tb.active { background:#2a4a6a; border-color:#4ec9b0; color:#4ec9b0; }
+  .hc-box { display:none; align-items:center; gap:6px; padding:0 9px; font-size:12px;
+            background:rgba(30,30,30,0.92); border:1px solid #444; border-radius:5px; color:#bbb; }
+  .hc-box.on { display:inline-flex; }
+  .hc-box input { width:80px; margin:0; accent-color:#4ec9b0; cursor:pointer; }
+  .hc-box span { min-width:30px; text-align:right; }
   #info { position:absolute; bottom:10px; left:10px; background:rgba(20,20,20,0.85);
           padding:5px 12px; border-radius:4px; font-size:11px; color:#888; z-index:40; }
   #stat { position:absolute; bottom:10px; right:10px; background:rgba(20,20,20,0.85);
@@ -5462,6 +5555,8 @@ __MOBILE_META__
      sayfayı yakınlaştırmasın). */
   @media (pointer: coarse) {
     .tb { min-height:40px; min-width:40px; }
+    .hc-box { min-height:40px; }
+    .hc-box input { width:120px; height:32px; }
     #sb-toggle { width:36px; height:36px; font-size:14px; line-height:34px; }
     #sidebar h2 { padding-right:52px; min-height:52px; }
     .sec-btn { min-height:36px; }
@@ -5553,6 +5648,10 @@ __MOBILE_META__
       <button class="tb tb-more" id="b-rot" title="⟪90° döndür ( R )⟫">&#10227;</button>
       <button class="tb tb-more" id="b-mir" title="⟪Alt yüzden bakış / ayna ( X )⟫">⟪Çevir⟫</button>
       <button class="tb" id="b-flip" title="⟪Üst / alt katman setini değiştir ( T )⟫">⟪Üst/Alt⟫</button>
+      <button class="tb tb-more" id="b-hc" title="⟪Yüksek kontrast: aktif yüz net, diğer katmanlar soluk ( S )⟫">⟪Kontrast⟫</button>
+      <label class="hc-box tb-more" id="hc-box" title="⟪Soluk katmanların opaklığı (0 = tamamen gizli)⟫">⟪Opaklık⟫
+        <input type="range" id="hc-op" min="0" max="80" step="5" value="20">
+        <span id="hc-val">20%</span></label>
       <button class="tb more-btn" id="more-btn" title="⟪Diğer araçlar⟫">⋯</button>
       <button class="tb tb-more" id="b-all" title="⟪Tüm katmanları göster⟫">⟪Hepsi⟫</button>
       <button class="tb tb-more" id="b-none" title="⟪Tüm katmanları gizle⟫">⟪Temizle⟫</button>
@@ -5570,10 +5669,11 @@ __MOBILE_META__
         <tr><td>⟪Sürükle⟫</td><td>⟪Kaydır⟫</td></tr>
         <tr><td>⟪Tekerlek⟫</td><td>⟪İmleç altına zoom⟫</td></tr>
         <tr><td>⟪Tıkla⟫</td><td>⟪Komponent seç (detay + cross-probe)⟫</td></tr>
-        <tr><td>⟪Çift tıkla⟫</td><td>⟪Altındaki net'i vurgula⟫</td></tr>
+        <tr><td>⟪Çift tıkla⟫</td><td>⟪Altındaki netin tüm yolunu vurgula (kapalı katmanlar dahil)⟫</td></tr>
         <tr><td><kbd>M</kbd></td><td>⟪Ölçüm (mm/mil, pad merkezine yapışır)⟫</td></tr>
         <tr><td><kbd>R</kbd> / <kbd>X</kbd></td><td>⟪Döndür / çevir (ayna)⟫</td></tr>
         <tr><td><kbd>P</kbd> · <kbd>T</kbd></td><td>⟪Pad etiketleri · Üst/Alt katman seti⟫</td></tr>
+        <tr><td><kbd>S</kbd></td><td>⟪Yüksek kontrast: aktif yüz net, diğer katmanlar soluk ve seçilemez⟫</td></tr>
         <tr><td><kbd>I</kbd></td><td>⟪Özellikler bölümünü aç / kapat⟫</td></tr>
         <tr><td><kbd>F</kbd> · <kbd>B</kbd> · <kbd>Esc</kbd> · <kbd>?</kbd></td>
             <td>⟪Sığdır · panel · temizle · yardım⟫</td></tr>
@@ -5588,6 +5688,8 @@ __MOBILE_META__
       <table>
         <tr><td>⟪BOM · Montaj⟫</td><td>⟪Değer+footprint grubuna tıkla → grubun tamamı⟫
             ⟪vurgulanır; ✓ ile montaj takibi (tarayıcıda saklanır, Dışa/İçe ile taşınır)⟫</td></tr>
+        <tr><td>⟪Yüz⟫</td><td>⟪Katmanları gizli yüzdeki komponent seçilmez, pad etiketi⟫
+            ⟪basılmaz. İki yüz açıkken aktif yüz önce gelir (Çevir = alt yüz).⟫</td></tr>
         <tr><td>⟪Geometri tabanlı⟫</td><td>⟪Board SVG olarak değil, ham geometri (iz/pad/via/⟫
             ⟪region/metin) olarak gömülür ve canvas'a çizilir → dosya çok küçük,⟫
             ⟪her zoom'da akıcı.⟫</td></tr>
@@ -5709,7 +5811,41 @@ function prep() {
   G.texts.forEach(t => byLayer[t[0]].texts.push(t));
   (G.stexts || []).forEach(t => byLayer[t[0]].stexts.push(t));
   vis = G.layers.map(l => !!l.on);
+  LSIDE = G.layers.map(layerSideOf);
 }
+
+// === Yüz (Üst / Alt) farkındalığı =========================================
+// Altium / KiCad kuralı: GÖRDÜĞÜN şeyi seçer ve etiketli görürsün. Bir yüzün
+// bakır / overlay / maske / macun katmanlarından hiçbiri açık değilse o
+// yüzdeki komponent seçilmez, pad'lerine numara / net basılmaz. İki yüz de
+// açıkken üst üste binen komponentlerde AKTİF yüz önce gelir (curSide:
+// Üst/Alt ile ya da Çevir ile alttan bakınca 'B').
+// LSIDE: 'T' / 'B' = yüz katmanı (iç anahtar TOP… / BOTTOM…), 't' / 'b' =
+// adı Top / Bottom ile başlayan mekanik (Top Courtyard…; yalnız kontrast
+// kipinde soluklaştırmada sayılır), 'M' = Multi-Layer, '' = yüzsüz.
+let LSIDE = [], curSide = 'T', hc = false, hcAdded = [];
+let hcAlpha = 0.2;          // soluk katman opaklığı (Kontrast kaydırıcısı)
+function layerSideOf(L) {
+  const k = String(L.k || '').toUpperCase();
+  if (k.startsWith('TOP')) return 'T';
+  if (k.startsWith('BOTTOM')) return 'B';
+  if (k === 'MULTI_LAYER') return 'M';
+  const n = String(L.name || '').toUpperCase();
+  if (/^TOP/.test(n)) return 't';
+  if (/^BOTTOM/.test(n)) return 'b';
+  return '';
+}
+function sideOn(s) { return LSIDE.some((x, i) => x === s && vis[i]); }
+// Yüksek kontrast (S): aktif yüz + Multi-Layer net, kalan her katman soluk
+// (KiCad Ctrl+H / Altium Single Layer Mode karşılığı).
+function dimmed(i) {
+  if (!hc) return false;
+  const s = LSIDE[i];
+  return !(s === 'M' || s === curSide || s === curSide.toLowerCase());
+}
+function layerLive(i) { return vis[i] && !dimmed(i); }   // etiketlenir / seçilir
+function compSide(c) { return c.l === 'BOTTOM' ? 'B' : 'T'; }
+function compLive(c) { return hc ? compSide(c) === curSide : sideOn(compSide(c)); }
 function padPath(p) {                       // pad şekli (1 yuvarlak, 2 dik., 3 sekizgen, 9 yuv.dik.)
   const [, x, y, w, h, sh, r] = p;
   ctx.save(); ctx.translate(x, y); ctx.rotate(r * Math.PI / 180);
@@ -5751,7 +5887,7 @@ function drawLayer(li, netOnly) {   // netOnly: null | Set<netIndex>
   // bakır dolgu (pour) yarı saydam → üstündeki izler/pad'ler belirgin kalsın
   if (B.regions.length) {
     ctx.save();
-    ctx.globalAlpha = (L.role === 'copper' || L.role === 'inner') ? 0.55 : 0.8;
+    ctx.globalAlpha *= (L.role === 'copper' || L.role === 'inner') ? 0.55 : 0.8;
     B.regions.forEach(r => {
       if (netOnly && !netOnly.has(r[1])) return;
       ctx.beginPath(); polyPath(r[2]);
@@ -5807,9 +5943,16 @@ function draw() {
   ctx.fillStyle = '#0e3b21'; ctx.fill();
   ctx.strokeStyle = '#c8b400'; ctx.lineWidth = 0.15; ctx.stroke();
   // Çizim sırası = katman sırası; "↑" ile seçilen katman EN SONA alınır
-  // (canvas'ta sonra çizilen üstte kalır).
-  G.layers.forEach((L, i) => { if (vis[i] && i !== topLayer) drawLayer(i, null); });
-  if (topLayer >= 0 && vis[topLayer]) drawLayer(topLayer, null);
+  // (canvas'ta sonra çizilen üstte kalır). Kontrast kipinde soluk katmanlar
+  // ÖNCE çizilir → aktif yüz hep üstte kalır.
+  const drawL = i => {
+    if (!dimmed(i)) { drawLayer(i, null); return; }
+    if (hcAlpha <= 0) return;
+    ctx.save(); ctx.globalAlpha = hcAlpha; drawLayer(i, null); ctx.restore();
+  };
+  G.layers.forEach((L, i) => { if (vis[i] && i !== topLayer && dimmed(i)) drawL(i); });
+  G.layers.forEach((L, i) => { if (vis[i] && i !== topLayer && !dimmed(i)) drawL(i); });
+  if (topLayer >= 0 && vis[topLayer]) drawL(topLayer);
   // delikler en üstte (pad/via içleri)
   ctx.fillStyle = '#0b0b0b';
   G.vias.forEach(v => { if (v[3] > 0) { ctx.beginPath(); ctx.arc(v[0], v[1], v[3] / 2, 0, 7); ctx.fill(); } });
@@ -5820,7 +5963,11 @@ function draw() {
     ctx.fillStyle = 'rgba(0,0,0,0.62)';
     ctx.beginPath(); polyPath(G.outline); ctx.fill();
     ctx.save(); ctx.globalCompositeOperation = 'lighter';
-    G.layers.forEach((L, i) => { if (vis[i]) drawLayer(i, selSet); });
+    // Netin TÜM yolu: bakır katmanları kapalı olsa da çizilir (alt yüze ya da
+    // iç katmana geçen iz kaybolmasın). Çizilen yalnız bu netin nesneleridir.
+    G.layers.forEach((L, i) => {
+      if (vis[i] || L.role === 'copper' || L.role === 'inner' || L.role === 'plane') drawLayer(i, selSet);
+    });
     ctx.restore();
     G.vias.forEach(v => {
       if (!selSet.has(v[4])) return;
@@ -5843,17 +5990,27 @@ function drawOverlay(r) {
       const p = [w2s(c.b[0], c.b[1]), w2s(c.b[2], c.b[1]), w2s(c.b[2], c.b[3]), w2s(c.b[0], c.b[3])];
       const x0 = Math.min(...p.map(q => q.x)) - 3, y0 = Math.min(...p.map(q => q.y)) - 3;
       const x1 = Math.max(...p.map(q => q.x)) + 3, y1 = Math.max(...p.map(q => q.y)) + 3;
+      // Görünmeyen yüzdeki komponent (cross-probe / liste / BOM'dan gelen
+      // seçim): kesikli, soluk kutu + hangi yüzde olduğu → kullanıcı görünür
+      // yüzdeki bir parçayı seçtiğini sanmaz.
+      const live = compLive(c);
+      const lbl = live ? d : d + ' · ' + (compSide(c) === 'B' ? '⟪alt yüz, gizli⟫' : '⟪üst yüz, gizli⟫');
+      ctx.save();
+      if (!live) { ctx.setLineDash([5, 4]); ctx.globalAlpha = 0.6; }
       ctx.strokeStyle = '#00e5ff'; ctx.lineWidth = 1.8;
       ctx.strokeRect(x0, y0, x1 - x0, y1 - y0);
+      ctx.setLineDash([]);
       ctx.font = 'bold 12px Consolas,monospace';
       ctx.strokeStyle = '#04222a'; ctx.lineWidth = 3;
-      ctx.strokeText(d, x0, y0 - 4);
-      ctx.fillStyle = '#00e5ff'; ctx.fillText(d, x0, y0 - 4);
+      ctx.strokeText(lbl, x0, y0 - 4);
+      ctx.fillStyle = '#00e5ff'; ctx.fillText(lbl, x0, y0 - 4);
+      ctx.restore();
     });
     // Tek komponent seçiliyse pin 1'i sarı halkayla işaretle (iBOM'daki
-    // "highlight first pin" — kutup/yön kontrolünü kolaylaştırır)
+    // "highlight first pin" — kutup/yön kontrolünü kolaylaştırır).
+    // Pad'i görünmüyorsa halka da çizilmez.
     if (selComps.length === 1) {
-      const c = G.comps.find(x => x.d === selComps[0]);
+      const c = G.comps.find(x => x.d === selComps[0] && compLive(x));
       const p1 = c && G.pads.find(p => p[9] === c.i && (p[10] === '1' || p[10] === 'A1'));
       if (p1) {
         const s = w2s(p1[1], p1[2]);
@@ -5866,7 +6023,11 @@ function drawOverlay(r) {
   }
   if (padLabels && scale > 28) {
     ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    const netSet = new Set(selNets);
     G.pads.forEach(p => {
+      // Gizli / soluk katmandaki pad etiketlenmez; seçili netin pad'i ise
+      // katmanı kapalı olsa da çizildiği için etiketlenir.
+      if (!layerLive(p[0]) && !netSet.has(p[8])) return;
       const s = w2s(p[1], p[2]);
       if (s.x < -20 || s.y < -20 || s.x > r.width + 20 || s.y > r.height + 20) return;
       const px = Math.min(p[3], p[4]) * scale;
@@ -5903,13 +6064,16 @@ function drawOverlay(r) {
 }
 
 // === Hit-test =============================================================
+// Yalnız görünür yüzdeki komponentler; üst üste binenlerde önce AKTİF yüz,
+// sonra en küçük kutu (Altium / KiCad'de aktif katmanın önceliği gibi).
 function compAt(w) {
-  let best = null, ba = 1e18;
+  let best = null, bs = 2, ba = 1e18;
   G.comps.forEach(c => {
-    if (!c.b) return;
+    if (!c.b || !compLive(c)) return;
     if (w.x < c.b[0] || w.x > c.b[2] || w.y < c.b[1] || w.y > c.b[3]) return;
+    const s = compSide(c) === curSide ? 0 : 1;
     const a = (c.b[2] - c.b[0]) * (c.b[3] - c.b[1]);
-    if (a < ba) { ba = a; best = c; }
+    if (s < bs || (s === bs && a < ba)) { bs = s; ba = a; best = c; }
   });
   return best;
 }
@@ -5922,7 +6086,7 @@ function segDist(px, py, x1, y1, x2, y2) {
 function netAt(w) {
   const tol = 3 / scale;
   for (const p of G.pads) {
-    if (p[8] < 0) continue;
+    if (p[8] < 0 || !layerLive(p[0])) continue;
     if (Math.abs(w.x - p[1]) <= p[3] / 2 + tol && Math.abs(w.y - p[2]) <= p[4] / 2 + tol) return p[8];
   }
   for (const v of G.vias) {
@@ -5930,7 +6094,7 @@ function netAt(w) {
   }
   let best = -1, bd = 1e9;
   G.tracks.forEach(t => {
-    if (t[6] < 0 || !vis[t[0]]) return;
+    if (t[6] < 0 || !layerLive(t[0])) return;
     const d = segDist(w.x, w.y, t[1], t[2], t[3], t[4]) - t[5] / 2;
     if (d < bd && d <= tol) { bd = d; best = t[6]; }
   });
@@ -5940,6 +6104,7 @@ function padAt(w) {                       // ölçümde merkeze yapışma
   const tol = 6 / scale;
   let best = null, bd = 1e9;
   for (const p of G.pads) {
+    if (!vis[p[0]] && selNets.indexOf(p[8]) < 0) continue;   // görünmeyen pad'e yapışma
     const d = Math.hypot(w.x - p[1], w.y - p[2]);
     if (d < bd && (Math.abs(w.x - p[1]) <= p[3] / 2 + tol) && (Math.abs(w.y - p[2]) <= p[4] / 2 + tol)) {
       bd = d; best = p;
@@ -5954,8 +6119,15 @@ function padAt(w) {                       // ölçümde merkeze yapışma
 
 // === Etkileşim ============================================================
 let dragging = false, lx = 0, ly = 0, moved = false;
+// Araç çubuğu ve yardım penceresi tek dosya çıktıda `wrap`'in içindedir: üzerlerine
+// basmak board'a basmak sayılmaz (pan başlamaz, komponent seçilmez, seçim silinmez).
+const onChrome = e => !!(e.target && e.target.closest && e.target.closest('#toolbar, #help'));
+// Basış çubukta başlayıp imleç dışarıda bırakılırsa `click` ortak üst öğeye
+// (wrap) gider: board tıklaması sanılmasın diye basışın yeri ayrıca saklanır.
+let pressOnChrome = false;
 wrap.addEventListener('mousedown', e => {
-  if (gTouchActive()) return;
+  pressOnChrome = onChrome(e);
+  if (gTouchActive() || pressOnChrome) return;
   dragging = true; moved = false; lx = e.clientX; ly = e.clientY;
 });
 window.addEventListener('mousemove', e => {
@@ -5981,7 +6153,7 @@ wrap.addEventListener('mousemove', e => {
   }
 });
 wrap.addEventListener('click', e => {
-  if (moved) return;
+  if (moved || pressOnChrome || onChrome(e)) return;
   const w = s2w(e.clientX, e.clientY);
   if (measureOn) {
     if (mPts.length >= 2) mPts = [];
@@ -6000,11 +6172,12 @@ wrap.addEventListener('click', e => {
   }
 });
 wrap.addEventListener('dblclick', e => {
-  if (measureOn) return;
+  if (measureOn || onChrome(e)) return;
   const n = netAt(s2w(e.clientX, e.clientY));
   if (n >= 0) selectNet(n);
 });
 installGesture(wrap, {
+  skip: onChrome,
   down: () => { moved = false; },
   start: () => { moved = true; },
   pan: (dx, dy) => { tx += dx; ty += dy; draw(); },
@@ -6028,7 +6201,8 @@ function netKind(n) {
 let netTypeF = '', qs = '';
 function renderLayers() {
   document.getElementById('p-layers').innerHTML = G.layers.map((l, i) =>
-    '<div class="layer-item' + (vis[i] ? '' : ' off') + '" data-i="' + i + '">'
+    '<div class="layer-item' + (vis[i] ? '' : ' off') + (vis[i] && dimmed(i) ? ' dim' : '')
+    + '" data-i="' + i + '">'
     + '<span class="sw" style="background:' + l.color + '"></span>'
     + '<span class="ln">' + esc(l.name) + '</span>'
     + '<button class="ltop' + (topLayer === i ? ' on' : '') + '" data-top="' + i
@@ -6076,7 +6250,9 @@ document.getElementById('p-layers').addEventListener('click', e => {
     return;
   }
   const it = e.target.closest('.layer-item'); if (!it) return;
-  const i = +it.dataset.i; vis[i] = !vis[i]; renderLayers(); draw();
+  const i = +it.dataset.i; vis[i] = !vis[i];
+  hcAdded = hcAdded.filter(x => x !== i);   // elle değiştirilen katman kullanıcınındır
+  renderLayers(); draw();
 });
 document.getElementById('p-nets').addEventListener('click', e => {
   const r = e.target.closest('.row'); if (!r) return;
@@ -6144,6 +6320,10 @@ function showComp(d) {
   const s = w2s(c.x, c.y), a = viewArea();
   if (s.x < a.x || s.y < a.y || s.x > a.x + a.w || s.y > a.y + a.h) centerOn(c.x, c.y);
   renderComps(); bomMark(d); draw();
+  if (!compLive(c))
+    info.textContent = d + ' ' + (compSide(c) === 'B'
+      ? '⟪alt yüzde; o yüz şu an gizli · T ile göster⟫'
+      : '⟪üst yüzde; o yüz şu an gizli · T ile göster⟫');
 }
 // × : Özellikler bölümünü KAPAT (tercih saklanır; seçim ve vurgu kalır)
 document.getElementById('pclose').onclick = () => setPropOpen(false);
@@ -6234,10 +6414,14 @@ function zoomBy(f) {
 function setOrient(nr, nm) {
   const r = wrap.getBoundingClientRect();
   const c = s2w(r.left + r.width / 2, r.top + r.height / 2);
+  const flipped = nm !== mir;
   rot = ((nr % 360) + 360) % 360; mir = nm;
   centerOn(c.x, c.y);
   document.getElementById('b-mir').classList.toggle('active', mir === -1);
-  draw();
+  // Alttan bakış = alt yüz aktif (Altium View → Flip Board ile aynı mantık):
+  // üst üste binen seçimlerde ve kontrast kipinde alt yüz öne çıkar.
+  if (flipped) setSide(mir < 0 ? 'B' : 'T', false);
+  else draw();
 }
 function setMeasure(on) {
   measureOn = on;
@@ -6258,22 +6442,69 @@ document.getElementById('b-pin').onclick = () => {
   draw();
 };
 document.getElementById('b-bg').onclick = () => { bgi = (bgi + 1) % BG.length; draw(); };
-// Üst/Alt: "Top ..." katmanlarını aç, "Bottom ..." olanları kapat (ve tersi).
-// Katman adına göre çalışır; taraf bilgisi taşımayanlara (Multi-Layer, Keepout,
-// mekanik) DOKUNMAZ — SVG sürümündeki flip ile aynı semantik.
-let showingTop = true;
-document.getElementById('b-flip').onclick = () => {
-  showingTop = !showingTop;
-  G.layers.forEach((l, i) => {
-    // İç anahtara bakılır (TOP, TOP_OVERLAY, BOTTOM_SOLDER…): görünen ad
-    // Altium'unkidir ve "Top Courtyard" gibi mekanikler de Top ile başlar —
-    // onlara dokunulmaz (eski semantik).
-    const n = (l.k || l.name).toUpperCase();
-    if (n.startsWith('TOP')) vis[i] = showingTop;
-    else if (n.startsWith('BOTTOM')) vis[i] = !showingTop;
-  });
+// Yüz tamamen gizliyse bakır + overlay'ini aç (kontrast kipinde aktif yüzde
+// görecek bir şey olsun).
+function ensureSideShown(s) {
+  if (sideOn(s)) return;
+  const want = s === 'T' ? ['TOP', 'TOP_OVERLAY'] : ['BOTTOM', 'BOTTOM_OVERLAY'];
+  G.layers.forEach((l, i) => { if (want.indexOf(String(l.k || '').toUpperCase()) >= 0) vis[i] = true; });
+}
+// Aktif yüzü değiştir. layerSet (Üst/Alt düğmesi): normal kipte o yüzün
+// katmanlarını açar, diğerininkileri kapatır — eski semantik: iç anahtara
+// bakılır (TOP, TOP_OVERLAY, BOTTOM_SOLDER…), "Top Courtyard" gibi mekanikler
+// ile Multi-Layer / Keepout'a DOKUNULMAZ. Kontrast kipinde diğer yüz
+// kapatılmaz (soluk görünmeye devam eder).
+function setSide(s, layerSet) {
+  curSide = s;
+  if (layerSet && !hc) {
+    G.layers.forEach((l, i) => {
+      if (LSIDE[i] === 'T') vis[i] = s === 'T';
+      else if (LSIDE[i] === 'B') vis[i] = s === 'B';
+    });
+  } else if (hc) ensureSideShown(s);
   renderLayers(); draw();
-  info.textContent = showingTop ? '⟪Üst katmanlar⟫' : '⟪Alt katmanlar⟫';
+  if (hc) hcInfo();
+}
+function hcInfo() {
+  info.textContent = curSide === 'B'
+    ? '⟪Kontrast: alt yüz aktif · T yüz değiştirir · S kapatır⟫'
+    : '⟪Kontrast: üst yüz aktif · T yüz değiştirir · S kapatır⟫';
+}
+// Yüksek kontrast (S): aktif yüz + Multi-Layer net, diğer katmanlar soluk ve
+// seçilemez. Diğer yüz tamamen gizliyse bakırı soluk görünsün diye açılır;
+// kip kapanınca (kullanıcı elle dokunmadıysa) geri kapatılır.
+function setHC(on, quiet) {
+  hc = !!on;
+  if (hc) {
+    ensureSideShown(curSide);
+    const o = curSide === 'T' ? 'B' : 'T';
+    if (!sideOn(o)) G.layers.forEach((l, i) => {
+      if (String(l.k || '').toUpperCase() === (o === 'T' ? 'TOP' : 'BOTTOM')) { vis[i] = true; hcAdded.push(i); }
+    });
+  } else { hcAdded.forEach(i => { vis[i] = false; }); hcAdded = []; }
+  document.getElementById('b-hc').classList.toggle('active', hc);
+  document.getElementById('hc-box').classList.toggle('on', hc);
+  uiSet({ hc: hc });
+  renderLayers(); draw();
+  if (quiet) return;
+  if (hc) hcInfo(); else info.textContent = '⟪Kontrast kapalı⟫';
+}
+document.getElementById('b-hc').onclick = () => setHC(!hc);
+// Soluk katmanların opaklığı: yalnız Kontrast açıkken görünür, tercih saklanır.
+function setHcAlpha(pct, save) {
+  const op = document.getElementById('hc-op');
+  const v = Math.max(+op.min, Math.min(+op.max, Math.round(+pct) || 0));
+  hcAlpha = v / 100;
+  op.value = v;
+  document.getElementById('hc-val').textContent = v + '%';
+  if (save) uiSet({ hcA: v });
+}
+document.getElementById('hc-op').addEventListener('input', e => {
+  setHcAlpha(e.target.value, true); draw();
+});
+document.getElementById('b-flip').onclick = () => {
+  setSide(curSide === 'T' ? 'B' : 'T', true);
+  if (!hc) info.textContent = curSide === 'T' ? '⟪Üst katmanlar⟫' : '⟪Alt katmanlar⟫';
 };
 document.getElementById('b-all').onclick = () => {
   vis = vis.map(() => true); renderLayers(); draw();
@@ -6317,6 +6548,7 @@ window.addEventListener('keydown', e => {
   else if (k === 'x') setOrient(rot, -mir);
   else if (k === 'p') document.getElementById('b-pin').click();
   else if (k === 't') document.getElementById('b-flip').click();
+  else if (k === 's' && !e.ctrlKey && !e.metaKey && !e.altKey) setHC(!hc);
   else if (e.key === '?') help.classList.toggle('open');
   else if (e.key === '/') { e.preventDefault(); document.getElementById('q').focus(); }
 });
@@ -6553,6 +6785,8 @@ async function gunzipB64(b64) {
     if (st.propM !== undefined) propPref.m = !!st.propM;
     navOpen = st.nav !== undefined ? !!st.nav : window.innerWidth >= 820;
     applyPanels();
+    if (st.hcA !== undefined) setHcAlpha(st.hcA, false);
+    if (st.hc) setHC(true, true);
   }
   fit();
   new ResizeObserver(() => { applyPendingXp(0); draw(); }).observe(wrap);
@@ -7939,7 +8173,8 @@ def build_html(sheets, net_list, components, timestamp,
         {"s": dl_map, "im": list(dl_imgs.keys())},
         separators=(",", ":")).encode("utf-8"), 6)).decode()
     # Şematik renk temaları (bkz. _SCH_THEMES): JS tablosu + seçim listesi
-    sch_themes_json = json.dumps([list(t) for t in _SCH_THEMES],
+    sch_themes_json = json.dumps([[t[0], t[1], t[2], sch_theme_readable(t[3])]
+                                  for t in _SCH_THEMES],
                                  separators=(",", ":"))
     _th_opt = lambda t: (f'<option value="{t[0]}">'
                          + ("⟪KiCad (varsayılan)⟫" if t[0] == "kicad" else t[1])

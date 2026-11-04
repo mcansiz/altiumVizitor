@@ -808,10 +808,35 @@ _EN_HTML = {
     "Üst / alt katman setini değiştir ( T )":
         "Switch the top / bottom layer set ( T )",
     "Pad etiketleri · Üst/Alt katman seti": "Pad labels · Top/Bottom layer set",
+    "Yüksek kontrast: aktif yüz net, diğer katmanlar soluk ( S )":
+        "High contrast: active side sharp, other layers dimmed ( S )",
+    "Kontrast": "Contrast",
+    "Yüksek kontrast: aktif yüz net, diğer katmanlar soluk ve seçilemez":
+        "High contrast: active side sharp, other layers dimmed and not selectable",
+    "Yüz": "Side",
+    "Katmanları gizli yüzdeki komponent seçilmez, pad etiketi":
+        "Components on a side whose layers are hidden cannot be selected and",
+    "basılmaz. İki yüz açıkken aktif yüz önce gelir (Çevir = alt yüz).":
+        "get no pad labels. With both sides shown, the active side wins (Flip = bottom side).",
+    "alt yüz, gizli": "bottom side, hidden",
+    "üst yüz, gizli": "top side, hidden",
+    "alt yüzde; o yüz şu an gizli · T ile göster":
+        "is on the bottom side, which is hidden · T shows it",
+    "üst yüzde; o yüz şu an gizli · T ile göster":
+        "is on the top side, which is hidden · T shows it",
+    "Kontrast: alt yüz aktif · T yüz değiştirir · S kapatır":
+        "Contrast: bottom side active · T switches side · S turns off",
+    "Kontrast: üst yüz aktif · T yüz değiştirir · S kapatır":
+        "Contrast: top side active · T switches side · S turns off",
+    "Kontrast kapalı": "Contrast off",
     "Pad no + net ( P )": "Pad number + net ( P )",
     "Komponent seç (detay + cross-probe)":
         "Select a component (detail + cross-probe)",
-    "Altındaki net'i vurgula": "Highlight the net underneath",
+    "Altındaki netin tüm yolunu vurgula (kapalı katmanlar dahil)":
+        "Highlight the full path of the net underneath (hidden layers included)",
+    "Opaklık": "Opacity",
+    "Soluk katmanların opaklığı (0 = tamamen gizli)":
+        "Opacity of dimmed layers (0 = fully hidden)",
     "90° döndür ( R )": "Rotate by 90° ( R )",
     "Alt yüzden bakış / ayna ( X )": "View from the bottom / mirror ( X )",
     "Döndür / çevir (ayna)": "Rotate / flip (mirror)",

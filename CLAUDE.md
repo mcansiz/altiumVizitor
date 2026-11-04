@@ -5,7 +5,7 @@ Wavenumber'ın ticari "viz sch 1.0" ürününün açık-kaynak alternatifi.
 [altium_monkey](https://github.com/wavenumber-eng/altium_monkey) kütüphanesi
 (Eli Hughes / Wavenumber) üzerine kurulu.
 
-**Mevcut sürüm**: `APP_VERSION` sabiti **`viewer.py`'de** tutulur (şu an 2.36.0);
+**Mevcut sürüm**: `APP_VERSION` sabiti **`viewer.py`'de** tutulur (şu an 2.38.0);
 `gui.py` oradan import eder (v2.9.29'da taşındı — HTML çıktıları da sürümü
 gösterebilsin diye, tek kaynak). Yeni özellik/düzeltme ekleyince bu sabiti
 güncelle (semver: major.minor.patch). Sürüm pencere başlığında, alt durum
@@ -570,6 +570,21 @@ bölümlerinden birebir; eksik `worksheet` ← `note`, `sheet_background` ← sa
   paketler, `_pt` rol'lü stile göre) → **Altium kipinde kare eskisiyle piksel
   piksel AYNI** (ölçüldü: Smart_MCU + m2_emmc, toolbar şeridi dışında fark 0).
   `tlBuild` font için `tsx[t[0]][0]` üzerinden temel stile iner.
+- **Okunurluk uyarlaması** (v2.36.1, kullanıcı bildirimi: "blok tasarımların
+  kutu içi zemin ile aynı renkte kalmış … wdark'ta mor ve siyah göz yoruyor"):
+  `_SCH_THEMES` kaynakla birebir kalır, `build_html` JS'e
+  `sch_theme_readable(c)` çıktısını gömer. (1) `sheet_background` :=
+  `component_body` — KiCad temalarında bu alan 9 temada SAYDAM (blok zeminle
+  aynı), wDark'ta siyah, wLight'ta yeşildi; artık bloklar IC'ler gibi dolu.
+  (2) `_TH_ON_BG` rolleri zemine, `_TH_ON_BODY` rolleri (gövde içindekiler)
+  ayrıca gövdeye karşı WCAG kontrastı ≥ `_TH_MIN_CONTRAST` (3.0) olacak
+  şekilde HLS açıklığı 0.01 adımla kaydırılır (ton/doygunluk korunur, ilk
+  yeten değer). Eşiği geçen renge dokunulmaz: KiCad, wLight, Blue Tone,
+  Black/White hiç değişmedi; en büyük düzeltmeler Nord (tel 1.8, hiyerarşik
+  etiket 1.4) ve Eagle Dark (fields/sheet 1.9). **Denetim yuvarlanmış
+  `#rrggbb` ile yapılır** — float'la yapılınca sol-dark `fields` yuvarlamadan
+  sonra 2.998'e düşüyordu (test yakaladı). Test: `test_schematic_theme_roles`
+  her temada her çifti ölçer.
 - **Bilinmeyen rol** (kütüphanenin yeni nesne türü vb.): orijinal renk tema
   zemininde okunuyorsa korunur (parlaklık farkı ≥ 0.3), değilse `note`.
   Gömülü GÖRSELLER (logo, datasheet resmi) renklendirilmez.
@@ -1008,7 +1023,11 @@ Sol panelde dört sekme: **Katmanlar · Netler · Komponentler · BOM · Montaj*
 - **Netler**: net adı + pad/iz sayısı, ara, Güç/GND/Sinyal filtrele, tıkla →
   net tüm katmanlarda vurgulanır (bakır ize çift tıklamakla aynı sonuç).
   Çoklu net vurgusu `selNets` + Set tabanlı filtreyle (`drawLayer(li, netSet)`)
-  yapılır.
+  yapılır. **Vurgu netin TÜM yolunu gösterir** (v2.38.0): `copper` / `inner` /
+  `plane` rolündeki katmanlar KAPALI olsa da yalnız o netin nesneleri çizilir
+  (kapalı mekanik/maske katmanına girmez), `vis` değişmez, seçim bırakılınca
+  görünüm eski haline döner. Netin kapalı katmandaki pad'i çizildiği için
+  etiketlenir ve ölçüm ona yapışır; başka netin kapalı pad'i etiketsiz kalır.
 - **BOM · Montaj** (InteractiveHtmlBom / KiCad iBOM tarzı montaj akışı):
   komponentler değer + footprint ikilisine göre gruplanır (anahtar
   `değer\u0000footprint`), satıra tıkla → grubun TÜM komponentleri vurgulanır
@@ -1025,8 +1044,36 @@ Sol panelde dört sekme: **Katmanlar · Netler · Komponentler · BOM · Montaj*
 - **Yardım modalı** (`?`): fare/klavye, dokunmatik ve panel özeti.
 - **Katlanabilir sol panel** (`#sb-toggle`, `B`) ve katlanabilir arama
   (`#search-box`, `/` açar, `Esc` kapatır) — şematik viewer'daki desenin aynısı.
+- **Yüz farkındalığı + yüksek kontrast** (v2.37.0): kural Altium / KiCad'inki —
+  *gördüğün şeyi seçer ve etiketli görürsün*. Katman → yüz eşlemesi `LSIDE`
+  (`layerSideOf`): iç anahtar `TOP…`/`BOTTOM…` → `'T'`/`'B'`, `MULTI_LAYER` →
+  `'M'`, adı Top/Bottom ile başlayan mekanik (Top Courtyard…) → `'t'`/`'b'`
+  (yalnız soluklaştırmada sayılır, seçimde DEĞİL). Bir yüzün T/B katmanlarından
+  hiçbiri açık değilse o yüzdeki komponent seçilmez (`compLive`), pad
+  etiketleri / net çift tıklaması / ölçüm yapışması gizli katmandaki pad'i
+  yok sayar (`layerLive`). İki yüz açıkken örtüşmede **aktif yüz** önce gelir
+  (`curSide`; `T` ile ya da `X` Çevir ile alttan bakınca `'B'` — Altium Flip
+  Board), aynı yüzde en küçük kutu. Liste / BOM / cross-probe gizli yüzdeki
+  komponenti yine seçer ama kutu **kesikli + soluk** ve `· alt yüz, gizli`
+  etiketli, pin-1 halkası yok, info'da "T ile göster" ipucu.
+  **`S` / Kontrast** (KiCad Ctrl+H, Altium Single Layer Mode): aktif yüz +
+  Multi-Layer net, diğer her görünür katman `hcAlpha` ile soluk, ÖNCE
+  çizilir ve seçilemez/etiketlenmez; listede italik (`.dim`). **Opaklık
+  kaydırıcısı** (`#hc-box`, v2.38.0): yalnız kip açıkken görünür, %0–80
+  (varsayılan %20, %0 = soluk katman hiç çizilmez), tercih
+  `schviz-pcb-ui.hcA`. Birleşik görünümde üst çubuğa taşındığı için CSS'i
+  kabukta `#pane-tools .hc-box` olarak TEKRARLANIR. Diğer yüz
+  tamamen gizliyse bakırı açılır (`hcAdded`) ve kip kapanınca geri kapatılır
+  (kullanıcı arada elle dokunduysa bırakılır). Kontrastta `T` diğer yüzü
+  KAPATMAZ, yalnız aktif yüzü değiştirir. Tercih `schviz-pcb-ui.hc`.
+  `drawLayer`'daki region saydamlığı `globalAlpha *=` olmalı (kontrastın
+  alfasını ezmesin). Genel çizim sırası bilerek DEĞİŞTİRİLMEDİ (maske/macun
+  katmanlarının pad'leri örtmemesi için). Doğrulama (headless Edge + CDP,
+  Smart_MCU + m2_emmc + birleşik görünüm): **39/39**; v2.38.0 eklentileri
+  (net yolu + kaydırıcı, gerçek fare/dokunma ve piksel ölçümü): **56/56**.
 - **Kısayollar**: `F` sığdır, `B` panel, `M` ölçüm, `R` döndür, `X` çevir,
-  `P` pad etiketleri, `T` Üst/Alt, `/` arama, `?` yardım, `Esc` temizle.
+  `P` pad etiketleri, `T` Üst/Alt, `S` kontrast, `/` arama, `?` yardım,
+  `Esc` temizle.
 - **Katman verisi** gzip+base64 gömülüdür, açılışta `DecompressionStream` ile
   çözülür; çok eski tarayıcıda (API yok) info-bar'da uyarı gösterilir.
 - **CSS tuzağı** (bkz. Çözülen Sorunlar): gizleme kuralı `.panel.hidden,
@@ -1149,6 +1196,32 @@ mesajına bak.
   bu API olmayabilir (graceful fallback var, "veri yok" der).
 
 ## Çözülen Sorunlar (tarihçe)
+
+- **PCB'de net vurgusu kapalı katmandaki yolu göstermiyordu + tek dosya çıktıda
+  araç düğmeleri seçimi siliyordu (v2.38.0, kullanıcı isteği: "bir nete
+  tıkladığımda netin ulaştığı tüm yolu görmek istiyorum" + Kontrast için opaklık
+  seçeneği)**: Vurgu geçişi yalnız `vis[i]` katmanları çiziyordu, alt yüze
+  geçen iz kayboluyordu → bakır rollü katmanlar artık koşulsuz çizilir
+  (bkz. "Netler"). **Yan bulgu, kaydırıcıyı eklerken ölçüldü**: tek dosya PCB
+  çıktısında toolbar `#wrap`'in içinde ve `wrap`'in `mousedown`/`click`/`dblclick`
+  işleyicileri ile jest çubuğu ayırt etmiyordu → HERHANGİ bir araç düğmesine
+  tıklamak board tıklaması sayılıp seçimi siliyor (ölçüm: `R10` → seçim yok),
+  çubuktan başlayan sürükleme board'u kaydırıyordu (60 px). Birleşik görünümde
+  çubuk kabuğa taşındığı için görünmüyordu. Çözüm `onChrome(e)` (`#toolbar`,
+  `#help`) + jestte `skip`. **İnce nokta — `pressOnChrome`**: basış çubukta
+  başlayıp imleç dışarıda bırakılınca tarayıcı `click`'i ortak üst öğeye
+  (`#wrap`) gönderir, `e.target` çubuğu göstermez; basışın yeri `mousedown`'da
+  ayrıca saklanır. Kaydırıcıdan taşarak bırakmak bu yüzden seçimi siliyordu.
+
+- **PCB'de gizli yüzün pad etiketleri basılıyor, komponentleri seçilebiliyordu
+  (v2.37.0, kullanıcı bildirimi: BRK-209'da yalnız Top katmanları açıkken
+  alt yüzdeki IC10_2'nin pin no / net adları görünüyor ve seçim kutusu
+  çıkıyor)**: pad etiketi döngüsü, `compAt` ve `netAt`'in pad/via kısmı katman
+  görünürlüğüne HİÇ bakmıyordu (yalnız izler bakıyordu) → pad'in kendisi
+  çizilmezken etiketi basılıyor, gizli yüzdeki komponent tıklamayla
+  seçiliyordu. Çözüm ve kurallar: "PCB Viewer: paneller" → *Yüz farkındalığı +
+  yüksek kontrast*. Veri zaten vardı (`c.l`, pad katmanı `p[0]`, katman `k`),
+  Python tarafı değişmedi.
 
 - **PCB'de `.Designator` / `.PCBCODE` özel dizgeleri ham basılıyordu (v2.35.2,
   kullanıcı bildirimi: Mech 29 montaj çiziminde her komponentin yerinde

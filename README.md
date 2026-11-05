@@ -3,10 +3,10 @@
 
 > A PyQt5 desktop application that converts Altium schematic and PCB projects into **interactive, single-file HTML viewers** — no server required.
 
-![Version](https://img.shields.io/badge/version-2.27.3-blue.svg)
-![Python](https://img.shields.io/badge/python-3.10%2B-3776AB.svg?logo=python\&logoColor=white)
+[![Version](https://img.shields.io/github/v/release/mcansiz/altiumVizitor?label=version&color=blue)](https://github.com/mcansiz/altiumVizitor/releases/latest)
+![Python](https://img.shields.io/badge/python-3.12%2B-3776AB.svg?logo=python\&logoColor=white)
 ![GUI](https://img.shields.io/badge/GUI-PyQt5-41CD52.svg?logo=qt\&logoColor=white)
-![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20Linux-lightgrey.svg)
+![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20Linux%20%7C%20macOS-lightgrey.svg)
 ![License](https://img.shields.io/badge/license-AGPL--3.0--or--later-orange.svg)
 [![Buy Me A Coffee](https://img.shields.io/badge/Buy%20Me%20A%20Coffee-support-FFDD00.svg?logo=buymeacoffee\&logoColor=black)](https://buymeacoffee.com/cansizmikab)
 
@@ -94,7 +94,7 @@ No web server, no installation, no internet required. Works directly via `file:/
   filter by Top/Bottom/Remaining, pin-1 marker on the selected part.
 
 * **Cross-platform**
-  Works on Windows and Linux. Fully OS-independent via `pathlib`.
+  Works on Windows, Linux and macOS (experimental). Fully OS-independent via `pathlib`.
 
 ---
 
@@ -265,10 +265,10 @@ Give it a star ⭐ on GitHub and consider supporting:
 
 > Altium şematik ve PCB projelerini tek dosyalık, sunucu gerektirmeyen **interaktif HTML görüntüleyicilere** dönüştüren PyQt5 masaüstü uygulaması.
 
-![Version](https://img.shields.io/badge/version-2.27.3-blue.svg)
-![Python](https://img.shields.io/badge/python-3.10%2B-3776AB.svg?logo=python&logoColor=white)
+[![Version](https://img.shields.io/github/v/release/mcansiz/altiumVizitor?label=version&color=blue)](https://github.com/mcansiz/altiumVizitor/releases/latest)
+![Python](https://img.shields.io/badge/python-3.12%2B-3776AB.svg?logo=python&logoColor=white)
 ![GUI](https://img.shields.io/badge/GUI-PyQt5-41CD52.svg?logo=qt&logoColor=white)
-![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20Linux-lightgrey.svg)
+![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20Linux%20%7C%20macOS-lightgrey.svg)
 ![License](https://img.shields.io/badge/license-AGPL--3.0--or--later-orange.svg)
 [![Buy Me A Coffee](https://img.shields.io/badge/Buy%20Me%20A%20Coffee-destek-FFDD00.svg?logo=buymeacoffee&logoColor=black)](https://buymeacoffee.com/cansizmikab)
 
@@ -310,7 +310,7 @@ Projeyi seçin, bir düğmeye basın — çıktı olarak **çift tıkla açılan
 - **Dokunmatik / mobil** — Telefon ve tablette çalışır: tek parmak kaydırma, iki parmak yakınlaştırma, dokunarak seçme (şematik, PCB ve 3D); dar ekranda kayan sol panel.
 - **Ölçüm · Net listesi · PNG (PCB)** — İki tıkla mesafe (mm + mil, pad merkezine yapışır), aranabilir net listesi (Güç/GND/Sinyal filtresi, tıkla → vurgula), tek tıkla görünümün PNG'si, `?` ile yardım.
 - **BOM · Montaj paneli (PCB)** — Değer + footprint'e göre gruplanmış liste; satıra dokun → grubun tamamı board'da vurgulanır, ✓ ile montaj takibi (tarayıcıda saklanır), Üst/Alt/Kalan filtreleri, seçili parçada pin-1 işareti.
-- **Cross-platform** — Windows ve Linux; kodun tamamı `pathlib` ile OS-bağımsız.
+- **Cross-platform** — Windows, Linux ve macOS (deneysel); kodun tamamı `pathlib` ile OS-bağımsız.
 
 ---
 

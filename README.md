@@ -93,6 +93,21 @@ No web server, no installation, no internet required. Works directly via `file:/
   on the board, tick it off while assembling (progress is saved in the browser),
   filter by Top/Bottom/Remaining, pin-1 marker on the selected part.
 
+* **Altium Variants & DNP**
+  The variant selected in Altium is applied by default, and the viewers have a variant
+  selector. Not-fitted parts get a cross on the schematic and PCB (dashed orange if only
+  some channels are affected) and are hidden in 3D. BOM flags them, Pick & Place leaves
+  them out, and an **Ignore variant** checkbox turns this off.
+
+* **Schematic Color Themes**
+  Altium's original colors plus 11 KiCad-style light and dark themes, switchable in the
+  viewer toolbar and remembered in the browser.
+
+* **Full Net Route & High Contrast (PCB viewer)**
+  Selecting a net shows its whole route, including copper on layers that are switched off.
+  High Contrast (`S`) keeps the active side sharp and dims the rest, with an adjustable
+  opacity slider.
+
 * **Cross-platform**
   Works on Windows, Linux and macOS (experimental). Fully OS-independent via `pathlib`.
 
@@ -120,7 +135,7 @@ The application generates eight types of outputs:
 
 | Output                     | Format           | Description                       |
 | -------------------------- | ---------------- | --------------------------------- |
-| **Schematic Viewer**       | HTML (~30 MB)    | Single-file interactive schematic |
+| **Schematic Viewer**       | HTML (~2-9 MB)   | Single-file interactive schematic |
 | **PCB Viewer**             | HTML (~3-8 MB)   | Canvas viewer from raw geometry, net highlighting |
 | **Schematic + PCB + 3D ★** | HTML (~8-15 MB)  | Combined view with cross-probing  |
 | **MCU Pin List**           | XLSX             | MCU-centric pin mapping           |
@@ -131,12 +146,24 @@ The application generates eight types of outputs:
 
 ---
 
-## ⚙️ Installation
+## ⬇️ Download
+
+Ready-to-run builds are on the [Releases page](https://github.com/mcansiz/altiumVizitor/releases/latest). No Python needed.
+
+| Platform | File | Notes |
+| -------- | ---- | ----- |
+| **Windows 10/11 (64-bit)** | `SchematicViz-vX.Y.Z-win-x64.exe` | Single file, no installation. If it does not start on a fresh Windows machine, install the [MS VC++ Redistributable](https://aka.ms/vs/17/release/vc_redist.x64.exe). Not code-signed: SmartScreen → **More info → Run anyway**. |
+| **Linux (64-bit)** | `SchematicViz-vX.Y.Z-linux-x86_64.AppImage` | `chmod +x` and run. Needs glibc 2.35+ (Ubuntu 22.04+ / Debian 12+). Without FUSE: `--appimage-extract-and-run`. |
+| **macOS 11+ (Apple Silicon), experimental** | `SchematicViz-vX.Y.Z-macos-arm64.zip` | Passed automated tests only. Unsigned: if blocked on first launch use **System Settings → Privacy & Security → Open Anyway** or `xattr -dr com.apple.quarantine SchematicViz.app`. |
+
+---
+
+## ⚙️ Installation (from source)
 
 ### Requirements
 
 * **Python 3.12**
-* On Linux: `glibc ≥ 2.39` required due to dependency constraints
+* On Linux: `glibc ≥ 2.35` required due to dependency constraints (Ubuntu 22.04+ / Debian 12+)
 
 ### Install dependencies
 
@@ -310,6 +337,9 @@ Projeyi seçin, bir düğmeye basın — çıktı olarak **çift tıkla açılan
 - **Dokunmatik / mobil** — Telefon ve tablette çalışır: tek parmak kaydırma, iki parmak yakınlaştırma, dokunarak seçme (şematik, PCB ve 3D); dar ekranda kayan sol panel.
 - **Ölçüm · Net listesi · PNG (PCB)** — İki tıkla mesafe (mm + mil, pad merkezine yapışır), aranabilir net listesi (Güç/GND/Sinyal filtresi, tıkla → vurgula), tek tıkla görünümün PNG'si, `?` ile yardım.
 - **BOM · Montaj paneli (PCB)** — Değer + footprint'e göre gruplanmış liste; satıra dokun → grubun tamamı board'da vurgulanır, ✓ ile montaj takibi (tarayıcıda saklanır), Üst/Alt/Kalan filtreleri, seçili parçada pin-1 işareti.
+- **Altium varyantları ve DNP** — Altium'da seçili varyant varsayılan olarak uygulanır, görüntüleyicilerde varyant seçici vardır. Takılmayan parçalar şematik ve PCB'de çarpıyla işaretlenir (yalnız bazı kanallarda ise turuncu kesikli), 3D'de gizlenir. BOM'da işaretlenir, Pick &amp; Place'e girmez; **Varyantı yok say** kutusu bunu kapatır.
+- **Şematik renk temaları** — Altium'un özgün renklerine ek olarak KiCad tarzı 11 açık ve koyu tema; araç çubuğundan seçilir, tarayıcıda hatırlanır.
+- **Netin tüm yolu ve Kontrast kipi (PCB)** — Seçilen netin tüm yolu, kapalı katmanlardaki bakırı dahil gösterilir. Kontrast kipi (`S`) aktif yüzü net bırakır, diğerlerini soldurur; opaklığı kaydırıcıyla ayarlanır.
 - **Cross-platform** — Windows, Linux ve macOS (deneysel); kodun tamamı `pathlib` ile OS-bağımsız.
 
 ---
@@ -337,7 +367,7 @@ Uygulama sekiz ayrı çıktı üretir:
 
 | Çıktı                    | Format           | Açıklama                                                     |
 | ------------------------ | ---------------- | ------------------------------------------------------------ |
-| **Şematik Viewer**       | HTML (~30 MB)    | Gömülü SVG'lerle tek dosya interaktif şematik                |
+| **Şematik Viewer**       | HTML (~2-9 MB)   | Kanvasa çizilen tek dosya interaktif şematik                 |
 | **PCB Görüntüleyici**    | HTML (~3-8 MB)   | Ham geometriden canvas PCB, net highlight, cross-probe       |
 | **Şematik + PCB + 3D ★** | HTML (~8-15 MB)  | Üçü tek dosyada, çift yönlü cross-probe + 3D                 |
 | **MCU Pin Listesi**      | XLSX             | MCU merkezli pin listesi (fonksiyon/arayüz otomatik tespiti) |
@@ -349,12 +379,24 @@ Uygulama sekiz ayrı çıktı üretir:
 
 ---
 
-##  Kurulum
+## İndirme
+
+Hazır derlenmiş sürümler [Releases sayfasında](https://github.com/mcansiz/altiumVizitor/releases/latest). Python gerekmez.
+
+| Platform | Dosya | Not |
+| -------- | ----- | --- |
+| **Windows 10/11 (64-bit)** | `SchematicViz-vX.Y.Z-win-x64.exe` | Tek dosya, kurulum gerektirmez. Temiz bir Windows'ta açılmazsa [MS VC++ Redistributable](https://aka.ms/vs/17/release/vc_redist.x64.exe) kurun. İmzasız: SmartScreen'de **Ek bilgi → Yine de çalıştır**. |
+| **Linux (64-bit)** | `SchematicViz-vX.Y.Z-linux-x86_64.AppImage` | `chmod +x` ile çalıştırılabilir yapın. glibc 2.35+ (Ubuntu 22.04+ / Debian 12+). FUSE yoksa `--appimage-extract-and-run`. |
+| **macOS 11+ (Apple Silicon), deneysel** | `SchematicViz-vX.Y.Z-macos-arm64.zip` | Yalnız otomatik testlerden geçti. İmzasız: ilk açılışta engellenirse **Sistem Ayarları → Gizlilik ve Güvenlik → Yine de Aç** ya da `xattr -dr com.apple.quarantine SchematicViz.app`. |
+
+---
+
+##  Kurulum (kaynak koddan)
 
 ### Gereksinimler
 
 - **Python 3.12** 
-- Linux'ta `altium-monkey` bağımlılığı `wn-geometer` yalnızca `manylinux_2_39` wheel'i dağıttığından **glibc ≥ 2.39** gerekir (Ubuntu 24.04+ / Debian 13+). Eski dağıtımlarda `pip` `ResolutionImpossible` hatası verir.
+- Linux'ta `altium-monkey` bağımlılığı `wn-geometer` yalnızca `manylinux_2_35` wheel'i dağıttığından **glibc ≥ 2.35** gerekir (Ubuntu 22.04+ / Debian 12+). Eski dağıtımlarda `pip` `ResolutionImpossible` hatası verir.
 
 ### Bağımlılıklar
 
@@ -369,7 +411,7 @@ python3 -m pip install -r requirements.txt
 `requirements.txt` tüm listeyi içerir: PyQt5, altium-monkey, openpyxl ve 3D görünüm için
 zorunlu `cascadio` / `trimesh` / `numpy`.
 
-> **Not:** Gerekli minimum `altium-monkey` sürümü **2026.8.11**'dir. Uygulama açılışta
+> **Not:** Gerekli minimum `altium-monkey` sürümü **2026.9.19**'dur. Uygulama açılışta
 > tüm bağımlılıkları denetler (`deps.py`); eksik/eski paket varsa hangi paketin sorunlu
 > olduğunu ve kurulum komutunu söyleyen bir mesajla durur. Listeyi görmek için:
 > `py -3.12 deps.py`
@@ -477,7 +519,7 @@ Geliştirici dokümantasyonu için `CLAUDE.md`; kaynak-kod dokümantasyonu için
 
 ##  Mimari Kısa Notlar
 
-- **Tek-dosya HTML stratejisi**: SVG'ler gömülü, sunucu gerekmez, `file://` ile açılır — dosya büyük ama tamamen portable.
+- **Tek-dosya HTML stratejisi**: Çizim verisi sıkıştırılıp dosyaya gömülür, kanvasa çizilir; sunucu gerekmez, `file://` ile açılır, tamamen portable.
 - **Gerçek netlist**: JSON/Excel çıktıları `compile_netlist()` ile derlenen gerçek pin→net bağlantısı içerir; PcbDoc varsa netler PCB'den yeniden kurularak fiziksel doğruluk sağlanır.
 - **PyQt5** (PyQt6 değil): `app.exec_()` ve flat enum kullanımına dikkat.
 - **SchDoc/PcbDoc bulma**: Üç kademeli, OS-bağımsız fallback — Windows'ta kaydedilip Linux'ta açılan projeler de sorunsuz çözülür.

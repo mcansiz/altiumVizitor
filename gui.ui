@@ -218,6 +218,16 @@
              </widget>
             </item>
             <item>
+             <widget class="QCheckBox" name="ignoreVariantChk">
+              <property name="toolTip">
+               <string>Normalde projede seçili Altium varyantı uygulanır: takılmayan parçalar Pick&amp;Place'e girmez, BOM'da dnp olarak işaretlenir, görüntüleyicilerde çarpıyla görünür. Bu kutu işaretliyse tüm parçalar takılı sayılır. Görüntüleyicilerde varyant sonradan da değiştirilebilir.</string>
+              </property>
+              <property name="text">
+               <string>Varyantı yok say (tüm parçalar takılı)</string>
+              </property>
+             </widget>
+            </item>
+            <item>
              <spacer name="excelVSpacer">
               <property name="orientation">
                <enum>Qt::Vertical</enum>

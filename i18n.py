@@ -127,6 +127,16 @@ _EN = {
     "Sayfalar arası:": "Between sheets:",
     "Sayfa içi:": "Within sheet:",
     "Antet / firma logosunu gizle": "Hide title block / company logo",
+    "Varyantı yok say (tüm parçalar takılı)": "Ignore variant (all parts fitted)",
+    "Normalde projede seçili Altium varyantı uygulanır: takılmayan parçalar "
+    "Pick&Place'e girmez, BOM'da dnp olarak işaretlenir, görüntüleyicilerde "
+    "çarpıyla görünür. Bu kutu işaretliyse tüm parçalar takılı sayılır. "
+    "Görüntüleyicilerde varyant sonradan da değiştirilebilir.":
+        "The Altium variant selected in the project is normally applied: parts "
+        "that are not fitted are left out of Pick&Place, flagged as dnp in the "
+        "BOM and shown with a cross in the viewers. If this is checked, all "
+        "parts count as fitted. The variant can also be changed later in the "
+        "viewers.",
     "Sayfa antetini (firma logosu, gizlilik metni, DWN/CHK/REV/SHEET tablosu) "
     "üretilen HTML'e koyma. Altium'un Show Template Graphics / Title Block "
     "seçeneğini kapatmakla aynı şey: sayfa boyutu ve şema içeriği "
@@ -272,6 +282,16 @@ _EN = {
 _EN_LOG = {
     "  · IR yolu kullanılamadı, SVG yoluna dönülüyor ({a0}).":
         "  · IR path unavailable, falling back to SVG ({a0}).",
+    # --- varyant ------------------------------------------------------------
+    "  ! Varyant bulunamadı: {a0}": "  ! Variant not found: {a0}",
+    "  ! Varyant {a0}: {a1} kayıt şemada bulunamadı (projede eski kayıt olabilir).":
+        "  ! Variant {a0}: {a1} record(s) not found in the schematic (possibly stale project records).",
+    "  · Fiziksel kanal listesi alınamadı: {a0}":
+        "  · Could not read the physical channel list: {a0}",
+    "  · Etkin varyant: {a0} — {a1} parça takılmaz.":
+        "  · Active variant: {a0} — {a1} part(s) not fitted.",
+    "  · Varyant uygulanmadı: tüm parçalar takılı kabul ediliyor.":
+        "  · No variant applied: all parts count as fitted.",
     # --- genel akış / özet ------------------------------------------------
     "Proje: {a0}": "Project: {a0}",
     "{a0} şema bulundu.\n": "{a0} schematic(s) found.\n",
@@ -561,6 +581,27 @@ _EN.update(_EN_LOG)
 # şablonu bozar. (Kapsama denetimi: tools/check_html_i18n.py)
 # ---------------------------------------------------------------------------
 _EN_HTML = {
+    # --- varyant / DNP ------------------------------------------------------
+    "Varyantsız (hepsi takılı)": "No variant (all fitted)",
+    "Altium varyantı: takılmayan parçalar çarpıyla işaretlenir":
+        "Altium variant: parts that are not fitted are marked with a cross",
+    "Altium varyantı: takılmayan parçaların gövdesi gizlenir":
+        "Altium variant: bodies of parts that are not fitted are hidden",
+    "Takılmaz (DNP)": "Not fitted (DNP)",
+    "Bazı kanallarda takılmaz (DNP):": "Not fitted in some channels (DNP):",
+    "Varyant:": "Variant:",
+    "bu varyantta takılmaz, gövdesi gösterilmiyor":
+        "is not fitted in this variant, its body is not shown",
+    "Çarpı: seçili varyantta takılmayan parça. Montaj sayacına girmez,":
+        "Cross: part not fitted in the selected variant. Not counted for assembly,",
+    "BOM listesinin sonunda ayrı durur; aramada dnp yazınca listelenir.":
+        "listed separately at the end of the BOM; type dnp in search to list them.",
+    "Çarpı: seçili varyantta takılmayan parça (turuncu kesikli: yalnız bazı kanallarda). "
+    "Sayfadaki DNP yazıları elle konmuş metindir, kesin bilgi çarpıdır. "
+    "Aramada dnp yazınca listelenir.":
+        "Cross: part not fitted in the selected variant (dashed orange: only in some channels). "
+        "DNP texts on the sheet were placed by hand; the cross is the definitive information. "
+        "Type dnp in search to list them.",
     # --- ortak: araç çubuğu / gezinme -------------------------------------
     "Tam ekran aç / kapat ( F11 )": "Toggle full screen ( F11 )",
     "Tümü": "All",

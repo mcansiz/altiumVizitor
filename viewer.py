@@ -40,6 +40,7 @@ import re
 import sys
 import datetime
 import xml.etree.ElementTree as ET
+from html import escape as _html_escape
 from typing import Callable
 
 # Bağımlılık kapısı — viewer doğrudan import edildiğinde de (script/otomasyon)
@@ -91,7 +92,7 @@ from altium_monkey.altium_schdoc import AltiumSchDoc
 
 # Uygulama sürümü — tek kaynak burası; gui.py buradan import eder.
 # HTML çıktılarında sağ üst köşedeki rozette görünür (build saati yerine).
-APP_VERSION = "2.38.0"
+APP_VERSION = "2.39.0"
 
 # Önerilen minimum altium_monkey sürümü. Bu sürümden öncesinde:
 #   · 2026.6.21 öncesi — STM32 gibi IC'lerde dikey pin adları yatay çiziliyordu.
@@ -1921,6 +1922,138 @@ def _pick_pcbdoc(project_path, log):
     return (best, best_doc)
 
 
+# Üretici fonksiyonlarda `variant` varsayılanı: projede Altium'da SEÇİLİ varyant
+# (PrjPcb → [Design] CurrentVariant). None = varyantsız (tüm parçalar takılı),
+# kütüphanenin `to_bom(variant=None)` anlamıyla aynı.
+ACTIVE_VARIANT = "<active>"
+
+
+def _resolve_variant(project, variant, log=None):
+    """@brief İstenen varyantı projedeki gerçek varyant adına çevirir.
+
+    @param project AltiumPrjPcb nesnesi
+    @param variant ACTIVE_VARIANT · varyant adı · None
+    @param log Log mesajı callback'i (adı bulunamayan varyant için)
+    @return Varyant adı; varyant uygulanmayacaksa None
+    """
+    if variant is None:
+        return None
+    names = list(getattr(project, "variants", None) or {})
+    want = project.get_current_variant() if variant == ACTIVE_VARIANT else variant
+    for name in names:
+        if want and name.casefold() == str(want).casefold():
+            return name
+    if variant != ACTIVE_VARIANT and log:
+        log(tr('  ! Varyant bulunamadı: {a0}').format(a0=variant))
+    return None
+
+
+def project_variant_view(project, variant=ACTIVE_VARIANT, log=None,
+                         uid_to_des=None, phys_by_uid=None):
+    """@brief Görüntüleyicilere gömülecek varyant verisini (DNP listeleri) kurar.
+
+    @details
+    Altium "takılmaz" bilgisini şemada değil PrjPcb'nin `[ProjectVariantN]`
+    bölümünde tutar: `Designator=R29|UniqueId=\\SYM\\SYM\\UID|Kind=1`. Şemadaki
+    "DNP" yazıları ise tasarımcının elle koyduğu serbest metinlerdir ve hangi
+    parçaya ait oldukları belli değildir; kesin kaynak yalnız bu kayıtlardır.
+
+    Designator FİZİKSELDİR (kanal soneki dahil, `C85_2`) → PCB ve 3D doğrudan
+    kullanır. Şematik tekrar sayfasını BİR kez çizdiği için mantıksal komponente
+    (`C85`) inmek gerekir: UniqueId'nin son parçası komponentin kendi kimliğidir.
+    Kanal sayısı (`t`) yalnız bazı kanallarda takılmayan parçayı ayırt etmek için.
+
+    @param project AltiumPrjPcb nesnesi
+    @param variant Açılışta seçili varyant (bkz. _resolve_variant)
+    @param log Log mesajı callback'i
+    @param uid_to_des {UniqueId: mantıksal designator}; yoksa `c` kurulmaz
+    @param phys_by_uid {UniqueId: fiziksel designator kümesi}
+    @return {"cur": indeks (-1 = varyantsız),
+             "list": [{"n": ad, "d": [fiziksel...],
+                       "c": {mantıksal: {"p": [fiziksel...], "t": kanal sayısı}}}]}
+    """
+    view = {"cur": -1, "list": []}
+    variants = getattr(project, "variants", None) or {}
+    if not variants:
+        return view
+    active = _resolve_variant(project, variant, log)
+    known = set((uid_to_des or {}).values())
+    for i, (name, vdata) in enumerate(variants.items()):
+        if name == active:
+            view["cur"] = i
+        phys, by_des, stale = [], {}, 0
+        for row in vdata.get("variations") or []:
+            if str(row.get("Kind", "")) != "1":
+                continue
+            des = str(row.get("Designator") or "").strip()
+            if not des:
+                continue
+            phys.append(des)
+            if uid_to_des is None:
+                continue
+            uid = str(row.get("UniqueId") or "").rsplit("\\", 1)[-1]
+            logical = uid_to_des.get(uid) or (des if des in known else None)
+            if not logical:
+                stale += 1
+                continue
+            ent = by_des.setdefault(logical, {"p": [], "t": 0})
+            ent["p"].append(des)
+            ent["t"] = max(ent["t"], len(ent["p"]), len((phys_by_uid or {}).get(uid) or ()))
+        rec = {"n": name, "d": phys}
+        if uid_to_des is not None:
+            rec["c"] = by_des
+        view["list"].append(rec)
+        if stale and log:
+            log(tr('  ! Varyant {a0}: {a1} kayıt şemada bulunamadı (projede eski kayıt olabilir).')
+                .format(a0=name, a1=stale))
+    return view
+
+
+def _physical_variant_view(project_path, variant=ACTIVE_VARIANT, log=None):
+    """@brief PCB ve 3D için varyant verisi: yalnız fiziksel designator'lar.
+
+    @param project_path Altium proje dosyası (.PrjPcb) yolu
+    @param variant Açılışta seçili varyant
+    @param log Log mesajı callback'i
+    @return project_variant_view biçiminde sözlük (`c` alanı yok)
+    """
+    try:
+        return project_variant_view(AltiumPrjPcb(project_path), variant, log)
+    except Exception as e:
+        if log:
+            log(tr('  ! Varyant okuma hatası: {a0}').format(a0=e))
+        return {"cur": -1, "list": []}
+
+
+def _js_json(obj) -> str:
+    """@brief Satır-içi script'e gömülecek JSON (`</` kaçırılır: script kapanmasın).
+
+    @param obj JSON'a çevrilecek nesne
+    @return JSON metni
+    """
+    return json.dumps(obj, separators=(",", ":")).replace("</", "<\\/")
+
+
+def _variant_select_html(view, cls, title):
+    """@brief Varyant seçici (`#var-sel`); projede varyant yoksa boş metin.
+
+    Seçenekler üretimde yazılır: şematiğin "Kaydet" klonu DOM'u kopyaladığından
+    script'le eklenseydi kopyada iki kez görünürdü.
+
+    @param view project_variant_view çıktısı
+    @param cls CSS sınıfları
+    @param title Çeviri işaretli araç ipucu
+    @return HTML metni
+    """
+    if not view or not view.get("list"):
+        return ""
+    opts = ['<option value="-1">⟪Varyantsız (hepsi takılı)⟫</option>']
+    for i, v in enumerate(view["list"]):
+        sel = " selected" if i == view.get("cur") else ""
+        opts.append(f'<option value="{i}"{sel}>{_html_escape(v["n"])}</option>')
+    return f'<select class="{cls}" id="var-sel" title="{title}">{"".join(opts)}</select>'
+
+
 _SCH_IR_RENDERER = "?"          # "?" = henüz denenmedi, None = yok
 
 
@@ -1978,20 +2111,22 @@ def _hide_title_block(schdoc) -> bool:
 
 
 def _collect_data(project_path: str, log, with_pcb=False, progress=None,
-                  hide_title_block=False):
+                  hide_title_block=False, variant=ACTIVE_VARIANT):
     """@brief Projeyi yükle, tüm sayfa/net/komponent verilerini topla.
-    
+
     Hem generate_viewer hem generate_json bunu kullanır.
     with_pcb=True ise PCB cross-probe verisi de toplanır (maliyetli, sadece
     HTML viewer için).
     progress(frac, label): 0..1 arası şematik-faz ilerlemesi (opsiyonel).
-    
+
     @param project_path Altium proje dosyası (.PrjPcb) yolu
     @param log Log mesajı callback'i (str alır)
     @param with_pcb PCB dahil mi (bool)
     @param progress İlerleme callback'i (yüzde:int, etiket:str)
     @param hide_title_block Antet/firma logosu render edilmesin mi (bkz.
                             _hide_title_block)
+    @param variant ACTIVE_VARIANT (projede seçili varyant) · varyant adı ·
+                   None (varyantsız, hepsi takılı)
     @return Üretilen sonuç.
     """
     patch_altium_text_decoding()   # cp1252'ye sığmayan metin sayfayı düşürmesin
@@ -2198,6 +2333,10 @@ def _collect_data(project_path: str, log, with_pcb=False, progress=None,
     ]
     net_list.sort(key=lambda x: (-x["count"], x["name"].lower()))
 
+    # Varyant kayıtları komponenti UniqueId ile gösterir; birleştirmeden önce
+    # sakla (birleştirilmiş kayıtta UniqueId yok).
+    uid_to_des = {c["unique_id"]: c["designator"] for c in components if c.get("unique_id")}
+
     # === Multi-part komponentleri birleştir ===
     # STM32 gibi IC'ler şemada IC2A/IC2B/IC2C diye part'lara bölünür ama tek
     # mantıksal komponenttir. Aynı designator'ı tek girişte topla, her part'ın
@@ -2303,7 +2442,9 @@ def _collect_data(project_path: str, log, with_pcb=False, progress=None,
 
     # === BOM / Pick&Place / Varyant (AltiumDesign API) ===
     prog(0.96, tr('Tasarım verileri'))
-    design_extras = collect_design_extras(project_path, log)
+    design_extras = collect_design_extras(project_path, log, variant=variant)
+    variant_view = project_variant_view(project, variant, log, uid_to_des,
+                                        design_extras.get("phys_by_uid"))
 
     # === PCB cross-probe (opsiyonel, maliyetli) ===
     if with_pcb:
@@ -2317,6 +2458,7 @@ def _collect_data(project_path: str, log, with_pcb=False, progress=None,
         "components": components,
         "netlist": netlist,
         "design_extras": design_extras,
+        "variants": variant_view,
         "pcb": pcb_data,
         "project_name": Path(project_path).stem,
     }
@@ -2749,20 +2891,23 @@ def _merge_netlist_with_pcb(netlist, project_path, log):
     log(tr("  ✓ Netlist PCB'den kuruldu: {a0} PCB neti ({a1} pad; {a2} pin adı şematikten eşleşti; {a3} otomatik ad şematik etiket/port adıyla değiştirildi) + {a4} şematik-yalnız net korundu.").format(a0=len(pcb_groups), a1=total_pins, a2=named_pins, a3=renamed, a4=kept_sch))
 
 
-def collect_design_extras(project_path, log):
+def collect_design_extras(project_path, log, variant=ACTIVE_VARIANT):
     """@brief AltiumDesign API'si üzerinden BOM, Pick&Place ve varyant bilgisini topla.
-    
+
     Bu API güncel altium_monkey sürümlerinde mevcut (2026.6.x+). Eski sürümde
     veya hata durumunda her alan için boş/None döner — uygulama yine çalışır.
 
-    Döner: {"variants": [...], "bom": [...], "pnp": [...], "has_pcb": bool}
-    
+    Döner: {"variants": [...], "active_variant": ad|None, "dnp": [...],
+            "phys_by_uid": {...}, "bom": [...], "pnp": [...], "has_pcb": bool}
+
     @param project_path Altium proje dosyası (.PrjPcb) yolu
     @param log Log mesajı callback'i (str alır)
+    @param variant ACTIVE_VARIANT (projede seçili varyant) · varyant adı ·
+                   None (varyantsız, hepsi takılı)
     @return Üretilen sonuç.
     """
-    result = {"variants": [], "bom": [], "pnp": [], "has_pcb": False,
-              "available": False}
+    result = {"variants": [], "active_variant": None, "dnp": [], "phys_by_uid": {},
+              "bom": [], "pnp": [], "has_pcb": False, "available": False}
     try:
         from altium_monkey.altium_design import AltiumDesign
     except Exception:
@@ -2803,20 +2948,40 @@ def collect_design_extras(project_path, log):
             log(tr('  ✓ {a0} varyant: {a1}').format(a0=len(result['variants']), a1=', '.join(result['variants'])))
         else:
             log(tr('  · Varyant tanımlı değil'))
+        active = _resolve_variant(design.project, variant, log) if result["variants"] else None
+        result["active_variant"] = active
     except Exception as e:
+        active = None
         log(tr('  ! Varyant okuma hatası: {a0}').format(a0=e))
 
-    # BOM (tüm komponentler, varyant=None → hepsi)
+    # Mantıksal komponent → fiziksel kopyalar (kanal başına). Yalnız "bazı
+    # kanallarda takılmaz" ayrımı için gerekir; to_bom zaten derlediğinden ek
+    # maliyet yok. Hata olursa şematik her kaydı "tam takılmaz" sayar.
     try:
-        bom = design.to_bom(variant=None)
+        by_uid = result["phys_by_uid"]
+        for comp in design.compile().components:
+            if comp.source_object_id and comp.physical_designator:
+                by_uid.setdefault(comp.source_object_id, set()).add(comp.physical_designator)
+    except Exception as e:
+        log(tr('  · Fiziksel kanal listesi alınamadı: {a0}').format(a0=e))
+
+    # BOM (tüm komponentler; varyant varsa takılmayanlarda dnp=True)
+    try:
+        bom = design.to_bom(variant=active)
         result["bom"] = bom or []
+        result["dnp"] = [r.get("designator", "") for r in result["bom"] if r.get("dnp")]
         log(tr('  ✓ BOM: {a0} komponent').format(a0=len(result['bom'])))
     except Exception as e:
         log(tr('  ! BOM hatası: {a0}').format(a0=e))
 
-    # Pick & Place (PCB gerekir — yoksa graceful)
+    if active:
+        log(tr('  · Etkin varyant: {a0} — {a1} parça takılmaz.').format(a0=active, a1=len(result['dnp'])))
+    elif result["variants"]:
+        log(tr('  · Varyant uygulanmadı: tüm parçalar takılı kabul ediliyor.'))
+
+    # Pick & Place (PCB gerekir — yoksa graceful). Takılmayan parçalar listeye girmez.
     try:
-        pnp_entries = design.to_pnp(variant=None, units="mm")
+        pnp_entries = design.to_pnp(variant=active, units="mm")
         pnp_list = []
         for e in (pnp_entries or []):
             # PnpEntry objesi → dict (to_json varsa onu kullan)
@@ -4112,9 +4277,10 @@ def generate_viewer(
     log: Callable[[str], None] = print,
     progress: Callable[[int, str], None] = None,
     hide_title_block: bool = False,
+    variant=ACTIVE_VARIANT,
 ):
     """@brief Tam interaktif HTML viewer üret (gömülü SVG'lerle, büyük dosya).
-    
+
     @param project_path Altium proje dosyası (.PrjPcb) yolu
     @param output_path Çıktı dosyası yolu
     @param inter_sheet_color Sayfalar arası bağlantı rengi (hex)
@@ -4123,20 +4289,21 @@ def generate_viewer(
     @param progress İlerleme callback'i (yüzde:int, etiket:str)
     @param hide_title_block Sayfa anteti / firma logosu (özel şablon grafikleri
                             + standart antet) çizilmesin mi
+    @param variant Açılışta seçili varyant (ACTIVE_VARIANT · ad · None)
     """
     prog = progress or (lambda percent, label: None)
     prog(2, tr('Şematik verisi toplanıyor'))
     data = _collect_data(
         project_path, log, with_pcb=True,
         progress=lambda frac, label: prog(2 + int(frac * 88), label),
-        hide_title_block=hide_title_block,
+        hide_title_block=hide_title_block, variant=variant,
     )
     prog(92, tr('HTML oluşturuluyor'))
     timestamp = datetime.datetime.now().strftime("%H:%M:%S")
     html = build_html(
         data["sheets"], data["net_list"], data["components"], timestamp,
         inter_sheet_color, intra_sheet_color, pcb=data.get("pcb"),
-        project_name=data["project_name"],
+        project_name=data["project_name"], variants=data.get("variants"),
     )
     out = Path(output_path)
     out.parent.mkdir(parents=True, exist_ok=True)
@@ -4155,6 +4322,7 @@ def generate_combined_viewer(
     log: Callable[[str], None] = print,
     progress: Callable[[int, str], None] = None,
     hide_title_block: bool = False,
+    variant=ACTIVE_VARIANT,
 ):
     """@brief Şematik + PCB tek HTML'de yan yana, çift yönlü cross-probe.
 
@@ -4178,6 +4346,7 @@ def generate_combined_viewer(
     @param progress İlerleme callback'i (yüzde:int, etiket:str)
     @param hide_title_block Sayfa anteti / firma logosu (özel şablon grafikleri
                             + standart antet) çizilmesin mi
+    @param variant Açılışta seçili varyant (ACTIVE_VARIANT · ad · None)
     @return Üretilen sonuç.
     """
     prog = progress or (lambda percent, label: None)
@@ -4202,7 +4371,7 @@ def generate_combined_viewer(
     data = _collect_data(
         project_path, log, with_pcb=True,
         progress=lambda frac, label: prog(2 + int(frac * 48), label),
-        hide_title_block=hide_title_block,
+        hide_title_block=hide_title_block, variant=variant,
     )
     timestamp = datetime.datetime.now().strftime("%H:%M:%S")
 
@@ -4211,8 +4380,9 @@ def generate_combined_viewer(
     sch_html = build_html(
         data["sheets"], data["net_list"], data["components"], timestamp,
         inter_sheet_color, intra_sheet_color, pcb=data.get("pcb"),
-        project_name=data["project_name"],
+        project_name=data["project_name"], variants=data.get("variants"),
     )
+    phys_variants = _physical_variant_view(project_path, variant)
 
     comp_info = {
         c["designator"]: {
@@ -4238,7 +4408,8 @@ def generate_combined_viewer(
     have_pcb = bool(geo.get("available"))
     if have_pcb:
         pcb_html = build_pcb_canvas_html(geo, comp_info, timestamp,
-                                         Path(project_path).stem, pcb_path.name)
+                                         Path(project_path).stem, pcb_path.name,
+                                         variants=phys_variants)
     else:
         log(tr('  · PCB yok — birleşik görünümde sağ panel boş olacak.'))
         pcb_html = empty_pcb_html
@@ -4255,7 +4426,8 @@ def generate_combined_viewer(
 
     # 3) 3D görünüm HTML'i (board + komponent gövdeleri)
     have_3d = bool(board3d and board3d.get("available"))
-    td_html = build_3d_html(board3d, timestamp, Path(project_path).stem) if have_3d else ""
+    td_html = (build_3d_html(board3d, timestamp, Path(project_path).stem, variants=phys_variants)
+               if have_3d else "")
 
     # 4) Kabuk: üç iframe + splitter + köprü
     prog(94, tr('Birleştiriliyor ve yazılıyor'))
@@ -4271,19 +4443,21 @@ def generate_combined_viewer(
     return True
 
 
-def build_3d_html(d3d, timestamp, project_name):
+def build_3d_html(d3d, timestamp, project_name, variants=None):
     """@brief Three.js ile 3D PCB: board levhası + extrude komponent gövdeleri,
-    
+
     orbit kontrol (döndür/zoom/pan), tıkla→cross-probe. Self-contained (Three.js
     gömülü). f-string DEĞİL: büyük JS bloğunda brace kaçışı olmasın diye
     placeholder + .replace kullanılır (Python .replace tamamen literaldir).
-    
+
     @param d3d 3B veri sözlüğü (board3d)
     @param timestamp Zaman damgası metni
     @param project_name Proje adı
+    @param variants project_variant_view çıktısı (takılmayan parçalar gizlenir)
     @return Üretilen sonuç.
     """
     import json
+    variants = variants or {"cur": -1, "list": []}
     tpl = r'''<!DOCTYPE html><html><head><meta charset="utf-8">__VIEWPORT__<style>
   html,body{margin:0;height:100%;background:#9499a0;overflow:hidden;
             font-family:"Segoe UI",system-ui,sans-serif;}
@@ -4294,6 +4468,10 @@ def build_3d_html(d3d, timestamp, project_name):
        padding:4px 11px;border-radius:4px;cursor:pointer;}
   .b3d:hover{border-color:#4ec9b0;color:#4ec9b0;}
   .b3d.on{background:#4ec9b0;color:#0a0a0a;border-color:#4ec9b0;font-weight:bold;}
+  .tool-sel{background:#1a1a1a;border:1px solid #333;color:#bbb;font-size:11px;
+            padding:3px 4px;border-radius:4px;cursor:pointer;max-width:160px;font-family:inherit;}
+  .tool-sel:hover{border-color:#4ec9b0;color:#4ec9b0;}
+  .tool-sel option{background:#222;color:#ccc;}
   #lbl3d{position:absolute;left:0;top:0;background:rgba(20,20,20,.9);color:#4ec9b0;
          font-size:12px;padding:2px 7px;border-radius:3px;pointer-events:none;
          display:none;transform:translate(10px,-130%);z-index:6;white-space:nowrap;}
@@ -4305,7 +4483,7 @@ def build_3d_html(d3d, timestamp, project_name):
   @media (max-width:820px){ #tb3d{flex-wrap:wrap;justify-content:flex-end;left:8px;}
     #info3d{right:8px;line-height:1.4;} }
   /* Dokunmatik: parmak hedefleri >= 40 px */
-  @media (pointer:coarse){ .b3d{min-height:40px;min-width:40px;font-size:12px;} }
+  @media (pointer:coarse){ .b3d,.tool-sel{min-height:40px;min-width:40px;font-size:12px;} }
 </style></head><body>
 <canvas id="c3d"></canvas>
 <div id="tb3d">
@@ -4315,6 +4493,7 @@ def build_3d_html(d3d, timestamp, project_name):
   <button class="b3d" id="v-rot">⟪Döndür⟫</button>
   <button class="b3d on" id="v-comp" title="⟪Komponentleri gizle/göster — çıplak board'u incele⟫">⟪Parçalar⟫</button>
   <button class="b3d on" id="v-lod" title="⟪LOD: döndürme/zoom sırasında çözünürlük düşürülür (akıcılık), durunca netleşir⟫">LOD</button>
+  __VARSEL__
 </div>
 <div id="lbl3d"></div>
 <div id="info3d">⟪Sürükle / tek parmak: döndür · Tekerlek / iki parmak: imlecin olduğu yere zoom · Sağ-sürükle veya iki parmak kaydır: taşı · Tıkla: komponent⟫</div>
@@ -4326,6 +4505,20 @@ if (window.matchMedia && matchMedia('(pointer: coarse)').matches)
   document.getElementById('info3d').textContent =
     '⟪Tek parmak: döndür · İki parmak: yakınlaştır + kaydır · Dokun: komponent⟫';
 const D = __DATA__;
+// Varyant: takılmayan parçaların gövdesi gösterilmez (bkz. project_variant_view)
+const VARIANTS = __VARIANTS__;
+let varIdx = VARIANTS.cur;
+let DNP = new Set();
+function dnpRefresh(){ const v = VARIANTS.list[varIdx]; DNP = new Set(v ? v.d : []); }
+dnpRefresh();
+const info3d = document.getElementById('info3d');
+const INFO3D = info3d.textContent;
+// Seçim takılmayan bir parçaya geldiyse boş sahne yerine nedeni yazılır
+function dnpNote(d){
+  const off = !!(d && DNP.has(d));
+  info3d.textContent = off ? d + ' ⟪bu varyantta takılmaz, gövdesi gösterilmiyor⟫' : INFO3D;
+  info3d.style.color = off ? '#b71c1c' : '';
+}
 const canvas = document.getElementById('c3d');
 function fail(msg){ const e=document.createElement('div'); e.id='err3d'; e.textContent=msg;
   document.body.appendChild(e); }
@@ -4704,7 +4897,7 @@ function pick(e){
   return hits.length ? hits[0].object : null;
 }
 function setSel(desig){
-  const has = !!(desig && meshByDesig[desig] && meshByDesig[desig].length);
+  const has = !!(desig && meshByDesig[desig] && meshByDesig[desig].length && !DNP.has(desig));
   dimMats.forEach(m=>{
     // önce eski haline döndür
     if(m.userData.col0) m.color.copy(m.userData.col0);
@@ -4725,6 +4918,7 @@ function setSel(desig){
 canvas.addEventListener('click', e=>{
   if(moved) return;
   const o = pick(e);
+  dnpNote(null);
   if(o && o.userData.desig){
     lastXpSel = o.userData.desig; setSel(lastXpSel); crossOut(lastXpSel);
   }
@@ -4754,8 +4948,22 @@ canvas.addEventListener('mousemove', e=>{
 const IN_FRAME = window.parent && window.parent!==window;
 function crossOut(d){ if(IN_FRAME) window.parent.postMessage(
   {type:'xprobe', source:'3d', designator:d}, '*'); }
+const varSel = document.getElementById('var-sel');
+function setVariant(i, quiet){
+  varIdx = (i >= 0 && i < VARIANTS.list.length) ? i : -1;
+  if(varSel) varSel.value = String(varIdx);
+  dnpRefresh();
+  applyPartVis();
+  setSel(lastXpSel);
+  dnpNote(lastXpSel);
+  if(!quiet && IN_FRAME) window.parent.postMessage(
+    {type:'xprobe-variant', source:'3d', idx:varIdx}, '*');
+}
+if(varSel) varSel.addEventListener('change', e=>setVariant(+e.target.value));
 window.addEventListener('message', ev=>{
-  const m=ev.data; if(!m||m.type!=='xprobe'||m.source==='3d') return;
+  const m=ev.data; if(!m||m.source==='3d') return;
+  if(m.type==='xprobe-variant'){ setVariant(m.idx, true); return; }
+  if(m.type!=='xprobe') return;
   let d = m.designator || null;      // designator yok → "seçimi temizle"
   if(d && !meshByDesig[d]){
     // Şematikten MANTIKSAL ad gelmiş olabilir (hiyerarşik kanal: R103) →
@@ -4772,8 +4980,9 @@ window.addEventListener('message', ev=>{
   // yerel olarak sıfırlıyor, o yüzden tekrar mesajını "yeni" saymamalı.
   if(d === lastXpSel) return;
   lastXpSel = d;
+  dnpNote(d);
   // Yeni bir seçim geldi ve parçalar gizli → seçim görünsün diye geri aç
-  if(d && !compsVisible) compBtn.onclick();
+  if(d && !DNP.has(d) && !compsVisible) compBtn.onclick();
   setSel(d);
 });
 
@@ -4789,10 +4998,15 @@ rotBtn.onclick=()=>{ autoRot=!autoRot; rotBtn.classList.toggle('on',autoRot); };
 //     mesh'ler (extrude gövdeler + STEP modelleri) gizlenir. ===
 const compBtn=document.getElementById('v-comp');
 let compsVisible=true;
+function applyPartVis(){
+  pickList.forEach(m=>{
+    if(m.userData.part) m.visible = compsVisible && !DNP.has(m.userData.desig);
+  });
+}
 compBtn.onclick=()=>{
   compsVisible=!compsVisible;
   compBtn.classList.toggle('on', compsVisible);
-  pickList.forEach(m=>{ if(m.userData.part) m.visible=compsVisible; });
+  applyPartVis();
   // Gizli parçada seçim asılı kalmasın. crossOut YOK: parçaları gizlemek yerel bir
   // görünüm tercihi, diğer panellerin (şematik/PCB) seçimini düşürmemeli.
   if(!compsVisible) setSel(null);
@@ -4817,6 +5031,7 @@ function init(){
   renderer.setPixelRatio(Math.min(devicePixelRatio||1, 1.5));  // yüksek-DPI'de piksel sınırı → FPS
   renderer.setSize(W,H,false);
   buildScene();
+  applyPartVis();
   applyCam();
   new ResizeObserver(resize).observe(canvas);
   window.addEventListener('resize', resize);
@@ -4829,6 +5044,10 @@ else fail('⟪Bu projede 3D verisi bulunamadı.⟫');
     return _tr_html(tpl
                     .replace("__VIEWPORT__", _MOBILE_META)
                     .replace("__GESTURE__", _GESTURE_JS)
+                    .replace("__VARSEL__", _variant_select_html(
+                        variants, "tool-sel",
+                        "⟪Altium varyantı: takılmayan parçaların gövdesi gizlenir⟫"))
+                    .replace("__VARIANTS__", _js_json(variants))
                     .replace("__THREE__", _three_js_source())
                     .replace("__DATA__", json.dumps(d3d)))
 
@@ -5077,7 +5296,7 @@ const HAVE_3D  = {have_3d_js};
 const frameSch = document.getElementById('frame-sch');
 const framePcb = document.getElementById('frame-pcb');
 const frame3d  = HAVE_3D ? document.getElementById('frame-3d') : null;
-let td_loaded = false, pcb_loaded = false, lastSel = null, lastNet = null;
+let td_loaded = false, pcb_loaded = false, lastSel = null, lastNet = null, lastVar = null;
 
 // gzip+base64 → metin (DecompressionStream). Yoksa null (eski tarayıcı).
 async function gunzipB64(b64) {{
@@ -5163,6 +5382,7 @@ frameSch.addEventListener('load',
   () => setTimeout(() => hoistTools(frameSch, 'toolbar', 'sch'), 60));
 loadFrame('frame-sch', SCH_GZ);
 function repostSel(fr) {{ setTimeout(() => {{
+  if (lastVar !== null) postTo(fr, {{type:'xprobe-variant', source:'shell', idx:lastVar}});
   if (lastSel) postTo(fr, {{type:'xprobe', source:'sch', designator:lastSel}});
   if (lastNet) postTo(fr, {{type:'xprobe-net', source:'sch', net:lastNet}});
 }}, 400); }}
@@ -5190,6 +5410,15 @@ function postTo(fr, d) {{ try {{ if (fr && fr.contentWindow) fr.contentWindow.po
 window.addEventListener('message', ev => {{
   const d = ev.data;
   if (!d) return;
+  // Varyant seçimi üç panelde de aynı olmalı. Henüz yüklenmemiş panel son seçimi
+  // yüklenince alır (repostSel).
+  if (d.type === 'xprobe-variant') {{
+    lastVar = d.idx;
+    if (d.source !== 'sch') postTo(frameSch, d);
+    if (d.source !== 'pcb') postTo(framePcb, d);
+    if (d.source !== '3d') postTo(frame3d, d);
+    return;
+  }}
   // Net seçimi (v2.18.0): yalnız şematik ↔ PCB arasında anlamlı — 3D'de net
   // verisi yok. net YOKSA "net vurgusunu bırak" demektir.
   if (d.type === 'xprobe-net') {{
@@ -5465,6 +5694,13 @@ __MOBILE_META__
   .bchk { width:16px; height:16px; flex-shrink:0; border:1px solid #555; border-radius:3px;
           color:#4ec9b0; font-size:12px; line-height:14px; text-align:center; background:#111; }
   .brow.done .bchk { background:#1d4d33; border-color:#4ec9b0; }
+  .brow.dnp .bchk { border-color:transparent; background:none; color:#ff6b5b; cursor:default; }
+  .brow.dnp .bv { color:#ff8a80; }
+  .dnp-tag { color:#ff6b5b; border:1px solid #a33; border-radius:3px; font-size:9px;
+             padding:0 3px; margin-left:5px; font-weight:bold; }
+  .pdnp { color:#ff8a80; background:#3a1a1a; border-left:3px solid #e53935; padding:5px 8px;
+          margin-bottom:6px; font-size:11px; font-weight:bold; }
+  .pdnp span { display:block; color:#b98; font-weight:normal; font-size:10px; }
   .bq { color:#4ec9b0; min-width:22px; flex-shrink:0; text-align:right; }
   .bm { flex:1; min-width:0; }
   .bv { color:#eee; font-weight:bold; }
@@ -5489,6 +5725,10 @@ __MOBILE_META__
   .hc-box.on { display:inline-flex; }
   .hc-box input { width:80px; margin:0; accent-color:#4ec9b0; cursor:pointer; }
   .hc-box span { min-width:30px; text-align:right; }
+  .tool-sel { background:rgba(30,30,30,0.92); border:1px solid #444; color:#ddd; padding:5px 6px;
+              border-radius:5px; cursor:pointer; font-size:12px; font-family:inherit; max-width:170px; }
+  .tool-sel:hover { border-color:#4ec9b0; color:#4ec9b0; }
+  .tool-sel option { background:#222; color:#ccc; }
   #info { position:absolute; bottom:10px; left:10px; background:rgba(20,20,20,0.85);
           padding:5px 12px; border-radius:4px; font-size:11px; color:#888; z-index:40; }
   #stat { position:absolute; bottom:10px; right:10px; background:rgba(20,20,20,0.85);
@@ -5554,7 +5794,7 @@ __MOBILE_META__
   /* Dokunmatik: parmak hedefleri ≥ 40 px; arama kutusu 16 px (iOS odakta
      sayfayı yakınlaştırmasın). */
   @media (pointer: coarse) {
-    .tb { min-height:40px; min-width:40px; }
+    .tb, .tool-sel { min-height:40px; min-width:40px; }
     .hc-box { min-height:40px; }
     .hc-box input { width:120px; height:32px; }
     #sb-toggle { width:36px; height:36px; font-size:14px; line-height:34px; }
@@ -5653,6 +5893,7 @@ __MOBILE_META__
         <input type="range" id="hc-op" min="0" max="80" step="5" value="20">
         <span id="hc-val">20%</span></label>
       <button class="tb more-btn" id="more-btn" title="⟪Diğer araçlar⟫">⋯</button>
+      __VARSEL__
       <button class="tb tb-more" id="b-all" title="⟪Tüm katmanları göster⟫">⟪Hepsi⟫</button>
       <button class="tb tb-more" id="b-none" title="⟪Tüm katmanları gizle⟫">⟪Temizle⟫</button>
       <button class="tb tb-more" id="b-meas" title="⟪Ölçüm ( M )⟫">⟪Ölç⟫</button>
@@ -5688,6 +5929,8 @@ __MOBILE_META__
       <table>
         <tr><td>⟪BOM · Montaj⟫</td><td>⟪Değer+footprint grubuna tıkla → grubun tamamı⟫
             ⟪vurgulanır; ✓ ile montaj takibi (tarayıcıda saklanır, Dışa/İçe ile taşınır)⟫</td></tr>
+        <tr><td>DNP</td><td>⟪Çarpı: seçili varyantta takılmayan parça. Montaj sayacına girmez,⟫
+            ⟪BOM listesinin sonunda ayrı durur; aramada dnp yazınca listelenir.⟫</td></tr>
         <tr><td>⟪Yüz⟫</td><td>⟪Katmanları gizli yüzdeki komponent seçilmez, pad etiketi⟫
             ⟪basılmaz. İki yüz açıkken aktif yüz önce gelir (Çevir = alt yüz).⟫</td></tr>
         <tr><td>⟪Geometri tabanlı⟫</td><td>⟪Board SVG olarak değil, ham geometri (iz/pad/via/⟫
@@ -5706,6 +5949,16 @@ const GEO_GZ = "__GEO_GZ__";
 const COMP_INFO = __COMPINFO__;
 const PROJECT = __PROJECTJSON__;
 let G = null;                       // geometri (gzip'ten çözülür)
+// Varyant: takılmayan parçalar (fiziksel designator; bkz. project_variant_view)
+const VARIANTS = __VARIANTS__;
+let varIdx = VARIANTS.cur;
+let DNP = new Set(), dnpComps = [];
+function dnpRefresh() {
+  const v = VARIANTS.list[varIdx];
+  DNP = new Set(v ? v.d : []);
+  dnpComps = G ? G.comps.filter(c => DNP.has(c.d)) : [];
+}
+dnpRefresh();
 const cv = document.getElementById('cv'), ctx = cv.getContext('2d');
 const wrap = document.getElementById('wrap');
 const info = document.getElementById('info');
@@ -5982,6 +6235,21 @@ function draw() {
 // Ekran uzayında çizilenler: seçim kutusu, pad etiketleri, ölçüm
 function drawOverlay(r) {
   ctx.save();
+  // Takılmayan parçaların üstüne çarpı (Altium'un varyant görünümündeki gibi).
+  // Yalnız görünür yüzde: gizli yüzdeki parçanın işareti karşı yüzdekine binerdi.
+  dnpComps.forEach(c => {
+    if (!c.b || !compLive(c)) return;
+    const p = [w2s(c.b[0], c.b[1]), w2s(c.b[2], c.b[1]), w2s(c.b[2], c.b[3]), w2s(c.b[0], c.b[3])];
+    const x0 = Math.min(...p.map(q => q.x)), y0 = Math.min(...p.map(q => q.y));
+    const x1 = Math.max(...p.map(q => q.x)), y1 = Math.max(...p.map(q => q.y));
+    if (x1 < 0 || y1 < 0 || x0 > r.width || y0 > r.height) return;
+    ctx.beginPath();
+    ctx.moveTo(x0, y0); ctx.lineTo(x1, y1);
+    ctx.moveTo(x1, y0); ctx.lineTo(x0, y1);
+    ctx.lineCap = 'round';
+    ctx.strokeStyle = 'rgba(0,0,0,0.65)'; ctx.lineWidth = 3.2; ctx.stroke();
+    ctx.strokeStyle = '#ff5252'; ctx.lineWidth = 1.6; ctx.stroke();
+  });
   if (selComps.length) {
     ctx.textAlign = 'left'; ctx.textBaseline = 'alphabetic';
     selComps.forEach(d => {
@@ -5994,7 +6262,8 @@ function drawOverlay(r) {
       // seçim): kesikli, soluk kutu + hangi yüzde olduğu → kullanıcı görünür
       // yüzdeki bir parçayı seçtiğini sanmaz.
       const live = compLive(c);
-      const lbl = live ? d : d + ' · ' + (compSide(c) === 'B' ? '⟪alt yüz, gizli⟫' : '⟪üst yüz, gizli⟫');
+      const lbl = (DNP.has(d) ? d + ' · DNP' : d)
+        + (live ? '' : ' · ' + (compSide(c) === 'B' ? '⟪alt yüz, gizli⟫' : '⟪üst yüz, gizli⟫'));
       ctx.save();
       if (!live) { ctx.setLineDash([5, 4]); ctx.globalAlpha = 0.6; }
       ctx.strokeStyle = '#00e5ff'; ctx.lineWidth = 1.8;
@@ -6229,11 +6498,14 @@ function renderComps() {
   const q = qs.toLowerCase();
   let html = '', n = 0;
   G.comps.slice().sort((a, b) => a.d.localeCompare(b.d, undefined, { numeric: true })).forEach(c => {
+    const off = DNP.has(c.d);
     if (q && c.d.toLowerCase().indexOf(q) < 0
-        && ((COMP_INFO[c.d] || {}).value || '').toLowerCase().indexOf(q) < 0) return;
+        && ((COMP_INFO[c.d] || {}).value || '').toLowerCase().indexOf(q) < 0
+        && !(q === 'dnp' && off)) return;
     n++;
     html += '<div class="row' + (selComp === c.d ? ' sel' : '') + '" data-comp="' + esc(c.d) + '">'
-         + '<span class="nm">' + esc(c.d) + '</span><span class="ct">'
+         + '<span class="nm">' + esc(c.d) + (off ? '<span class="dnp-tag">DNP</span>' : '')
+         + '</span><span class="ct">'
          + esc((COMP_INFO[c.d] || {}).value || '') + ' · ' + c.l[0] + '</span></div>';
   });
   document.getElementById('p-comps').innerHTML = n ? html : '<div class="empty">⟪eşleşen yok⟫</div>';
@@ -6298,6 +6570,19 @@ function netScroll(i) {
   const r = document.querySelector('#p-nets .row[data-net="' + i + '"]');
   if (r) r.scrollIntoView({ block:'nearest' });
 }
+function renderProp(c) {
+  const d = c.d;
+  document.getElementById('pd').textContent = d;
+  const inf = COMP_INFO[d] || {};
+  const row = (k, v) => v ? '<div class="pr"><span class="pk">' + k + '</span><span class="pv">' + esc(v) + '</span></div>' : '';
+  document.getElementById('pbody').innerHTML =
+    (DNP.has(d) ? '<div class="pdnp">⟪Takılmaz (DNP)⟫<span>⟪Varyant:⟫ '
+                  + esc(VARIANTS.list[varIdx].n) + '</span></div>' : '')
+    + row('⟪Değer⟫', inf.value) + row('⟪Açıklama⟫', inf.description) + row('⟪Şema Sayfası⟫', inf.sheet)
+    + row('Footprint', c.fp) + row('⟪Katman⟫', c.l)
+    + row('Konum (mm)', 'X=' + c.x.toFixed(2) + ' Y=' + c.y.toFixed(2))
+    + (c.r ? row('⟪Dönüş⟫', c.r + '°') : '');
+}
 function showComp(d) {
   const c = G.comps.find(x => x.d === d);
   if (!c) return;
@@ -6306,14 +6591,7 @@ function showComp(d) {
   // Özellikler tercihine bağlı. Telefonda Gezgin kaplaması kapanır.
   propSel = d;
   if (isNarrow() && navOpen) { navOpen = false; uiSet({ nav: false }); }
-  document.getElementById('pd').textContent = d;
-  const inf = COMP_INFO[d] || {};
-  const row = (k, v) => v ? '<div class="pr"><span class="pk">' + k + '</span><span class="pv">' + esc(v) + '</span></div>' : '';
-  document.getElementById('pbody').innerHTML =
-    row('⟪Değer⟫', inf.value) + row('⟪Açıklama⟫', inf.description) + row('⟪Şema Sayfası⟫', inf.sheet)
-    + row('Footprint', c.fp) + row('⟪Katman⟫', c.l)
-    + row('Konum (mm)', 'X=' + c.x.toFixed(2) + ' Y=' + c.y.toFixed(2))
-    + (c.r ? row('⟪Dönüş⟫', c.r + '°') : '');
+  renderProp(c);
   applyPanels();
   pingProp();
   // görünürde değilse ortala (telefonda alttaki kartın altında kalan da sayılır)
@@ -6530,6 +6808,8 @@ window.addEventListener('keydown', e => {
     if (e.key === 'Escape') document.getElementById('q').blur();
     return;
   }
+  // Odak varyant seçicideyken harf yazmak seçenek arar, kısayol tetiklemesin
+  if (document.activeElement && document.activeElement.tagName === 'SELECT') return;
   const k = e.key.toLowerCase();
   if (e.key === 'Escape') {
     if (help.classList.contains('open')) { help.classList.remove('open'); return; }
@@ -6566,7 +6846,15 @@ function bomSave() { try { localStorage.setItem(BOM_KEY, JSON.stringify(bomState
 let BOM_GROUPS = [], BOM_TOTAL = 0;
 function bomBuild() {
   const m = new Map();
+  // Takılmayan parçalar değer gruplarına ve sayaca GİRMEZ (dizilecek bir şey yok);
+  // listenin sonunda ayrı, işaretlenemez bir satırda görünürler.
+  const off = { key: '\u0000dnp', val: '⟪Takılmaz (DNP)⟫', fp: '', desigs: [], top: 0, bot: 0, dnp: true };
   G.comps.forEach(c => {
+    if (DNP.has(c.d)) {
+      off.desigs.push(c.d);
+      if (c.l === 'BOTTOM') off.bot++; else off.top++;
+      return;
+    }
     const val = ((COMP_INFO[c.d] || {}).value || '').trim(), fp = (c.fp || '').trim();
     const key = val + '\u0000' + fp;
     let g = m.get(key);
@@ -6578,7 +6866,8 @@ function bomBuild() {
   BOM_GROUPS = [...m.values()];
   BOM_GROUPS.forEach(g => g.desigs.sort(nat));
   BOM_GROUPS.sort((a, b) => b.desigs.length - a.desigs.length || nat(a.val, b.val));
-  BOM_TOTAL = G.comps.length;
+  BOM_TOTAL = G.comps.length - off.desigs.length;
+  if (off.desigs.length) { off.desigs.sort(nat); BOM_GROUPS.push(off); }
 }
 function bomProg() {
   let done = 0;
@@ -6593,13 +6882,13 @@ function bomRender() {
   BOM_GROUPS.forEach((g, i) => {
     if (bomFilter === 'TOP' && !g.top) return;
     if (bomFilter === 'BOTTOM' && !g.bot) return;
-    if (bomFilter === 'todo' && bomState[g.key]) return;
+    if (bomFilter === 'todo' && (bomState[g.key] || g.dnp)) return;
     if (q && !(g.val.toLowerCase().indexOf(q) >= 0 || g.fp.toLowerCase().indexOf(q) >= 0
                || g.desigs.some(d => d.toLowerCase().indexOf(q) >= 0))) return;
     n++;
     const done = !!bomState[g.key];
-    html += '<div class="brow' + (done ? ' done' : '') + '" data-i="' + i + '">'
-         + '<span class="bchk">' + (done ? '\u2713' : '') + '</span>'
+    html += '<div class="brow' + (done ? ' done' : '') + (g.dnp ? ' dnp' : '') + '" data-i="' + i + '">'
+         + '<span class="bchk">' + (g.dnp ? '\u00d7' : done ? '\u2713' : '') + '</span>'
          + '<span class="bq">' + g.desigs.length + '</span>'
          + '<span class="bm"><span class="bv">' + esc(g.val || '(deger yok)') + '</span>'
          + (g.fp ? ' <span class="bf">' + esc(g.fp) + '</span>' : '')
@@ -6613,6 +6902,7 @@ document.getElementById('bom-list').addEventListener('click', e => {
   if (!row) return;
   const g = BOM_GROUPS[+row.dataset.i];
   if (e.target.classList.contains('bchk')) {        // montaj isareti
+    if (g.dnp) return;
     if (bomState[g.key]) delete bomState[g.key]; else bomState[g.key] = 1;
     bomSave(); bomRender();
     return;
@@ -6695,6 +6985,21 @@ function crossNet(name) {
   if (IN_FRAME && !xpApplying)
     window.parent.postMessage({ type:'xprobe-net', source:'pcb', net:name || null }, '*');
 }
+const varSel = document.getElementById('var-sel');
+function setVariant(i, quiet) {
+  varIdx = (i >= 0 && i < VARIANTS.list.length) ? i : -1;
+  if (varSel) varSel.value = String(varIdx);
+  dnpRefresh();
+  if (G) {
+    bomBuild(); renderComps(); bomRender();
+    const c = propSel && G.comps.find(x => x.d === propSel);
+    if (c) renderProp(c);
+    draw();
+  }
+  if (!quiet && IN_FRAME)
+    window.parent.postMessage({ type:'xprobe-variant', source:'pcb', idx:varIdx }, '*');
+}
+if (varSel) varSel.addEventListener('change', e => setVariant(+e.target.value));
 // Panel gizliyken (birleşik görünümün tek-panel modları) `wrap` ölçüsü 0'dır →
 // `centerOn` 0×0 alana göre hesaplayıp komponenti sol-üst KÖŞEYE atıyordu.
 // Ölçülemiyorsa seçim bekletilir, panel görünür olunca uygulanır (şematik
@@ -6719,6 +7024,7 @@ window.addEventListener('message', ev => {
   const d = ev.data;
   if (!d || d.source === 'pcb') return;
   if (d.type === 'pane-shown') { applyPendingXp(0); return; }
+  if (d.type === 'xprobe-variant') { setVariant(d.idx, true); return; }
   if (!G) return;
   if (d.type === 'xprobe-net') {
     xpApplying = true;
@@ -6774,6 +7080,7 @@ async function gunzipB64(b64) {
   }
   G = JSON.parse(txt);
   prep();
+  dnpRefresh();
   document.getElementById('dims').textContent =
     G.w.toFixed(1) + '×' + G.h.toFixed(1) + 'mm · ' + G.comps.length + ' ⟪komponent⟫ · '
     + G.nets.filter(Boolean).length + ' net';
@@ -6796,7 +7103,7 @@ async function gunzipB64(b64) {
 """
 
 
-def build_pcb_canvas_html(geo, comp_info, timestamp, project_name, pcb_name=""):
+def build_pcb_canvas_html(geo, comp_info, timestamp, project_name, pcb_name="", variants=None):
     """@brief Geometri tabanlı (canvas) PCB görüntüleyici HTML'i üret.
 
     @param geo extract_pcb_geometry() çıktısı
@@ -6804,14 +7111,20 @@ def build_pcb_canvas_html(geo, comp_info, timestamp, project_name, pcb_name=""):
     @param timestamp Üretim saati
     @param project_name Proje adı
     @param pcb_name PcbDoc dosya adı
+    @param variants project_variant_view çıktısı (takılmayan parçalar işaretlenir)
     @return HTML metni
     """
     import gzip as _gzip, base64 as _b64
+    variants = variants or {"cur": -1, "list": []}
     gz = _b64.b64encode(_gzip.compress(
         json.dumps(geo, separators=(",", ":")).encode("utf-8"), 6)).decode()
     return _tr_html(_PCB_CANVAS_TPL
             .replace("__MOBILE_META__", _MOBILE_META)
             .replace("__GESTURE__", _GESTURE_JS)
+            .replace("__VARSEL__", _variant_select_html(
+                variants, "tool-sel tb-more",
+                "⟪Altium varyantı: takılmayan parçalar çarpıyla işaretlenir⟫"))
+            .replace("__VARIANTS__", _js_json(variants))
             .replace("__GEO_GZ__", gz)
             .replace("__COMPINFO__", json.dumps(comp_info))
             .replace("__PROJECTJSON__", json.dumps(project_name))
@@ -6821,7 +7134,8 @@ def build_pcb_canvas_html(geo, comp_info, timestamp, project_name, pcb_name=""):
 
 
 @_with_library_logs
-def generate_pcb_canvas_viewer(project_path, output_path, log=print, progress=None):
+def generate_pcb_canvas_viewer(project_path, output_path, log=print, progress=None,
+                               variant=ACTIVE_VARIANT):
     """@brief Geometri tabanlı PCB görüntüleyici üret (küçük dosya, akıcı zoom).
 
     @details
@@ -6833,6 +7147,7 @@ def generate_pcb_canvas_viewer(project_path, output_path, log=print, progress=No
     @param output_path Çıktı HTML yolu
     @param log Log callback'i
     @param progress İlerleme callback'i (yüzde, etiket)
+    @param variant Açılışta seçili varyant (ACTIVE_VARIANT · ad · None)
     @return True/False
     """
     from altium_monkey.altium_pcbdoc import AltiumPcbDoc
@@ -6866,7 +7181,8 @@ def generate_pcb_canvas_viewer(project_path, output_path, log=print, progress=No
 
     prog(85, tr('HTML oluşturuluyor'))
     ts = datetime.datetime.now().strftime("%H:%M:%S")
-    html = build_pcb_canvas_html(geo, comp_info, ts, Path(project_path).stem, pcb_path.name)
+    html = build_pcb_canvas_html(geo, comp_info, ts, Path(project_path).stem, pcb_path.name,
+                                 variants=_physical_variant_view(project_path, variant, log))
     out = Path(output_path)
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(html, encoding="utf-8")
@@ -6880,17 +7196,22 @@ def generate_json(
     project_path: str,
     output_path: str,
     log: Callable[[str], None] = print,
+    variant=ACTIVE_VARIANT,
 ):
     """@brief AI'ya/LLM'e verilebilir kompakt JSON çıktı üret.
-    
+
     SVG verisi DAHİL DEĞİL — sadece yapısal bilgi:
     sayfa adları, her sayfadaki komponentler, her netin sayfa-bazlı dağılımı.
-    
+
     @param project_path Altium proje dosyası (.PrjPcb) yolu
     @param output_path Çıktı dosyası yolu
     @param log Log mesajı callback'i (str alır)
+    @param variant Uygulanacak varyant (ACTIVE_VARIANT · ad · None)
     """
-    data = _collect_data(project_path, log)
+    data = _collect_data(project_path, log, variant=variant)
+    _vv = data.get("variants") or {}
+    _vcur = _vv.get("cur", -1)
+    dnp_by_des = _vv["list"][_vcur].get("c", {}) if _vcur >= 0 else {}
 
     def classify_net(name):
         """@brief classify_net()
@@ -6937,6 +7258,13 @@ def generate_json(
                 comp_entry[k] = c[k]
         if c.get("parameters"):
             comp_entry["parameters"] = c["parameters"]
+        # Etkin varyantta takılmıyor (bazı kanallarda ise yalnız o kanallar)
+        off = dnp_by_des.get(c["designator"])
+        if off:
+            if len(off["p"]) >= off["t"]:
+                comp_entry["dnp"] = True
+            else:
+                comp_entry["dnp_channels"] = off["p"]
         # Pin → net bağlantıları (netlist'ten)
         pins = comp_pins.get(c["designator"])
         if pins:
@@ -7037,8 +7365,10 @@ def generate_json(
             "has_bom": bool(bom),
             "has_pnp": bool(pnp),
             "variant_count": len(variants),
+            "dnp_count": len(extras.get("dnp") or []),
         },
         "variants": variants,
+        "active_variant": extras.get("active_variant"),
         "sheets": sheets_json,
         "nets": nets_json,
     }
@@ -7059,18 +7389,18 @@ def generate_json(
 
 
 @_with_library_logs
-def generate_bom_csv(project_path, output_path, variant=None,
+def generate_bom_csv(project_path, output_path, variant=ACTIVE_VARIANT,
                      log: Callable[[str], None] = print):
-    """@brief BOM'u CSV dosyası olarak üret. variant verilirse o varyanta filtrele.
-    
+    """@brief BOM'u CSV dosyası olarak üret. Takılmayan parçalar satırda kalır, dnp=True.
+
     @param project_path Altium proje dosyası (.PrjPcb) yolu
     @param output_path Çıktı dosyası yolu
-    @param variant Varyant adı
+    @param variant Uygulanacak varyant (ACTIVE_VARIANT · ad · None)
     @param log Log mesajı callback'i (str alır)
     @return Üretilen sonuç.
     """
     import csv
-    extras = collect_design_extras(project_path, log)
+    extras = collect_design_extras(project_path, log, variant=variant)
     bom = extras.get("bom") or []
     if not bom:
         log(tr('! BOM verisi yok — CSV üretilemedi.'))
@@ -7102,19 +7432,19 @@ def generate_bom_csv(project_path, output_path, variant=None,
 
 
 @_with_library_logs
-def generate_pnp_csv(project_path, output_path, variant=None, units="mm",
+def generate_pnp_csv(project_path, output_path, variant=ACTIVE_VARIANT, units="mm",
                      log: Callable[[str], None] = print):
-    """@brief Pick&Place'i CSV dosyası olarak üret (PCB gerektirir).
-    
+    """@brief Pick&Place'i CSV dosyası olarak üret (PCB gerektirir; takılmayanlar girmez).
+
     @param project_path Altium proje dosyası (.PrjPcb) yolu
     @param output_path Çıktı dosyası yolu
-    @param variant Varyant adı
+    @param variant Uygulanacak varyant (ACTIVE_VARIANT · ad · None)
     @param units Birim
     @param log Log mesajı callback'i (str alır)
     @return Üretilen sonuç.
     """
     import csv
-    extras = collect_design_extras(project_path, log)
+    extras = collect_design_extras(project_path, log, variant=variant)
     pnp = extras.get("pnp") or []
     if not pnp:
         log(tr('! Pick&Place verisi yok (PCB dosyası gerekli) — CSV üretilemedi.'))
@@ -8140,7 +8470,7 @@ def build_sheet_hierarchy(sheets):
 
 
 def build_html(sheets, net_list, components, timestamp,
-               inter_color, intra_color, pcb=None, project_name=""):
+               inter_color, intra_color, pcb=None, project_name="", variants=None):
     """@brief Şematik viewer'ın tam HTML belgesini kurar (gömülü SVG + JS).
 
     @param sheets
@@ -8151,9 +8481,13 @@ def build_html(sheets, net_list, components, timestamp,
     @param intra_color Sayfa içi bağlantı rengi (hex)
     @param pcb AltiumPcbDoc PCB nesnesi
     @param project_name Proje adı (not/kutu localStorage anahtarı + kayıt dosya adı)
+    @param variants project_variant_view çıktısı (takılmayan parçalar işaretlenir)
     @return Üretilen sonuç.
     """
     pcb = pcb or {"available": False}
+    variants = variants or {"cur": -1, "list": []}
+    var_sel = _variant_select_html(variants, "tool-sel tb-more",
+                                   "⟪Altium varyantı: takılmayan parçalar çarpıyla işaretlenir⟫")
     hierarchy = build_sheet_hierarchy(sheets)
     max_x = max((s["x"] + s["w"] for s in sheets), default=2000) + 100
     max_y = max((s["y"] + s["h"] for s in sheets), default=1200) + 100
@@ -8282,6 +8616,14 @@ def build_html(sheets, net_list, components, timestamp,
   .net-item.active.color-3 {{ background:#4a4a15; color:#ffeb3b; }}
   .badge {{ float:right; color:#666; font-size:10px; margin-left:4px; }}
   .comp-item .sheet-tag {{ float:right; color:#666; font-size:10px; }}
+  .dnp-tag {{ color:#ff6b5b; border:1px solid #a33; border-radius:3px; font-size:9px;
+              padding:0 3px; margin-left:4px; font-weight:bold; }}
+  .dnp-tag.part {{ color:#ffb74d; border-color:#a06a1c; }}
+  .popup-dnp {{ color:#ff8a80; background:#3a1a1a; border-left:3px solid #e53935;
+                padding:5px 8px; margin:4px 0 6px; font-size:11px; font-weight:bold; }}
+  .popup-dnp.part {{ color:#ffb74d; background:#33270f; border-left-color:#ff9800; }}
+  .popup-dnp span {{ display:block; color:#b98; font-weight:normal; font-size:10px; }}
+  #svg-tip .tt-dnp {{ color:#ff8a80; font-weight:bold; }}
   /* === Şematik hiyerarşi ağacı (KiCad "Schematic Hierarchy" paneli) =======
      DİKKAT: #hier-list bir .list-container'dır ve display:flex alır; gizleme
      kuralı ID özgüllüğünde tekrar yazılmalı — yoksa `.list-container.hidden`
@@ -8796,6 +9138,7 @@ def build_html(sheets, net_list, components, timestamp,
     </label>
     <select class="tool-sel tb-more" id="theme-sel"
             title="⟪Şematik renk teması (KiCad tarzı) — tercih bu tarayıcıda hatırlanır⟫">{theme_opts}</select>
+    {var_sel}
     <div class="toolbar-sep tb-more"></div>
     <button class="tool-btn tb-more" id="anno-note"
             title="⟪Not ekle: butona bas, şemada istediğin yere tıkla ve DOĞRUDAN yaz (dışına tıkla = bitir, Enter = yeni satır). Sonradan: çift tık düzenle · sürükle taşı · KÖŞE TUTAMACIYLA ya da A−/A+ ile yazı boyutu · seç + Del sil · Ctrl+C / Ctrl+V kopyala-yapıştır⟫">⟪Not⟫</button>
@@ -8879,6 +9222,7 @@ def build_html(sheets, net_list, components, timestamp,
       <tr><td>⟪Not / kutu araçları⟫</td><td>⟪Parmakla da çalışır (yaz, çiz, taşı, boyutlandır)⟫</td></tr>
       <tr><td>⟪Yazının yakınına dokun⟫</td><td>⟪Yeterli — en yakın net / designator / block seçilir⟫</td></tr>
       <tr><td>⋯</td><td>⟪Dar ekranda gizlenen araçlar (not, kutu, renk, PNG…)⟫</td></tr>
+      <tr><td>DNP</td><td>⟪Çarpı: seçili varyantta takılmayan parça (turuncu kesikli: yalnız bazı kanallarda). Sayfadaki DNP yazıları elle konmuş metindir, kesin bilgi çarpıdır. Aramada dnp yazınca listelenir.⟫</td></tr>
     </table>
     <h3>⟪Renk Pickers⟫</h3>
     <table>
@@ -8906,6 +9250,14 @@ const SHEET_TREE = {json.dumps(hierarchy, separators=(",", ":"))};
 // çağrılabilir → `var` (let olsaydı TDZ hatası verirdi, bkz. __annoUi deseni).
 var hierReady = false;
 const SCH_BOXES = {json.dumps(sch_boxes)};
+// Varyant: takılmayan parçalar. Şema mantıksal designator gösterdiği için `c`
+// fiziksel kopyaları (p) ve kanal sayısını (t) taşır (bkz. project_variant_view).
+const VARIANTS = {_js_json(variants)};
+let varIdx = VARIANTS.cur;
+function dnpOf(des) {{
+  const v = VARIANTS.list[varIdx];
+  return (v && v.c && v.c[des]) || null;
+}}
 const PCB = {json.dumps({
     "available": pcb.get("available", False),
     "components": pcb.get("components", {}),
@@ -9179,6 +9531,37 @@ function dlDrawSheet(g, d, bx, by, bw, bh, hlText, hovItem, hovColor) {{
   }}
   g.restore();
 }}
+// Takılmayan parçaların üstüne çarpı (Altium'un varyant görünümündeki gibi).
+// Kutu gövde + pinleri sarar; dirençte bu 40×400 mil'lik bir şerit olduğundan
+// çarpı kısa kenarda uzun kenarın %60'ına genişletilir, yoksa bir çizgi gibi
+// görünürdü. Bazı kanallarda takılmayan parça turuncu ve kesikli çizilir.
+function dnpDraw(g, id, d, bx, by, bw, bh) {{
+  const v = VARIANTS.list[varIdx], boxes = SCH_BOXES[id];
+  if (!v || !v.c || !boxes) return;
+  const vb = d.vb, kx = bw / vb[2], ky = bh / vb[3];
+  g.save();
+  g.beginPath(); g.rect(bx, by, bw, bh); g.clip();
+  g.lineCap = 'round';
+  for (const des in v.c) {{
+    const b = boxes[des];
+    if (!b) continue;
+    const m = Math.max(b[2], b[3]) * 0.6;
+    const w = Math.max(b[2], m) * kx, h = Math.max(b[3], m) * ky;
+    const cx = bx + (b[0] + b[2] / 2 - vb[0]) * kx, cy = by + (b[1] + b[3] / 2 - vb[1]) * ky;
+    const part = v.c[des].p.length < v.c[des].t;
+    const lw = Math.max(1.4, Math.min(3.5, Math.min(w, h) * 0.05));
+    g.beginPath();
+    g.moveTo(cx - w / 2, cy - h / 2); g.lineTo(cx + w / 2, cy + h / 2);
+    g.moveTo(cx + w / 2, cy - h / 2); g.lineTo(cx - w / 2, cy + h / 2);
+    g.setLineDash([]);
+    g.strokeStyle = (schTheme && schTheme[2]) ? 'rgba(0,0,0,0.7)' : 'rgba(255,255,255,0.85)';
+    g.lineWidth = lw + 1.6; g.stroke();
+    if (part) g.setLineDash([lw * 3, lw * 2.2]);
+    g.strokeStyle = part ? '#ff9800' : '#e53935';
+    g.lineWidth = lw; g.stroke();
+  }}
+  g.restore();
+}}
 // Tüm görünür sayfaları çiz (kare başına bir kez, applyT'den senkron çağrılır)
 function schDraw() {{
   const r = viewport.getBoundingClientRect();
@@ -9200,10 +9583,13 @@ function schDraw() {{
     if (bh <= 0.5 || sw <= 0.5) continue;
     g.fillStyle = schTheme ? schTheme[3].background : '#ffffff'; g.fillRect(sx, by, sw, bh);
     const d = DL[id];
-    if (d) dlDrawSheet(g, d, sx, by, sw, bh,
-                       (schHlDesig && id === schHlSheet) ? schHlDesig : null,
-                       (schHovItem && id === schHovSheet) ? schHovItem : null,
-                       schHovColor);
+    if (d) {{
+      dlDrawSheet(g, d, sx, by, sw, bh,
+                  (schHlDesig && id === schHlSheet) ? schHlDesig : null,
+                  (schHovItem && id === schHovSheet) ? schHovItem : null,
+                  schHovColor);
+      dnpDraw(g, id, d, sx, by, sw, bh);
+    }}
   }}
 }}
 // SVG-viewBox kutusu → KANVAS koordinatı. Eskiden bu dönüşüm designator
@@ -9859,6 +10245,7 @@ function renderComps(filter='') {{
   const q = filter.toLowerCase();
   const matched = components.filter(c =>
     c.designator.toLowerCase().includes(q) || c.value.toLowerCase().includes(q)
+    || (q === 'dnp' && dnpOf(c.designator))
   );
   // Liste DOM'u şişmesin diye üst sınır var; SESSİZ kırpma yapma — kalan
   // sayıyı yaz ki kullanıcı "komponent eksik" sanmasın (anotasyonsuz büyük
@@ -9868,7 +10255,10 @@ function renderComps(filter='') {{
     const div = document.createElement('div');
     div.className = 'comp-item';
     const val = comp.value ? ` <span style="color:#666">${{escHtml(comp.value)}}</span>` : '';
-    div.innerHTML = `${{escHtml(comp.designator)}}${{val}} <span class="sheet-tag">${{escHtml(comp.sheet_name)}}</span>`;
+    const off = dnpOf(comp.designator);
+    const tag = !off ? '' : off.p.length >= off.t ? '<span class="dnp-tag">DNP</span>'
+      : `<span class="dnp-tag part">DNP ${{off.p.length}}/${{off.t}}</span>`;
+    div.innerHTML = `${{escHtml(comp.designator)}}${{tag}}${{val}} <span class="sheet-tag">${{escHtml(comp.sheet_name)}}</span>`;
     div.onclick = () => {{
       highlightComponent(comp.designator, comp.sheet_id);
       showCompPopup(comp);
@@ -9937,6 +10327,13 @@ function showCompPopup(comp) {{
   }}
 
   let html = '';
+  const off = dnpOf(comp.designator);
+  if (off) {{
+    const full = off.p.length >= off.t;
+    html += '<div class="popup-dnp' + (full ? '' : ' part') + '">'
+      + (full ? '⟪Takılmaz (DNP)⟫' : '⟪Bazı kanallarda takılmaz (DNP):⟫ ' + escHtml(off.p.join(', ')))
+      + '<span>⟪Varyant:⟫ ' + escHtml(VARIANTS.list[varIdx].n) + '</span></div>';
+  }}
   if (rows.length > 0) {{
     html += '<div class="popup-section-title">Standard</div>';
     rows.forEach(([k, v]) => {{ html += renderPopupRow(k, v); }});
@@ -10328,6 +10725,7 @@ document.addEventListener('mouseover', e => {{
     if (c) html = `<span class="tt-title">${{escHtml(c.designator)}}</span>`
       + (c.value ? ` · ${{escHtml(c.value)}}` : '')
       + (c.description ? `<br>${{escHtml(c.description)}}` : '')
+      + (dnpOf(c.designator) ? `<br><span class="tt-dnp">⟪Takılmaz (DNP)⟫</span>` : '')
       + `<br><span class="tt-hint">⟪tıkla: detay + cross-probe⟫</span>`;
   }} else if (t.classList.contains('clickable-net')) {{
     const n = t.getAttribute('data-net');
@@ -12003,6 +12401,17 @@ function crossProbeNet(name) {{
       net:name || null, pcbNet:(rec && rec.pcb) || null}}, '*');
   }}
 }}
+const varSel = document.getElementById('var-sel');
+function setVariant(i, quiet) {{
+  varIdx = (i >= 0 && i < VARIANTS.list.length) ? i : -1;
+  if (varSel) varSel.value = String(varIdx);
+  schDraw();
+  renderComps(document.getElementById('search').value);
+  if (propSel) showCompPopup(propSel);
+  if (!quiet && IN_FRAME)
+    window.parent.postMessage({{type:'xprobe-variant', source:'sch', idx:varIdx}}, '*');
+}}
+if (varSel) varSel.addEventListener('change', e => setVariant(+e.target.value));
 // --- Gizli paneldeyken gelen komponent seçimi BEKLETİLİR -------------------
 // Birleşik görünümün tek-panel modlarında (PCB / 3D) şematik iframe'i
 // display:none'dır → içindeki her `getBoundingClientRect()` SIFIR döner.
@@ -12070,6 +12479,7 @@ window.addEventListener('message', ev => {{
   if (!d || d.source === 'sch') return;
   // Kabuk: "bu panel görünür oldu" → gizliyken gelen seçimi şimdi uygula
   if (d.type === 'pane-shown') {{ applyPendingXp(0); return; }}
+  if (d.type === 'xprobe-variant') {{ setVariant(d.idx, true); return; }}
   if (d.type === 'xprobe-net') {{
     xpApplying = true;
     try {{

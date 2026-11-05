@@ -54,7 +54,7 @@ from viewer import (generate_viewer, generate_json,
                     generate_ic_map_xlsx, generate_mcu_pinout_xlsx,
                     generate_pcb_canvas_viewer, generate_combined_viewer,
                     read_annotations, write_annotations,
-                    APP_VERSION)
+                    ACTIVE_VARIANT, APP_VERSION)
 
 
 def collect_versions() -> dict:
@@ -108,7 +108,7 @@ class GeneratorThread(QtCore.QThread):
     def __init__(self, mode, project_path, output_path,
                  inter_color="#4ec9b0", intra_color="#ff9800",
                  main_designators=None, min_pins=4, exclude_prefixes=None,
-                 hide_title_block=False, parent=None):
+                 hide_title_block=False, variant=ACTIVE_VARIANT, parent=None):
         """@brief __init__()
 
         @param mode Üretim modu (html/json/bom/pnp/icmap/mcupin/pcbgeo/combined)
@@ -120,6 +120,7 @@ class GeneratorThread(QtCore.QThread):
         @param min_pins Minimum pin sayısı eşiği
         @param exclude_prefixes IC haritasından hariç tutulacak designator önekleri ("J,P,TP")
         @param hide_title_block Şematik sayfa anteti / firma logosu gizlensin mi
+        @param variant Uygulanacak varyant (ACTIVE_VARIANT = projede seçili, None = varyantsız)
         @param parent
         """
         super().__init__(parent)
@@ -132,6 +133,7 @@ class GeneratorThread(QtCore.QThread):
         self.min_pins = min_pins
         self.exclude_prefixes = exclude_prefixes
         self.hide_title_block = hide_title_block
+        self.variant = variant
 
     def run(self):
         # İlerleme callback'i: üretici fonksiyonlara verilir, sinyale çevirir.
@@ -150,11 +152,13 @@ class GeneratorThread(QtCore.QThread):
                     project_path=self.project_path,
                     output_path=self.output_path,
                     log=lambda msg: self.log_signal.emit(msg),
+                    variant=self.variant,
                 )
             elif self.mode == "bom":
                 ok = generate_bom_csv(
                     project_path=self.project_path,
                     output_path=self.output_path,
+                    variant=self.variant,
                     log=lambda msg: self.log_signal.emit(msg),
                 )
                 if not ok:
@@ -164,6 +168,7 @@ class GeneratorThread(QtCore.QThread):
                 ok = generate_pnp_csv(
                     project_path=self.project_path,
                     output_path=self.output_path,
+                    variant=self.variant,
                     log=lambda msg: self.log_signal.emit(msg),
                 )
                 if not ok:
@@ -202,6 +207,7 @@ class GeneratorThread(QtCore.QThread):
                     output_path=self.output_path,
                     log=lambda msg: self.log_signal.emit(msg),
                     progress=emit_progress,
+                    variant=self.variant,
                 )
                 if not ok:
                     self.done_signal.emit(
@@ -218,6 +224,7 @@ class GeneratorThread(QtCore.QThread):
                     log=lambda msg: self.log_signal.emit(msg),
                     progress=emit_progress,
                     hide_title_block=self.hide_title_block,
+                    variant=self.variant,
                 )
                 if not ok:
                     self.done_signal.emit(
@@ -232,6 +239,7 @@ class GeneratorThread(QtCore.QThread):
                     log=lambda msg: self.log_signal.emit(msg),
                     progress=emit_progress,
                     hide_title_block=self.hide_title_block,
+                    variant=self.variant,
                 )
             # Çıktı yolunu mod'a göre düzelt (CSV/XLSX uzantısı)
             final_out = self.output_path
@@ -412,6 +420,11 @@ class MainWindow(QtWidgets.QMainWindow):
             chk.setChecked(self.settings.value("hideTitleBlock", False, type=bool))
             chk.toggled.connect(
                 lambda on: self.settings.setValue("hideTitleBlock", bool(on)))
+        chk = getattr(self, "ignoreVariantChk", None)
+        if chk is not None:
+            chk.setChecked(self.settings.value("ignoreVariant", False, type=bool))
+            chk.toggled.connect(
+                lambda on: self.settings.setValue("ignoreVariant", bool(on)))
 
         # Kayıtlı dili uygula (yoksa kaynak dil: Türkçe → mevcut davranış)
         saved_lang = self.settings.value("language", i18n.SOURCE_LANGUAGE, type=str)
@@ -1034,6 +1047,11 @@ class MainWindow(QtWidgets.QMainWindow):
         htb_chk = getattr(self, "hideTitleBlockChk", None)
         hide_title_block = bool(htb_chk.isChecked()) if htb_chk else False
 
+        # Varsayılan: projede seçili varyant (takılmayan parçalar BOM/PnP'ye ve
+        # görüntüleyicilere yansır). İşaretliyse tüm parçalar takılı sayılır.
+        iv_chk = getattr(self, "ignoreVariantChk", None)
+        variant = None if (iv_chk and iv_chk.isChecked()) else ACTIVE_VARIANT
+
         # Çıktı uzantısını mod'a göre otomatik ayarla
         if mode == "json":
             output_path = str(Path(output_path).with_suffix(".json"))
@@ -1088,6 +1106,7 @@ class MainWindow(QtWidgets.QMainWindow):
             main_designators=main_desigs or None, min_pins=min_pins,
             exclude_prefixes=exclude_prefixes or None,
             hide_title_block=hide_title_block,
+            variant=variant,
         )
         self.worker.log_signal.connect(self.log)
         self.worker.progress_signal.connect(self.on_progress)

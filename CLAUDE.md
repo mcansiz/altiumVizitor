@@ -5,7 +5,7 @@ Wavenumber'ın ticari "viz sch 1.0" ürününün açık-kaynak alternatifi.
 [altium_monkey](https://github.com/wavenumber-eng/altium_monkey) kütüphanesi
 (Eli Hughes / Wavenumber) üzerine kurulu.
 
-**Mevcut sürüm**: `APP_VERSION` sabiti **`viewer.py`'de** tutulur (şu an 2.38.0);
+**Mevcut sürüm**: `APP_VERSION` sabiti **`viewer.py`'de** tutulur (şu an 2.39.0);
 `gui.py` oradan import eder (v2.9.29'da taşındı — HTML çıktıları da sürümü
 gösterebilsin diye, tek kaynak). Yeni özellik/düzeltme ekleyince bu sabiti
 güncelle (semver: major.minor.patch). Sürüm pencere başlığında, alt durum
@@ -329,7 +329,8 @@ requirements↔deps uyumu, `check_html_i18n`, sözdizimi), `test_gui` (offscreen
 self-test, `_BTN_LABELS`↔gui.ui, eksik çeviri), `test_generation` (iki örnekte
 YEDİ üreticinin hepsi; HTML'lerde ⟪⟫ kalıntısı yok, satır-içi script'ler —
 birleşik kabuğun gzip'li iç HTML'leri dahil — `node --check`'ten geçer, EN
-üretim, not yazma/okuma, CSV/xlsx içerik), `test_pcb_resolution` (örnekleri
+üretim, not yazma/okuma, CSV/xlsx içerik), `test_variants` (`m2_emmc`'nin gerçek `A` varyantı: R5/R6 BOM, PnP, JSON,
+üç panel; `variant=None`; varyantsız projede seçici yok), `test_pcb_resolution` (örnekleri
 geçici klasörlerde beş düzende kurar: yan yana iki proje, `PCB PROJECT/` +
 `PCB/` + `SCHEMATIC/` kardeş düzeni, taşınmış PcbDoc, bozuk referansla başka
 projenin board'u, eski + geçerli referans). Yerelde ağ/node yoksa ilgili testler
@@ -416,6 +417,48 @@ doğrudan boru hattına sokma — parametre hatası verir).
 **Kalıcı düzeltme (kullanıcıya ait)**: fine-grained PAT'e
 https://github.com/settings/personal-access-tokens → Repository permissions →
 **Contents: Read and write** verilirse bu geçici yol gereksizleşir.
+
+## Altium varyantı / DNP (v2.39.0+)
+
+Şemadaki "DNP" yazıları tasarımcının elle koyduğu **serbest metinlerdir**
+(`AltiumSchLabel`), hangi parçaya ait oldukları belli değildir. Kesin bilgi
+PrjPcb'nin `[ProjectVariantN]` bölümünde:
+`Variation5=Designator=R29|UniqueId=\DQYJRQBC\FQNQEGJS\PVVATZCD|Kind=1|…`
+(`Kind=1` takılmaz, `Kind=2` alternatif parça). `Designator` FİZİKSELDİR
+(`C85_2`); `UniqueId`'nin son parçası komponentin kendi kimliğidir.
+
+- **`variant` parametresi** (`generate_viewer/combined/pcb_canvas/json/bom/pnp`,
+  `_collect_data`, `collect_design_extras`): varsayılan **`ACTIVE_VARIANT`** =
+  projede Altium'da seçili varyant (`[Design] CurrentVariant`); ad verilebilir;
+  **`None` = varyantsız** (kütüphanenin `to_bom(variant=None)` anlamı). GUI'de
+  **"Varyantı yok say"** kutusu (`ignoreVariantChk`, `QSettings: ignoreVariant`,
+  varsayılan KAPALI) `None` geçirir. Excel üreticileri varyant ALMAZ (aşağı bak).
+- **BOM**: satır atılmaz, takılmayanda `dnp=True`. **Pick&Place**: takılmayan
+  listeye girmez. **JSON**: `active_variant`, `summary.dnp_count`, komponentte
+  `dnp: true` ya da bazı kanallardaysa `dnp_channels: [...]`.
+- **`project_variant_view()`** gömülecek veriyi kurar:
+  `{cur, list:[{n, d:[fiziksel...], c:{mantıksal:{p:[fiziksel...], t:kanal}}}]}`.
+  PCB ve 3D `d`'yi kullanır; şematik tekrar sayfasını BİR kez çizdiği için `c`'ye
+  bakar. `t` (kanal sayısı) `design.compile().components`'tan gelir → `p` < `t`
+  ise parça yalnız bazı kanallarda takılmıyordur (turuncu kesikli çarpı, listede
+  `DNP 2/5`, Özellikler'de kanal adları).
+- **Görüntüleyiciler**: açılışta üretimdeki varyant seçili; `#var-sel` ile değişir
+  (seçenekler üretimde yazılır: script'le eklenseydi "Kaydet" klonunda iki kez
+  görünürdü; tercih SAKLANMAZ, yeniden açınca üretimdeki varyant gelir). Projede
+  varyant yoksa seçici hiç çıkmaz. Birleşik görünümde `xprobe-variant` mesajı üç
+  panele yayılır, tembel yüklenen panel son seçimi `repostSel` ile alır.
+  **Şematik**: kanvasa çarpı (`dnpDraw`; kutu dirençte 40×400 mil şerit olduğundan
+  kısa kenar uzun kenarın %60'ına genişletilir), listede etiket, Özellikler, hover.
+  **PCB**: görünür yüzde çarpı, seçim etiketinde `· DNP`, BOM · Montaj'da değer
+  gruplarına ve sayaca GİRMEZ (listenin sonunda ayrı, işaretlenemez satır).
+  **3D**: gövde gizlenir, seçim gelirse sahne kararmaz, alt bilgiye neden yazılır.
+  Aramada `dnp` yazmak takılmayanları listeler (şematik Comps, PCB Komponentler).
+- **Bilinen kısıtlar**: (1) `Kind=2` alternatif parça ve parametre varyasyonları
+  yalnız BOM/PnP'ye yansır (kütüphane uygular); görüntüleyici popup'ı taban değeri
+  gösterir. (2) **IC haritası / MCU pin listesi varyantı dikkate almaz**: takılmayan
+  seri direnç üzerinden izlenen bağlantı ve `R29→GND (pull-down)` satırları görünür.
+  (3) Kanal sayfaları (P50A1…P50A5) ayrı çizilmez: `to_physical_svg` hazır, ama o da
+  çarpı çizmez; hiyerarşi, cross-probe ve not konumlarına dokunan ayrı iş.
 
 ## Antet / firma logosu gizleme (v2.28.0+)
 
@@ -1133,11 +1176,12 @@ oturtma bacakları board dışına çıkarıyorsa düzeltme iptal edilir. Ayrın
   "project": {"name", "path"},
   "summary": {"sheet_count", "net_count", "component_count",
               "pin_connection_count", "has_netlist",
-              "has_bom", "has_pnp", "variant_count"},
+              "has_bom", "has_pnp", "variant_count", "dnp_count"},
   "variants": ["...", ...],
+  "active_variant": "..." | null,
   "sheets": [{"id", "name", "components": [{
       "designator", "value", "description"?, "footprint"?,
-      "library_reference"?, "parameters"?,
+      "library_reference"?, "parameters"?, "dnp"?, "dnp_channels"?,
       "pins"?: {"11": {"net": "ADC1_CS", "pin_name": "CS"}, ...}
   }]}],
   "nets": [{"name", "type": "power|ground|signal", "count",

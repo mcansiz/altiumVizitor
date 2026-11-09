@@ -700,15 +700,29 @@ class MainWindow(QtWidgets.QMainWindow):
 
     def _update_status_bar(self):
         """@brief Alt durum çubuğundaki kalıcı sürüm/dil özetini yazar.
+
+        @details Bilgi `showMessage()` ile GEÇİCİ mesaj olarak yazılmaz: menü
+        öğesinin üstünden geçen fare durum ipucunu (statusTip) geçici mesajın
+        yerine koyar, ayrılınca boş ipucuyla siler ve bilgi bir daha gelmezdi
+        (kullanıcı bildirimi: "alt bardaki bilgilendirme yazıları yok").
+        Kalıcı etiket ipucu süresince örtülür, sonra geri görünür.
         """
         sb = self.statusBar()
+        if getattr(self, "_sb_info", None) is None:
+            self._sb_info = QtWidgets.QLabel()
+            self._sb_info.setObjectName("statusInfo")
+            sb.addWidget(self._sb_info, 1)
+            credit = QtWidgets.QLabel("coded by Mcansız")
+            credit.setObjectName("statusCredit")
+            sb.addPermanentWidget(credit)
+        # Dar pencerede satır kesilmesin: Python / PyQt sürümleri ipucunda
         py = platform.python_version()
-        sb.showMessage(
-            f"v{APP_VERSION}  ·  Python {py}  ·  PyQt5 {PYQT_VERSION_STR}  "
-            f"·  altium_monkey {self._am_version()}"
-            f"  ·  {tr('Dil: {ad}').format(ad=i18n.LANGUAGES[i18n.language()])}"
-            f"							coded by Mcansız"
-        )
+        self._sb_info.setText(
+            f"v{APP_VERSION}  ·  altium_monkey {self._am_version()}"
+            f"  ·  {tr('Dil: {ad}').format(ad=i18n.LANGUAGES[i18n.language()])}")
+        self._sb_info.setToolTip(
+            f"Schematic Viz Generator v{APP_VERSION}\nPython {py}  ·  PyQt5 {PYQT_VERSION_STR}"
+            f"\naltium_monkey {self._am_version()}")
 
     # === Hakkında diyaloğu ===
     def show_about(self):

@@ -72,7 +72,7 @@ _EN = {
     "ℹ  Hakkında / Sürümler": "ℹ  About / Versions",
 
     # --- gui.ui: Excel / veri --------------------------------------------
-    "📊  Excel / Veri Dışa Aktarma": "📊  Excel / Data Export",
+    " Excel / Veri Dışa Aktarma": " Excel / Data Export",
     "MCU / Ana İşlemci:": "MCU / Main Processor:",
     "Ana işlemci designator'ı. Boş = en çok pinli IC otomatik. Çoklu: U2,U7":
         "Main processor designator. Empty = the IC with the most pins is "
@@ -107,7 +107,7 @@ _EN = {
     "JSON (AI / LLM için)": "JSON (for AI / LLM)",
 
     # --- gui.ui: görüntüleyiciler ----------------------------------------
-    "🖥  Görüntüleyiciler (HTML)": "🖥  Viewers (HTML)",
+    "Görüntüleyiciler (HTML)": "Viewers (HTML)",
     "İnteraktif şematik HTML görüntüleyici üret":
         "Generate an interactive schematic HTML viewer",
     "Şematik Viewer üret": "Generate Schematic Viewer",
@@ -360,7 +360,7 @@ _EN = {
     "Tema kaydedilemedi: {a0}": "Could not save the theme: {a0}",
     "Renk Temaları ve Yazı Tipleri…": "Color Themes and Fonts…",
     "Şematik ve PCB renk temalarını ve görüntüleyici yazı tiplerini ayarla": "Set schematic and PCB color themes and viewer fonts",
-    "🎨  Renk ve Yazı Tipleri…": "🎨  Colors and Fonts…",
+    " Renk ve Yazı Tipleri…": " Colors and Fonts…",
     "Şematik ve PCB renk temalarını yükle, düzenle, yeni tema oluştur; şematik, PCB etiketi ve arayüz yazı tiplerini seç. Tüm temalar üretilen HTML'e gömülür; burada seçilenler açılış ayarıdır.": "Load, edit or create schematic and PCB color themes; choose schematic, PCB label and interface fonts. All themes are embedded in the generated HTML; the choices made here are what it opens with.",
     "Renk Temaları ve Yazı Tipleri": "Color Themes and Fonts",
     "Yazı Tipleri": "Fonts",

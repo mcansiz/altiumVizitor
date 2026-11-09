@@ -64,7 +64,7 @@
             </sizepolicy>
            </property>
            <property name="title">
-            <string>📊  Excel / Veri Dışa Aktarma</string>
+            <string> Excel / Veri Dışa Aktarma</string>
            </property>
            <layout class="QVBoxLayout">
             <property name="spacing">
@@ -252,7 +252,7 @@
             </sizepolicy>
            </property>
            <property name="title">
-            <string>🖥  Görüntüleyiciler (HTML)</string>
+            <string>Görüntüleyiciler (HTML)</string>
            </property>
            <layout class="QVBoxLayout">
             <property name="spacing">
@@ -326,7 +326,7 @@
                <string>Şematik ve PCB renk temalarını yükle, düzenle, yeni tema oluştur; şematik, PCB etiketi ve arayüz yazı tiplerini seç. Tüm temalar üretilen HTML'e gömülür; burada seçilenler açılış ayarıdır.</string>
               </property>
               <property name="text">
-               <string>🎨  Renk ve Yazı Tipleri…</string>
+               <string> Renk ve Yazı Tipleri…</string>
               </property>
               <property name="cls" stdset="0">
                <string>ghost</string>

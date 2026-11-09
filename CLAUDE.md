@@ -5,7 +5,7 @@ Wavenumber'ın ticari "viz sch 1.0" ürününün açık-kaynak alternatifi.
 [altium_monkey](https://github.com/wavenumber-eng/altium_monkey) kütüphanesi
 (Eli Hughes / Wavenumber) üzerine kurulu.
 
-**Mevcut sürüm**: `APP_VERSION` sabiti **`viewer.py`'de** tutulur (şu an 2.40.0);
+**Mevcut sürüm**: `APP_VERSION` sabiti **`viewer.py`'de** tutulur (şu an 2.40.1);
 `gui.py` oradan import eder (v2.9.29'da taşındı — HTML çıktıları da sürümü
 gösterebilsin diye, tek kaynak). Yeni özellik/düzeltme ekleyince bu sabiti
 güncelle (semver: major.minor.patch). Sürüm pencere başlığında, alt durum
@@ -310,7 +310,10 @@ DiskUltimate deposundaki düzenin karşılığı. Üç iş akışı (`.github/wo
   paketi test edilen ortamla aynı olsun) ile kurar, `deps.py`, örnek projeleri
   indirir, `python -m unittest discover -s tests -t . -v` çalıştırır.
 - **`ci.yml`** — `master`'a her push / PR: **ubuntu-22.04 · windows-2022 ·
-  macos-14** (yalnız `.md`/görsel değişen commit'ler tetiklemez).
+  macos-15** (yalnız `.md`/görsel değişen commit'ler tetiklemez). v2.40.1'e
+  kadar `macos-14` idi; GitHub o yapılandırmayı kaldırdı ("The configuration
+  'macos-14-arm64-us-default' is not supported") ve iş başlar başlamaz
+  `cancelled` oluyordu → run'ın genel sonucu da cancelled görünüyordu.
 - **`release.yml`** — `v*` etiketi: sürüm denetimi (etiket = `v{APP_VERSION}`,
   değilse durur) → üç platformda test → üç platformda derleme + **paketlenmiş
   uygulamanın deneme açılışı** → **TASLAK** release (`SHA256SUMS` dahil). Elle
@@ -1413,6 +1416,17 @@ mesajına bak.
   bu API olmayabilir (graceful fallback var, "veri yok" der).
 
 ## Çözülen Sorunlar (tarihçe)
+
+- **Alt durum çubuğundaki sürüm bilgisi kayboluyordu (v2.40.1, kullanıcı
+  bildirimi: "alt bardaki bilgilendirme yazıları yok")**: bilgi
+  `statusBar().showMessage()` ile GEÇİCİ mesaj olarak yazılıyordu. Fare ipucu
+  (statusTip) olan bir menü öğesinin üstünden geçince Qt ipucunu geçici mesajın
+  yerine koyar, ayrılınca boş ipucuyla siler — bilgi bir daha gelmiyordu.
+  Artık kalıcı bir `QLabel` (`statusInfo`, `addWidget`): ipucu süresince
+  örtülür, sonra geri görünür; "coded by Mcansız" sağa sabit ayrı etiket
+  (`statusCredit`, eskiden sekme karakterleriyle itiliyordu). Python / PyQt
+  sürümleri dar pencerede satırı taşırdığı için ipucuna alındı. Test:
+  `test_status_bar_survives_status_tips` (ipucu gelip gidince etiket görünür).
 
 - **PCB'de net vurgusu kapalı katmandaki yolu göstermiyordu + tek dosya çıktıda
   araç düğmeleri seçimi siliyordu (v2.38.0, kullanıcı isteği: "bir nete

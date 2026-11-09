@@ -134,6 +134,28 @@ class TestGui(unittest.TestCase):
         finally:
             win.close()
 
+    def test_status_bar_survives_status_tips(self):
+        """Alt çubuktaki sürüm bilgisi menü ipucundan sonra kaybolmuyor."""
+        from PyQt5 import QtGui, QtWidgets
+        win = self.gui.MainWindow()
+        try:
+            win.show()
+            self.app.processEvents()
+            info = win.findChild(QtWidgets.QLabel, "statusInfo")
+            self.assertIsNotNone(info)
+            self.assertIn(self.gui.APP_VERSION, info.text())
+            # menü öğesinin üstünden geçen fare: önce ipucu, sonra boş ipucu
+            QtWidgets.QApplication.sendEvent(win, QtGui.QStatusTipEvent("ipucu"))
+            self.app.processEvents()
+            self.assertEqual(win.statusBar().currentMessage(), "ipucu")
+            QtWidgets.QApplication.sendEvent(win, QtGui.QStatusTipEvent(""))
+            self.app.processEvents()
+            self.assertTrue(info.isVisible(), "bilgi etiketi ipucundan sonra geri görünmeli")
+            self.assertIn(self.gui.APP_VERSION, info.text())
+            self.assertIsNotNone(win.findChild(QtWidgets.QLabel, "statusCredit"))
+        finally:
+            win.close()
+
     def test_no_missing_translations(self):
         """Arayüzdeki her Türkçe etiketin İngilizce karşılığı var."""
         import i18n

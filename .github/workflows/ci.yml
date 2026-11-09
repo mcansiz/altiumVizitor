@@ -29,4 +29,4 @@ jobs:
   macos:
     uses: ./.github/workflows/tests.yml
     with:
-      os: macos-14
+      os: macos-15

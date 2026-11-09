@@ -59,7 +59,7 @@ jobs:
   test-macos:
     needs: version
     uses: ./.github/workflows/tests.yml
-    with: { os: macos-14 }
+    with: { os: macos-15 }
 
   build-windows:
     name: Derleme (Windows exe)
@@ -139,7 +139,7 @@ jobs:
   build-macos:
     name: Derleme (macOS .app, deneysel)
     needs: [version, test-macos]
-    runs-on: macos-14
+    runs-on: macos-15
     timeout-minutes: 45
     env:
       VER: ${{ needs.version.outputs.version }}

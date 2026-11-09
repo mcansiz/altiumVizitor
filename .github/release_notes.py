@@ -24,9 +24,9 @@ def notes(ver: str, lang: str) -> str:
 
 def main() -> int:
     ver, tag, prev, repo, run_url, macos = sys.argv[1:7]
-    win = f"SchematicViz-v{ver}-win-x64.exe"
-    lin = f"SchematicViz-v{ver}-linux-x86_64.AppImage"
-    mac = f"SchematicViz-v{ver}-macos-arm64.zip"
+    win = f"AltiumVizitor-v{ver}-win-x64.exe"
+    lin = f"AltiumVizitor-v{ver}-linux-x86_64.AppImage"
+    mac = f"AltiumVizitor-v{ver}-macos-arm64.zip"
     has_mac = macos == "success"
 
     tr_rows = [
@@ -47,11 +47,11 @@ def main() -> int:
         tr_rows.append(
             f"| **macOS 11+ (Apple Silicon), deneysel** | `{mac}` | Yalnız otomatik testlerden "
             "geçti. İmzasız: ilk açılışta engellenirse **Sistem Ayarları → Gizlilik ve Güvenlik → "
-            "Yine de Aç** ya da `xattr -dr com.apple.quarantine SchematicViz.app`. |")
+            "Yine de Aç** ya da `xattr -dr com.apple.quarantine AltiumVizitor.app`. |")
         en_rows.append(
             f"| **macOS 11+ (Apple Silicon), experimental** | `{mac}` | Passed automated tests "
             "only. Unsigned: if blocked on first launch use **System Settings → Privacy & "
-            "Security → Open Anyway** or `xattr -dr com.apple.quarantine SchematicViz.app`. |")
+            "Security → Open Anyway** or `xattr -dr com.apple.quarantine AltiumVizitor.app`. |")
 
     changelog = (f"**Full Changelog**: https://github.com/{repo}/compare/{prev}...{tag}"
                  if prev else "")

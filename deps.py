@@ -32,7 +32,7 @@ Denetimi bilinçli olarak atlamak gerekirse (vendored/özel kurulum):
 @author Mikail Cansız
 @date 2026
 """
-# Schematic Viz Generator — bağımlılık kataloğu ve başlangıç denetimi.
+# Altium Vizitor — bağımlılık kataloğu ve başlangıç denetimi.
 # Copyright (C) 2026  Mikail Cansız <cansizmikail@gmail.com>
 #
 # SPDX-License-Identifier: AGPL-3.0-or-later
@@ -321,7 +321,7 @@ def format_report(problems) -> str:
     @param problems Problem listesi
     @return Çok satırlı hata metni (pip komutu dahil)
     """
-    lines = ["Schematic Viz başlatılamadı: gerekli kütüphanelerden bazıları eksik "
+    lines = ["Altium Vizitor başlatılamadı: gerekli kütüphanelerden bazıları eksik "
              "veya uyumsuz.", ""]
     for p in problems:
         dep = p.dep
@@ -380,7 +380,7 @@ def enforce(gui: bool = False) -> None:
                 box = QtWidgets.QMessageBox()
                 box.setIcon(QtWidgets.QMessageBox.Critical)
                 box.setWindowTitle("Eksik bağımlılık")
-                box.setText("Schematic Viz başlatılamadı — gerekli kütüphaneler eksik.")
+                box.setText("Altium Vizitor başlatılamadı — gerekli kütüphaneler eksik.")
                 box.setDetailedText(msg)
                 box.exec_()
             except Exception:
@@ -432,7 +432,7 @@ def _main() -> int:
         _write("\n".join(requirements_lines()), sys.stdout)
         return 0
     rows = status_table()
-    out = [f"Schematic Viz — bağımlılıklar ({sys.version.split()[0]} @ {sys.executable})", ""]
+    out = [f"Altium Vizitor — bağımlılıklar ({sys.version.split()[0]} @ {sys.executable})", ""]
     hdr = f"  {'PAKET':<16s} {'SÜRÜM':<16s} {'DURUM':<26s} AÇIKLAMA"
     out += [hdr, "-" * max(len(hdr), 96)]
     for grup, dogrudan in (("Doğrudan kullanılan", True), ("Alt bağımlılıklar", False)):

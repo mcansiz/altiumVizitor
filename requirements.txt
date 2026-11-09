@@ -1,4 +1,4 @@
-# Schematic Viz Generator bağımlılıkları (Python 3.12)
+# Altium Vizitor bağımlılıkları (Python 3.12)
 # Kurulum (Windows):  py -3.12 -m pip install -r requirements.txt
 # Kurulum (Linux):    python3 -m pip install -r requirements.txt
 #
@@ -11,7 +11,7 @@
 # Python >= 3.12 şart (altium-monkey: >=3.12,<3.15).
 #
 # DENETİM: aynı liste deps.py'de (Dep tablosu) tutulur ve uygulama HER
-# açılışta oradan denetlenir — paketlerden biri eksikse Schematic Viz
+# açılışta oradan denetlenir — paketlerden biri eksikse Altium Vizitor
 # başlamaz, hangi paketin eksik olduğunu ve kurulum komutunu söyler.
 # Kurulu durumu görmek için:  py -3.12 deps.py
 # Bu dosyayla deps.py'nin uyumunu görmek için:  py -3.12 deps.py --requirements

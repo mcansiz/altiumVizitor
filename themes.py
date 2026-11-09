@@ -744,6 +744,8 @@ def user_theme_dir() -> Path:
         base = Path.home() / "Library" / "Application Support"
     else:
         base = Path(os.environ.get("XDG_CONFIG_HOME") or (Path.home() / ".config"))
+    # Klasör adı uygulamanın ESKİ adı (v2.41.0'da "Altium Vizitor" oldu):
+    # değişirse kullanıcının kaydettiği temalar bulunamaz.
     return base / "SchematicViz" / "themes"
 
 

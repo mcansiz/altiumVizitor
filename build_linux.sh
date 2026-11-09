@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# SchematicViz — Linux paketleme betiği (build_exe.bat'ın Linux karşılığı).
-# Aynı SchematicViz.spec dosyasını kullanır; çıktı: dist/SchematicViz (ELF).
+# AltiumVizitor — Linux paketleme betiği (build_exe.bat'ın Linux karşılığı).
+# Aynı AltiumVizitor.spec dosyasını kullanır; çıktı: dist/AltiumVizitor (ELF).
 # Kullanım:  bash build_linux.sh    (veya: chmod +x build_linux.sh && ./build_linux.sh)
 #
 # NOT: PyInstaller çıktısı, DERLENDİĞİ makinenin glibc'sine bağlanır —
@@ -18,7 +18,7 @@ set -u
 cd "$(dirname "$(readlink -f "$0")")"
 
 echo "============================================================"
-echo "  SchematicViz - Linux paketleniyor (PyInstaller)"
+echo "  AltiumVizitor - Linux paketleniyor (PyInstaller)"
 echo "============================================================"
 echo
 
@@ -52,10 +52,10 @@ if ! "$PY" -m PyInstaller --version >/dev/null 2>&1; then
   echo
 fi
 
-# Derleme ayarları SchematicViz.spec'te (collect-all listesi, PyQt6 hariç
+# Derleme ayarları AltiumVizitor.spec'te (collect-all listesi, PyQt6 hariç
 # tutma, kullanılmayan Qt kütüphanelerini kırpan _DROP filtresi — regex
 # Linux'taki libQt5Qml.so vb. adları da yakalar). icon= Linux'ta yok sayılır.
-"$PY" -m PyInstaller --noconfirm SchematicViz.spec
+"$PY" -m PyInstaller --noconfirm AltiumVizitor.spec
 status=$?
 
 echo
@@ -67,5 +67,5 @@ if [ "$status" -ne 0 ]; then
 fi
 
 echo "============================================================"
-echo "  BASARILI!  Cikti:  dist/SchematicViz"
+echo "  BASARILI!  Cikti:  dist/AltiumVizitor"
 echo "============================================================"

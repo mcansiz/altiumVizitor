@@ -3,11 +3,11 @@
 @brief Linux AppImage üretir: PyInstaller klasör çıktısı + appimagetool.
 
 @details
-    python3 tools/build_appimage.py      # dist/SchematicViz-v<sürüm>-linux-x86_64.AppImage
+    python3 tools/build_appimage.py      # dist/AltiumVizitor-v<sürüm>-linux-x86_64.AppImage
 
 Adımlar:
-  1. `SCHVIZ_ONEDIR=1` ile PyInstaller → dist/SchematicViz/ (klasör çıktısı).
-  2. AppDir: usr/lib/schematicviz/ (uygulama), AppRun, .desktop, ikon (PNG,
+  1. `SCHVIZ_ONEDIR=1` ile PyInstaller → dist/AltiumVizitor/ (klasör çıktısı).
+  2. AppDir: usr/lib/altiumvizitor/ (uygulama), AppRun, .desktop, ikon (PNG,
      icon.ico'nun en büyük katmanından Pillow ile — Pillow zaten bağımlılık).
   3. Sabit sürümlü appimagetool indirilir (SHA-256 denetlenir) ve paketlenir.
 
@@ -34,7 +34,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 WORK = ROOT / ".tmp" / "appimage"
-APPDIR = WORK / "SchematicViz.AppDir"
+APPDIR = WORK / "AltiumVizitor.AppDir"
 
 # Güncelleme: gh api repos/AppImage/appimagetool/releases/latest --jq \
 #   '.tag_name, (.assets[] | select(.name=="appimagetool-x86_64.AppImage") | .digest)'
@@ -44,22 +44,22 @@ APPIMAGETOOL = ("appimagetool-x86_64.AppImage",
 
 DESKTOP = """[Desktop Entry]
 Type=Application
-Name=Schematic Viz Generator
+Name=Altium Vizitor
 GenericName=Altium schematic and PCB viewer generator
 GenericName[tr]=Altium şematik ve PCB görüntüleyici üretici
 Comment=Turn Altium projects into interactive HTML schematic, PCB and 3D viewers
 Comment[tr]=Altium projelerini etkileşimli HTML şematik, PCB ve 3D görüntüleyicilere dönüştürür
-Exec=SchematicViz %F
-Icon=schematicviz
+Exec=AltiumVizitor %F
+Icon=altiumvizitor
 Terminal=false
 Categories=Development;Electronics;
 Keywords=altium;schematic;pcb;bom;netlist;
 """
 
 APPRUN = """#!/bin/sh
-# Schematic Viz AppImage başlatıcısı.
+# Altium Vizitor AppImage başlatıcısı.
 HERE="$(dirname "$(readlink -f "$0")")"
-exec "$HERE/usr/lib/schematicviz/SchematicViz" "$@"
+exec "$HERE/usr/lib/altiumvizitor/AltiumVizitor" "$@"
 """
 
 
@@ -116,23 +116,23 @@ def max_glibc(tree: Path) -> str:
 
 def main() -> int:
     ver = app_version()
-    target = ROOT / "dist" / f"SchematicViz-v{ver}-linux-x86_64.AppImage"
+    target = ROOT / "dist" / f"AltiumVizitor-v{ver}-linux-x86_64.AppImage"
 
     log("== PyInstaller (klasör çıktısı)")
     env = dict(os.environ, SCHVIZ_ONEDIR="1")
     subprocess.run([sys.executable, "-m", "PyInstaller", "--noconfirm", "--clean",
-                    "SchematicViz.spec"], cwd=ROOT, env=env, check=True)
-    bundle = ROOT / "dist" / "SchematicViz"
-    if not (bundle / "SchematicViz").is_file():
-        raise SystemExit(f"HATA: {bundle}/SchematicViz yok")
+                    "AltiumVizitor.spec"], cwd=ROOT, env=env, check=True)
+    bundle = ROOT / "dist" / "AltiumVizitor"
+    if not (bundle / "AltiumVizitor").is_file():
+        raise SystemExit(f"HATA: {bundle}/AltiumVizitor yok")
 
     log("== AppDir")
     shutil.rmtree(APPDIR, ignore_errors=True)
-    lib = APPDIR / "usr" / "lib" / "schematicviz"
+    lib = APPDIR / "usr" / "lib" / "altiumvizitor"
     shutil.copytree(bundle, lib, symlinks=True)
     (APPDIR / "AppRun").write_text(APPRUN, encoding="utf-8")
     (APPDIR / "AppRun").chmod(0o755)
-    (APPDIR / "schematicviz.desktop").write_text(DESKTOP, encoding="utf-8")
+    (APPDIR / "altiumvizitor.desktop").write_text(DESKTOP, encoding="utf-8")
     from PIL import Image
     ico = Image.open(ROOT / "icon.ico")
     sizes = sorted(ico.info.get("sizes") or [ico.size])
@@ -140,9 +140,9 @@ def main() -> int:
     png = ico.convert("RGBA").resize((256, 256), Image.LANCZOS)
     icon_dir = APPDIR / "usr" / "share" / "icons" / "hicolor" / "256x256" / "apps"
     icon_dir.mkdir(parents=True)
-    png.save(icon_dir / "schematicviz.png")
-    png.save(APPDIR / "schematicviz.png")
-    (APPDIR / ".DirIcon").symlink_to("schematicviz.png")
+    png.save(icon_dir / "altiumvizitor.png")
+    png.save(APPDIR / "altiumvizitor.png")
+    (APPDIR / ".DirIcon").symlink_to("altiumvizitor.png")
 
     log(f"paketteki en yüksek glibc sürümü: {max_glibc(APPDIR)}")
 

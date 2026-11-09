@@ -1,16 +1,35 @@
-# Schematic Viz Generator
+# Altium Vizitor
 
 Altium şematik projelerini interaktif HTML viewer'a dönüştüren PyQt5 uygulaması.
 Wavenumber'ın ticari "viz sch 1.0" ürününün açık-kaynak alternatifi.
 [altium_monkey](https://github.com/wavenumber-eng/altium_monkey) kütüphanesi
 (Eli Hughes / Wavenumber) üzerine kurulu.
 
-**Mevcut sürüm**: `APP_VERSION` sabiti **`viewer.py`'de** tutulur (şu an 2.40.1);
+**Mevcut sürüm**: `APP_VERSION` sabiti **`viewer.py`'de** tutulur (şu an 2.41.0);
 `gui.py` oradan import eder (v2.9.29'da taşındı — HTML çıktıları da sürümü
 gösterebilsin diye, tek kaynak). Yeni özellik/düzeltme ekleyince bu sabiti
 güncelle (semver: major.minor.patch). Sürüm pencere başlığında, alt durum
 çubuğunda, üretim log'unun başında, "Hakkında" diyaloğunda ve birleşik HTML'in
 sağ üst rozetinde (`{proje} · v{APP_VERSION}`) görünür.
+
+## Uygulama adı: Altium Vizitor (v2.41.0+)
+
+Kullanıcı isteği: "uygulama adını Altium Vizitor olarak güncelleyelim, repo ile
+aynı olsun". Eski ad **Schematic Viz Generator** / `SchematicViz`. Değişen:
+görünen ad (pencere başlığı, Hakkında, log, durum çubuğu ipucu, HTML rozeti ve
+sekme başlığı, bağımlılık hata mesajları), paketleme (`AltiumVizitor.spec`,
+`dist/AltiumVizitor.exe`, release dosyaları `AltiumVizitor-vX.Y.Z-…`, AppImage
+`.desktop` / ikon adı, macOS `AltiumVizitor.app` ve `bundle_identifier`
+`io.github.mcansiz.altiumvizitor`), varsayılan dosya adları
+(`altium_vizitor.html`, PNG `altium_vizitor_…`).
+
+**BİLEREK DEĞİŞMEYENLER** — kullanıcı verisinin anahtarlarıdır, değişirse
+kayıtlı veri kaybolur: `QSettings("SchematicViz", "SchematicViz")` (dil, son
+klasör, temalar, yazı tipleri), tema klasörü `…/SchematicViz/themes`, tarayıcı
+`localStorage` anahtarları (`schviz-ui`, `schviz-pcb-ui`, `schviz-anno:…`,
+`schviz-bom:…`), ortam değişkenleri (`SCHVIZ_SKIP_DEP_CHECK`,
+`SCHVIZ_THEME_DIR`, `SCHVIZ_ONEDIR`, `SCHVIZ_REQUIRE_*`). Tarihçe
+kayıtlarındaki eski ad olduğu gibi bırakıldı.
 
 ## Dosyalar
 
@@ -291,7 +310,7 @@ py -3.12 -m pip install -r requirements.txt
 py -3.12 gui.py
 
 # Windows exe paketle (--add-data ZORUNLU: gui.ui runtime'da yüklenir, yoksa exe açılmaz)
-py -3.12 -m PyInstaller --noconfirm --onefile --windowed --name "SchematicViz" ^
+py -3.12 -m PyInstaller --noconfirm --onefile --windowed --name "AltiumVizitor" ^
     --collect-all altium_monkey --collect-all PyQt5 ^
     --collect-all openpyxl --collect-all cascadio --collect-all trimesh ^
     --collect-all numpy ^
@@ -320,7 +339,7 @@ DiskUltimate deposundaki düzenin karşılığı. Üç iş akışı (`.github/wo
   çalıştırma (workflow_dispatch) = deneme: derler/sınar, dosyaları run'ın
   Artifacts'ına koyar, release oluşturmaz. macOS DENEYSEL: düşerse release
   yine oluşur, yalnız mac dosyası eklenmez.
-  Çıktılar: `SchematicViz-vX.Y.Z-win-x64.exe` (eski adlandırma korundu),
+  Çıktılar: `AltiumVizitor-vX.Y.Z-win-x64.exe` (v2.41.0 öncesi `SchematicViz-…`),
   `…-linux-x86_64.AppImage`, `…-macos-arm64.zip` (.app).
   Release başlığı commit başlığından: `v2.33.0: konu` → `v2.33.0 — konu`.
   Gövde `.github/release_notes.py` ile (indirme tablosu TR+EN, kurulum, Full
@@ -349,10 +368,10 @@ ATLANIR; CI'da `SCHVIZ_REQUIRE_SAMPLES=1` / `SCHVIZ_REQUIRE_NODE=1` ile düşer.
 
 ```bash
 py -3.12 -m unittest discover -s tests -t . -v      # tüm testler
-py -3.12 tools/smoke_launch.py 2.33.0 .tmp/samples/m2_emmc/proj/m2_emmc.PrjPcb dist/SchematicViz.exe
+py -3.12 tools/smoke_launch.py 2.33.0 .tmp/samples/m2_emmc/proj/m2_emmc.PrjPcb dist/AltiumVizitor.exe
 ```
 
-**Paketleme** (`SchematicViz.spec`): Windows/Linux tek dosya (değişmedi);
+**Paketleme** (`AltiumVizitor.spec`): Windows/Linux tek dosya (değişmedi);
 `SCHVIZ_ONEDIR=1` → klasör (AppImage'in içi, `tools/build_appimage.py`);
 macOS → klasör + `BUNDLE` (.app). AppImage **ubuntu-22.04'te** derlenir:
 PyInstaller ikilisi derleme makinesinin glibc'sine bağlı, wn-geometer zaten
@@ -420,8 +439,8 @@ Kayıtları listelemek için: `cmd //c "cmdkey /list"` (Bash'ten `cmdkey`'i
 doğrudan boru hattına sokma — parametre hatası verir).
 
 **Release biçimi** (önceki sürümlerle tutarlı olsun): başlık
-`vX.Y.Z — <kısa Türkçe konu>`, asset adı `SchematicViz-vX.Y.Z-win-x64.exe`
-(`dist/SchematicViz.exe`'nin kopyası), gövde TR + EN iki bölüm, her birinde
+`vX.Y.Z — <kısa Türkçe konu>`, asset adı `AltiumVizitor-vX.Y.Z-win-x64.exe`
+(`dist/AltiumVizitor.exe`'nin kopyası), gövde TR + EN iki bölüm, her birinde
 "Kurulum / Install" (VC++ Redistributable linki) ve sonda
 `**Full Changelog**: …/compare/<önceki>...<yeni>`.
 
@@ -479,7 +498,8 @@ temasının 7'si böyle).
   opak yazılır. Opak renklerde sonuç değişmedi (eski 11 tema aynı).
 - **Kullanıcı temaları**: `themes.user_theme_dir()` altında birer JSON —
   Windows `%APPDATA%\SchematicViz\themes`, macOS `~/Library/Application
-  Support/…`, Linux `$XDG_CONFIG_HOME/SchematicViz/themes`;
+  Support/…`, Linux `$XDG_CONFIG_HOME/SchematicViz/themes` (klasör adı
+  uygulamanın ESKİ adı — bkz. "Uygulama adı");
   **`SCHVIZ_THEME_DIR`** önceliklidir (testler). Kimlik `u-<dosya-kökü>`
   (hazır kimliklerle çakışmaz). Klasöre elle KiCad teması atmak da yeter:
   GUI her üretimde klasörü yeniden okur (`MainWindow.theme_set()`).
@@ -980,7 +1000,7 @@ Bir değişiklik yaptıktan sonra:
   görünürlüğü, balon ve gruplama regresyonu, 0 JS hatası).
 - **Birleşik görünüm üst çubuğu** (v2.30.0, kullanıcı isteği): SOLDA Altium
   **proje adı** (eskiden sabit "Şematik + PCB"), ORTADA mod düğmeleri, SAĞDA
-  panel araçları + tam ekran + **`Schematic Viz Generator · v{APP_VERSION}`**
+  panel araçları + tam ekran + **`Altium Vizitor · v{APP_VERSION}`**
   rozeti. **"Sayfa…" açılır menüsü KALDIRILDI** (hiyerarşi sekmesi yeterli —
   şematik viewer'ın kendisinden de çıktı) ve cross-probe açıklama metni
   kaldırıldı. Mod düğmesi "Şematik" → **SCH**. Tam ekran düğmesi araç

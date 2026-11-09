@@ -1,10 +1,10 @@
 @echo off
 chcp 65001 >nul
-title SchematicViz - EXE Paketleme
+title AltiumVizitor - EXE Paketleme
 cd /d "D:\pythonProjeler\altium-monley"
 
 echo ============================================================
-echo   SchematicViz - EXE paketleniyor (PyInstaller)
+echo   AltiumVizitor - EXE paketleniyor (PyInstaller)
 echo ============================================================
 echo.
 
@@ -33,11 +33,11 @@ if errorlevel 1 (
   echo.
 )
 
-REM Derleme ayarlari SchematicViz.spec dosyasinda (collect-all listesi,
+REM Derleme ayarlari AltiumVizitor.spec dosyasinda (collect-all listesi,
 REM PyQt6 haric tutma, kullanilmayan Qt DLL'lerini kirpan _DROP filtresi).
 REM PyQt5 icin collect-all YOK: QML/Designer/ceviriler ~50MB gomuyordu;
 REM PyInstaller'in PyQt5 hook'u gerekli cekirdegi zaten toplar.
-py -3.12 -m PyInstaller --noconfirm "D:\pythonProjeler\altium-monley\SchematicViz.spec"
+py -3.12 -m PyInstaller --noconfirm "D:\pythonProjeler\altium-monley\AltiumVizitor.spec"
 
 echo.
 if errorlevel 1 (
@@ -46,7 +46,7 @@ if errorlevel 1 (
   echo ############################################################
 ) else (
   echo ============================================================
-  echo   BASARILI!  Cikti:  dist\SchematicViz.exe
+  echo   BASARILI!  Cikti:  dist\AltiumVizitor.exe
   echo ============================================================
 )
 

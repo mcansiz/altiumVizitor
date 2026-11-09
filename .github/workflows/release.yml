@@ -4,9 +4,9 @@
 # dosyalar çalıştırmanın "Artifacts" bölümüne konur, release OLUŞTURULMAZ.
 #
 # Çıktılar:
-#   SchematicViz-v<sürüm>-win-x64.exe            (önceki sürümlerle aynı ad)
-#   SchematicViz-v<sürüm>-linux-x86_64.AppImage  (glibc 2.35+ / Ubuntu 22.04+)
-#   SchematicViz-v<sürüm>-macos-arm64.zip        (deneysel, imzasız .app)
+#   AltiumVizitor-v<sürüm>-win-x64.exe            (v2.41.0 öncesi: SchematicViz-…)
+#   AltiumVizitor-v<sürüm>-linux-x86_64.AppImage  (glibc 2.35+ / Ubuntu 22.04+)
+#   AltiumVizitor-v<sürüm>-macos-arm64.zip        (deneysel, imzasız .app)
 name: Release
 
 on:
@@ -84,17 +84,17 @@ jobs:
       - name: Exe
         shell: bash
         run: |
-          python -m PyInstaller --noconfirm --clean SchematicViz.spec
-          mv dist/SchematicViz.exe "dist/SchematicViz-v$VER-win-x64.exe"
+          python -m PyInstaller --noconfirm --clean AltiumVizitor.spec
+          mv dist/AltiumVizitor.exe "dist/AltiumVizitor-v$VER-win-x64.exe"
       - name: Deneme açılışı (self-test + üretim)
         shell: bash
         run: |
           python tools/fetch_samples.py
-          python tools/smoke_launch.py "$VER" "$SAMPLE" "dist/SchematicViz-v$VER-win-x64.exe"
+          python tools/smoke_launch.py "$VER" "$SAMPLE" "dist/AltiumVizitor-v$VER-win-x64.exe"
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: dist-windows
-          path: dist/SchematicViz-v${{ env.VER }}-win-x64.exe
+          path: dist/AltiumVizitor-v${{ env.VER }}-win-x64.exe
           if-no-files-found: error
 
   build-linux:
@@ -129,11 +129,11 @@ jobs:
       - name: Deneme açılışı (self-test + üretim)
         run: |
           python tools/fetch_samples.py
-          python tools/smoke_launch.py "$VER" "$SAMPLE" "dist/SchematicViz-v$VER-linux-x86_64.AppImage"
+          python tools/smoke_launch.py "$VER" "$SAMPLE" "dist/AltiumVizitor-v$VER-linux-x86_64.AppImage"
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: dist-linux
-          path: dist/SchematicViz-v${{ env.VER }}-linux-x86_64.AppImage
+          path: dist/AltiumVizitor-v${{ env.VER }}-linux-x86_64.AppImage
           if-no-files-found: error
 
   build-macos:
@@ -158,16 +158,16 @@ jobs:
         run: python deps.py
       - name: .app
         run: |
-          python -m PyInstaller --noconfirm --clean SchematicViz.spec
-          ditto -c -k --keepParent dist/SchematicViz.app "dist/SchematicViz-v$VER-macos-arm64.zip"
+          python -m PyInstaller --noconfirm --clean AltiumVizitor.spec
+          ditto -c -k --keepParent dist/AltiumVizitor.app "dist/AltiumVizitor-v$VER-macos-arm64.zip"
       - name: Deneme açılışı (self-test + üretim)
         run: |
           python tools/fetch_samples.py
-          python tools/smoke_launch.py "$VER" "$SAMPLE" dist/SchematicViz.app/Contents/MacOS/SchematicViz
+          python tools/smoke_launch.py "$VER" "$SAMPLE" dist/AltiumVizitor.app/Contents/MacOS/AltiumVizitor
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: dist-macos
-          path: dist/SchematicViz-v${{ env.VER }}-macos-arm64.zip
+          path: dist/AltiumVizitor-v${{ env.VER }}-macos-arm64.zip
           if-no-files-found: error
 
   release:
@@ -202,7 +202,7 @@ jobs:
           prev=$(gh release list --exclude-drafts -L 10 --json tagName -q '.[].tagName' \
                  | grep -vx "$GITHUB_REF_NAME" | head -1 || true)
           cd out
-          sha256sum SchematicViz-* > SHA256SUMS
+          sha256sum AltiumVizitor-* > SHA256SUMS
           cat SHA256SUMS
           python3 ../.github/release_notes.py "$VER" "$GITHUB_REF_NAME" "$prev" \
             "$GITHUB_REPOSITORY" "$RUN_URL" "$MACOS" > notes.md
@@ -210,8 +210,8 @@ jobs:
           case "$VER" in *-*) pre="--prerelease" ;; esac
           if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
             echo "Release zaten var: dosyalar güncelleniyor"
-            gh release upload "$GITHUB_REF_NAME" SchematicViz-* SHA256SUMS --clobber
+            gh release upload "$GITHUB_REF_NAME" AltiumVizitor-* SHA256SUMS --clobber
           else
-            gh release create "$GITHUB_REF_NAME" SchematicViz-* SHA256SUMS \
+            gh release create "$GITHUB_REF_NAME" AltiumVizitor-* SHA256SUMS \
               --draft $pre --title "v$VER — $topic" --notes-file notes.md --verify-tag
           fi

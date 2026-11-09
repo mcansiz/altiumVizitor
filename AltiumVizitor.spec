@@ -1,15 +1,15 @@
 # -*- mode: python ; coding: utf-8 -*-
-# SchematicViz spec — build_exe.bat (Windows) ve build_linux.sh (Linux) bunu kullanır.
+# AltiumVizitor spec — build_exe.bat (Windows) ve build_linux.sh (Linux) bunu kullanır.
 # PyQt5 için collect_all YOK (Designer/QML/çeviriler ~50 MB gömerdi);
 # PyInstaller'ın PyQt5 hook'u QtWidgets çekirdeğini zaten toplar.
 #
 # Çıktı biçimi platforma göre (CI: .github/workflows/release.yml):
-#   Windows / Linux  tek dosya  dist/SchematicViz(.exe)
-#   Linux + SCHVIZ_ONEDIR=1     klasör  dist/SchematicViz/  (AppImage'in içi —
+#   Windows / Linux  tek dosya  dist/AltiumVizitor(.exe)
+#   Linux + SCHVIZ_ONEDIR=1     klasör  dist/AltiumVizitor/  (AppImage'in içi —
 #                               tools/build_appimage.py; AppImage zaten
 #                               sıkıştırılmış olduğundan tek dosyanın her
 #                               açılışta /tmp'ye açılması gereksiz olurdu)
-#   macOS            klasör + .app  dist/SchematicViz.app (çift tıkla açılır)
+#   macOS            klasör + .app  dist/AltiumVizitor.app (çift tıkla açılır)
 import os
 import re
 import sys
@@ -101,7 +101,7 @@ if ONEDIR:
         a.scripts,
         [],
         exclude_binaries=True,
-        name='SchematicViz',
+        name='AltiumVizitor',
         debug=False,
         bootloader_ignore_signals=False,
         strip=False,    # bkz. aşağıdaki tek dosya EXE'deki not (numpy/OpenBLAS)
@@ -115,20 +115,20 @@ if ONEDIR:
         icon=EXE_ICON,
     )
     coll = COLLECT(exe, a.binaries, a.datas, strip=False, upx=False,
-                   name='SchematicViz')
+                   name='AltiumVizitor')
     if IS_MACOS:
         _ver = re.search(r'^APP_VERSION = "([^"]+)"',
                          open(os.path.join(SPECPATH, 'viewer.py'), encoding='utf-8').read(),
                          re.M).group(1)
         app = BUNDLE(
             coll,
-            name='SchematicViz.app',
+            name='AltiumVizitor.app',
             icon='icon.ico',
-            bundle_identifier='io.github.mcansiz.schematicviz',
+            bundle_identifier='io.github.mcansiz.altiumvizitor',
             version=_ver,
             info_plist={
-                'CFBundleName': 'SchematicViz',
-                'CFBundleDisplayName': 'Schematic Viz Generator',
+                'CFBundleName': 'AltiumVizitor',
+                'CFBundleDisplayName': 'Altium Vizitor',
                 'CFBundleShortVersionString': _ver,
                 'NSHighResolutionCapable': True,
                 'LSMinimumSystemVersion': '11.0',
@@ -141,7 +141,7 @@ else:
         a.binaries,
         a.datas,
         [],
-        name='SchematicViz',
+        name='AltiumVizitor',
         debug=False,
         bootloader_ignore_signals=False,
         # strip KAPALI (v2.33.0): Linux'ta numpy'nin gömülü OpenBLAS'ını

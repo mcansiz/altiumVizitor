@@ -14,7 +14,7 @@ bağımsızdır (Three.js gömülü, harici bağımlılık yok).
 @date 2026
 @version 2.15.1
 """
-# Schematic Viz Generator — Altium projelerini interaktif HTML görüntüleyiciye dönüştürür.
+# Altium Vizitor — Altium projelerini interaktif HTML görüntüleyiciye dönüştürür.
 # Copyright (C) 2026  Mikail Cansız <cansizmikail@gmail.com>
 #
 # SPDX-License-Identifier: AGPL-3.0-or-later
@@ -92,7 +92,7 @@ from altium_monkey.altium_schdoc import AltiumSchDoc
 
 # Uygulama sürümü — tek kaynak burası; gui.py buradan import eder.
 # HTML çıktılarında sağ üst köşedeki rozette görünür (build saati yerine).
-APP_VERSION = "2.40.1"
+APP_VERSION = "2.41.0"
 
 # Önerilen minimum altium_monkey sürümü. Bu sürümden öncesinde:
 #   · 2026.6.21 öncesi — STM32 gibi IC'lerde dikey pin adları yatay çiziliyordu.
@@ -5201,7 +5201,7 @@ def build_combined_shell(sch_html, pcb_html, timestamp, project_name, have_pcb,
         fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"
         d="M1.6 5.4V1.6H5.4M10.6 1.6H14.4V5.4M14.4 10.6V14.4H10.6M5.4 14.4H1.6V10.6"/></svg>
     </button>
-    <span class="badge">Schematic Viz Generator · v{APP_VERSION}</span>
+    <span class="badge">Altium Vizitor · v{APP_VERSION}</span>
   </div>
 </div>
 <div id="split">
@@ -8539,7 +8539,7 @@ def build_html(sheets, net_list, components, timestamp,
 <meta charset="utf-8">
 {_MOBILE_META}
 <meta http-equiv="cache-control" content="no-cache">
-<title>Schematic Viz · {timestamp}</title>
+<title>Altium Vizitor · {timestamp}</title>
 <style>
 /* Şemaya gömülü fontlar (altium_monkey `<style>` ile veriyor) — proje genelinde
    TEKİLLEŞTİRİLDİ ve yalnız gerçekten kullanılan aileler taşındı. Kanvas
@@ -11428,7 +11428,7 @@ document.getElementById('export-png').onclick = async () => {{
     }});
     const a = document.createElement('a');
     a.href = canvas.toDataURL('image/png');
-    a.download = `schematic_viz_${{BUILD_STAMP.replace(/:/g,'')}}.png`;
+    a.download = `altium_vizitor_${{BUILD_STAMP.replace(/:/g,'')}}.png`;
     a.click();
   }} catch (err) {{
     alert('⟪Export hatası:⟫ ' + err.message);

@@ -1,5 +1,5 @@
 
-# Schematic Viz Generator (EN)
+# Altium Vizitor (EN)
 
 > A PyQt5 desktop application that converts Altium schematic and PCB projects into **interactive, single-file HTML viewers** — no server required.
 
@@ -157,9 +157,9 @@ Ready-to-run builds are on the [Releases page](https://github.com/mcansiz/altium
 
 | Platform | File | Notes |
 | -------- | ---- | ----- |
-| **Windows 10/11 (64-bit)** | `SchematicViz-vX.Y.Z-win-x64.exe` | Single file, no installation. If it does not start on a fresh Windows machine, install the [MS VC++ Redistributable](https://aka.ms/vs/17/release/vc_redist.x64.exe). Not code-signed: SmartScreen → **More info → Run anyway**. |
-| **Linux (64-bit)** | `SchematicViz-vX.Y.Z-linux-x86_64.AppImage` | `chmod +x` and run. Needs glibc 2.35+ (Ubuntu 22.04+ / Debian 12+). Without FUSE: `--appimage-extract-and-run`. |
-| **macOS 11+ (Apple Silicon), experimental** | `SchematicViz-vX.Y.Z-macos-arm64.zip` | Passed automated tests only. Unsigned: if blocked on first launch use **System Settings → Privacy & Security → Open Anyway** or `xattr -dr com.apple.quarantine SchematicViz.app`. |
+| **Windows 10/11 (64-bit)** | `AltiumVizitor-vX.Y.Z-win-x64.exe` | Single file, no installation. If it does not start on a fresh Windows machine, install the [MS VC++ Redistributable](https://aka.ms/vs/17/release/vc_redist.x64.exe). Not code-signed: SmartScreen → **More info → Run anyway**. |
+| **Linux (64-bit)** | `AltiumVizitor-vX.Y.Z-linux-x86_64.AppImage` | `chmod +x` and run. Needs glibc 2.35+ (Ubuntu 22.04+ / Debian 12+). Without FUSE: `--appimage-extract-and-run`. |
+| **macOS 11+ (Apple Silicon), experimental** | `AltiumVizitor-vX.Y.Z-macos-arm64.zip` | Passed automated tests only. Unsigned: if blocked on first launch use **System Settings → Privacy & Security → Open Anyway** or `xattr -dr com.apple.quarantine AltiumVizitor.app`. |
 
 ---
 
@@ -242,7 +242,7 @@ double tap = double click.
 ## 🛠 Windows EXE Build
 
 ```bash
-py -3.12 -m PyInstaller --noconfirm --onefile --windowed --name "SchematicViz" ^
+py -3.12 -m PyInstaller --noconfirm --onefile --windowed --name "AltiumVizitor" ^
     --collect-all altium_monkey --collect-all PyQt5 ^
     --collect-all openpyxl --collect-all cascadio --collect-all trimesh ^
     --collect-all numpy ^
@@ -293,7 +293,7 @@ Give it a star ⭐ on GitHub and consider supporting:
 
 -----------------------
 
-# Schematic Viz Generator (TR)
+# Altium Vizitor (TR)
 
 > Altium şematik ve PCB projelerini tek dosyalık, sunucu gerektirmeyen **interaktif HTML görüntüleyicilere** dönüştüren PyQt5 masaüstü uygulaması.
 
@@ -324,7 +324,7 @@ sürdürmemi sağlıyor.
 Projeyi seçin, bir düğmeye basın — çıktı olarak **çift tıkla açılan, tek dosya, portable** bir HTML
 (veya Excel/CSV/JSON) alın. Ne web sunucusu, ne kurulum, ne internet gerekir; `file://` ile açılır.
 
-![Schematic Viz Generator ana arayüzü](img/app.jpg)
+![Altium Vizitor ana arayüzü](img/app.jpg)
 
 ---
 
@@ -390,9 +390,9 @@ Hazır derlenmiş sürümler [Releases sayfasında](https://github.com/mcansiz/a
 
 | Platform | Dosya | Not |
 | -------- | ----- | --- |
-| **Windows 10/11 (64-bit)** | `SchematicViz-vX.Y.Z-win-x64.exe` | Tek dosya, kurulum gerektirmez. Temiz bir Windows'ta açılmazsa [MS VC++ Redistributable](https://aka.ms/vs/17/release/vc_redist.x64.exe) kurun. İmzasız: SmartScreen'de **Ek bilgi → Yine de çalıştır**. |
-| **Linux (64-bit)** | `SchematicViz-vX.Y.Z-linux-x86_64.AppImage` | `chmod +x` ile çalıştırılabilir yapın. glibc 2.35+ (Ubuntu 22.04+ / Debian 12+). FUSE yoksa `--appimage-extract-and-run`. |
-| **macOS 11+ (Apple Silicon), deneysel** | `SchematicViz-vX.Y.Z-macos-arm64.zip` | Yalnız otomatik testlerden geçti. İmzasız: ilk açılışta engellenirse **Sistem Ayarları → Gizlilik ve Güvenlik → Yine de Aç** ya da `xattr -dr com.apple.quarantine SchematicViz.app`. |
+| **Windows 10/11 (64-bit)** | `AltiumVizitor-vX.Y.Z-win-x64.exe` | Tek dosya, kurulum gerektirmez. Temiz bir Windows'ta açılmazsa [MS VC++ Redistributable](https://aka.ms/vs/17/release/vc_redist.x64.exe) kurun. İmzasız: SmartScreen'de **Ek bilgi → Yine de çalıştır**. |
+| **Linux (64-bit)** | `AltiumVizitor-vX.Y.Z-linux-x86_64.AppImage` | `chmod +x` ile çalıştırılabilir yapın. glibc 2.35+ (Ubuntu 22.04+ / Debian 12+). FUSE yoksa `--appimage-extract-and-run`. |
+| **macOS 11+ (Apple Silicon), deneysel** | `AltiumVizitor-vX.Y.Z-macos-arm64.zip` | Yalnız otomatik testlerden geçti. İmzasız: ilk açılışta engellenirse **Sistem Ayarları → Gizlilik ve Güvenlik → Yine de Aç** ya da `xattr -dr com.apple.quarantine AltiumVizitor.app`. |
 
 ---
 
@@ -483,7 +483,7 @@ Birleşik görünümün üst çubuğunda ayrıca **tam ekran düğmesi** vardır
 ##  Windows EXE Paketleme
 
 ```bash
-py -3.12 -m PyInstaller --noconfirm --onefile --windowed --name "SchematicViz" ^
+py -3.12 -m PyInstaller --noconfirm --onefile --windowed --name "AltiumVizitor" ^
     --collect-all altium_monkey --collect-all PyQt5 ^
     --collect-all openpyxl --collect-all cascadio --collect-all trimesh ^
     --collect-all numpy ^

@@ -12,7 +12,7 @@ APP_STYLE (QSS koyu tema) ile biçimlendirilir.
 @author Mikail Cansız
 @date 2026
 """
-# Schematic Viz Generator — viewer.py için PyQt5 masaüstü grafik arayüzü.
+# Altium Vizitor — viewer.py için PyQt5 masaüstü grafik arayüzü.
 # Copyright (C) 2026  Mikail Cansız <cansizmikail@gmail.com>
 #
 # SPDX-License-Identifier: AGPL-3.0-or-later
@@ -357,11 +357,14 @@ class MainWindow(QtWidgets.QMainWindow):
             self.setWindowIcon(QtGui.QIcon(str(ICON_FILE)))
 
         # Pencere başlığına versiyon ekle
-        self.setWindowTitle(f"Schematic Viz Generator  v{APP_VERSION}")
+        self.setWindowTitle(f"Altium Vizitor  v{APP_VERSION}")
         #self.setStyleSheet(APP_STYLE)
 
         # Kalıcı ayarlar (son açılan proje klasörü vb.) — Windows'ta registry,
         # Linux/macOS'ta ini dosyası; yol ayracı OS'a göre çözülür.
+        # Anahtar uygulamanın ESKİ adıdır (v2.41.0'da "Altium Vizitor" oldu):
+        # değişirse kullanıcının kayıtlı ayarları (proje klasörü, dil, temalar,
+        # yazı tipleri…) kaybolur.
         self.settings = QtCore.QSettings("SchematicViz", "SchematicViz")
 
         # --- Dil altyapısı ------------------------------------------------
@@ -721,7 +724,7 @@ class MainWindow(QtWidgets.QMainWindow):
             f"v{APP_VERSION}  ·  altium_monkey {self._am_version()}"
             f"  ·  {tr('Dil: {ad}').format(ad=i18n.LANGUAGES[i18n.language()])}")
         self._sb_info.setToolTip(
-            f"Schematic Viz Generator v{APP_VERSION}\nPython {py}  ·  PyQt5 {PYQT_VERSION_STR}"
+            f"Altium Vizitor v{APP_VERSION}\nPython {py}  ·  PyQt5 {PYQT_VERSION_STR}"
             f"\naltium_monkey {self._am_version()}")
 
     # === Hakkında diyaloğu ===
@@ -731,7 +734,7 @@ class MainWindow(QtWidgets.QMainWindow):
         box = QtWidgets.QMessageBox(self)
         box.setWindowTitle(tr("Hakkında / Sürüm Bilgisi"))
         box.setIcon(QtWidgets.QMessageBox.Information)
-        box.setText(f"Schematic Viz Generator  v{APP_VERSION}")
+        box.setText(f"Altium Vizitor  v{APP_VERSION}")
         box.setInformativeText(
             tr("Altium şematik projelerini interaktif HTML viewer'a ve "
                "AI analizine uygun JSON'a dönüştürür.")
@@ -940,7 +943,7 @@ class MainWindow(QtWidgets.QMainWindow):
     def browse_output(self):
         """@brief Çıktı dosyası yolunu seçtirir.
         """
-        suggested = self.outputPathEdit.text() or "schematic_viz.html"
+        suggested = self.outputPathEdit.text() or "altium_vizitor.html"
         path, _ = QtWidgets.QFileDialog.getSaveFileName(
             self, tr("Çıktı yolunu seç"), suggested,
             tr("HTML (*.html);;Tüm Dosyalar (*)")
@@ -1153,7 +1156,7 @@ class MainWindow(QtWidgets.QMainWindow):
             output_path = str(base.with_name(base.stem + "_Birlesik").with_suffix(".html"))
 
         self.logEdit.clear()
-        self.log(f"Schematic Viz v{APP_VERSION}  ·  Python {platform.python_version()}"
+        self.log(f"Altium Vizitor v{APP_VERSION}  ·  Python {platform.python_version()}"
                  f"  ·  altium_monkey {self._am_version()}")
         self.log("-" * 60)
 

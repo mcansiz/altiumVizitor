@@ -24,7 +24,7 @@ yeniden çevirir. Aksi halde İngilizceden Türkçeye dönüş mümkün olmazdı
 @author Mikail Cansız
 @date 2026
 """
-# Schematic Viz Generator — arayüz dil desteği.
+# Altium Vizitor — arayüz dil desteği.
 # Copyright (C) 2026  Mikail Cansız <cansizmikail@gmail.com>
 #
 # SPDX-License-Identifier: AGPL-3.0-or-later

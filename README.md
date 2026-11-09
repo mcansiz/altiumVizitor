@@ -99,9 +99,14 @@ No web server, no installation, no internet required. Works directly via `file:/
   some channels are affected) and are hidden in 3D. BOM flags them, Pick & Place leaves
   them out, and an **Ignore variant** checkbox turns this off.
 
-* **Schematic Color Themes**
-  Altium's original colors plus 11 KiCad-style light and dark themes, switchable in the
-  viewer toolbar and remembered in the browser.
+* **Schematic & PCB Color Themes and Fonts**
+  Altium's original colors plus 28 schematic and 18 PCB themes from the KiCad community
+  (Catppuccin, Dracula, Tokyo Night, Gruvbox, Nord, Solarized, Witch Hazel …). The
+  **Color Themes** dialog (Settings menu) loads KiCad color theme files (`.json`), copies and
+  edits themes and exports them back in KiCad's format. All themes are embedded in the
+  generated HTML; the one selected in the dialog is the opening theme, and the toolbar
+  selector switches between them. Fonts can be chosen for schematic text, PCB labels and the
+  viewer interface (font files are not embedded; the original font is used where missing).
 
 * **Full Net Route & High Contrast (PCB viewer)**
   Selecting a net shows its whole route, including copper on layers that are switched off.
@@ -338,7 +343,7 @@ Projeyi seçin, bir düğmeye basın — çıktı olarak **çift tıkla açılan
 - **Ölçüm · Net listesi · PNG (PCB)** — İki tıkla mesafe (mm + mil, pad merkezine yapışır), aranabilir net listesi (Güç/GND/Sinyal filtresi, tıkla → vurgula), tek tıkla görünümün PNG'si, `?` ile yardım.
 - **BOM · Montaj paneli (PCB)** — Değer + footprint'e göre gruplanmış liste; satıra dokun → grubun tamamı board'da vurgulanır, ✓ ile montaj takibi (tarayıcıda saklanır), Üst/Alt/Kalan filtreleri, seçili parçada pin-1 işareti.
 - **Altium varyantları ve DNP** — Altium'da seçili varyant varsayılan olarak uygulanır, görüntüleyicilerde varyant seçici vardır. Takılmayan parçalar şematik ve PCB'de çarpıyla işaretlenir (yalnız bazı kanallarda ise turuncu kesikli), 3D'de gizlenir. BOM'da işaretlenir, Pick &amp; Place'e girmez; **Varyantı yok say** kutusu bunu kapatır.
-- **Şematik renk temaları** — Altium'un özgün renklerine ek olarak KiCad tarzı 11 açık ve koyu tema; araç çubuğundan seçilir, tarayıcıda hatırlanır.
+- **Şematik ve PCB renk temaları** — Altium'un özgün renklerine ek olarak KiCad topluluğundan 28 şematik ve 18 PCB teması (Catppuccin, Dracula, Tokyo Night, Gruvbox, Nord, Solarized, Witch Hazel …). **Renk Temaları** diyaloğu (Ayarlar menüsü) KiCad renk teması dosyalarını (`.json`) yükler, temaları kopyalayıp düzenletir ve KiCad biçiminde dışa aktarır. Tüm temalar üretilen HTML'e gömülür; diyalogda seçilen tema açılış temasıdır, araç çubuğundan değiştirilir. Şematik yazıları, PCB etiketleri ve görüntüleyici arayüzü için yazı tipi de seçilebilir (yazı tipi dosyası gömülmez; açan bilgisayarda yoksa özgün yazı tipi kullanılır).
 - **Netin tüm yolu ve Kontrast kipi (PCB)** — Seçilen netin tüm yolu, kapalı katmanlardaki bakırı dahil gösterilir. Kontrast kipi (`S`) aktif yüzü net bırakır, diğerlerini soldurur; opaklığı kaydırıcıyla ayarlanır.
 - **Cross-platform** — Windows, Linux ve macOS (deneysel); kodun tamamı `pathlib` ile OS-bağımsız.
 
@@ -502,6 +507,9 @@ Linux için `build_linux.sh` betiği mevcuttur.
 ├── gui.py          # PyQt5 ana pencere, üst menü, non-blocking üretim thread'i
 ├── gui.ui          # Qt Designer XML formu (menü çubuğu gui.py'de kodla kurulur)
 ├── i18n.py         # Türkçe → İngilizce çeviri kataloğu (arayüz + log + HTML)
+├── themes.py       # Renk teması paketleri (KiCad tema JSON'u uyumlu), kullanıcı tema klasörü
+├── theme_dialog.py # "Renk Temaları" diyaloğu (seç / kopyala / düzenle / içe-dışa aktar)
+├── theme_library.py # Hazır üçüncü parti temalar (kaynak + lisans bilgisiyle)
 ├── deps.py         # Bağımlılık kataloğu ve başlangıç denetimi
 ├── tools/
 │   └── check_html_i18n.py   # HTML çevirisi kapsama denetimi

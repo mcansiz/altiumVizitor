@@ -55,6 +55,8 @@ from viewer import (generate_viewer, generate_json,
                     generate_pcb_canvas_viewer, generate_combined_viewer,
                     read_annotations, write_annotations,
                     ACTIVE_VARIANT, APP_VERSION)
+import themes
+from theme_dialog import ThemeDialog
 
 
 def collect_versions() -> dict:
@@ -108,7 +110,8 @@ class GeneratorThread(QtCore.QThread):
     def __init__(self, mode, project_path, output_path,
                  inter_color="#4ec9b0", intra_color="#ff9800",
                  main_designators=None, min_pins=4, exclude_prefixes=None,
-                 hide_title_block=False, variant=ACTIVE_VARIANT, parent=None):
+                 hide_title_block=False, variant=ACTIVE_VARIANT, theme_set=None,
+                 parent=None):
         """@brief __init__()
 
         @param mode Üretim modu (html/json/bom/pnp/icmap/mcupin/pcbgeo/combined)
@@ -121,6 +124,7 @@ class GeneratorThread(QtCore.QThread):
         @param exclude_prefixes IC haritasından hariç tutulacak designator önekleri ("J,P,TP")
         @param hide_title_block Şematik sayfa anteti / firma logosu gizlensin mi
         @param variant Uygulanacak varyant (ACTIVE_VARIANT = projede seçili, None = varyantsız)
+        @param theme_set Renk temaları {"packs", "sch", "pcb"} (görüntüleyicilere gömülür)
         @param parent
         """
         super().__init__(parent)
@@ -134,6 +138,7 @@ class GeneratorThread(QtCore.QThread):
         self.exclude_prefixes = exclude_prefixes
         self.hide_title_block = hide_title_block
         self.variant = variant
+        self.theme_set = theme_set
 
     def run(self):
         # İlerleme callback'i: üretici fonksiyonlara verilir, sinyale çevirir.
@@ -208,6 +213,7 @@ class GeneratorThread(QtCore.QThread):
                     log=lambda msg: self.log_signal.emit(msg),
                     progress=emit_progress,
                     variant=self.variant,
+                    theme_set=self.theme_set,
                 )
                 if not ok:
                     self.done_signal.emit(
@@ -225,6 +231,7 @@ class GeneratorThread(QtCore.QThread):
                     progress=emit_progress,
                     hide_title_block=self.hide_title_block,
                     variant=self.variant,
+                    theme_set=self.theme_set,
                 )
                 if not ok:
                     self.done_signal.emit(
@@ -240,6 +247,7 @@ class GeneratorThread(QtCore.QThread):
                     progress=emit_progress,
                     hide_title_block=self.hide_title_block,
                     variant=self.variant,
+                    theme_set=self.theme_set,
                 )
             # Çıktı yolunu mod'a göre düzelt (CSV/XLSX uzantısı)
             final_out = self.output_path
@@ -411,6 +419,11 @@ class MainWindow(QtWidgets.QMainWindow):
         if about_btn is not None:
             about_btn.clicked.connect(self.show_about)
 
+        # Renk temaları (şematik + PCB): diyalog + üretilen HTML'in açılış teması
+        themes_btn = getattr(self, "themesBtn", None)
+        if themes_btn is not None:
+            themes_btn.clicked.connect(self.open_theme_dialog)
+
         # Üst menü çubuğu (butonlarla aynı eylemler + klavye kısayolları + dil)
         self._build_menu()
 
@@ -429,6 +442,54 @@ class MainWindow(QtWidgets.QMainWindow):
         # Kayıtlı dili uygula (yoksa kaynak dil: Türkçe → mevcut davranış)
         saved_lang = self.settings.value("language", i18n.SOURCE_LANGUAGE, type=str)
         self.set_language(saved_lang, persist=False)
+
+    # === Renk temaları ===
+    def _theme_ids(self):
+        """@brief Kayıtlı açılış temaları (şematik, PCB); kayıt yoksa özgün Altium."""
+        return (self.settings.value("schTheme", themes.ALTIUM_ID, type=str) or themes.ALTIUM_ID,
+                self.settings.value("pcbTheme", themes.ALTIUM_ID, type=str) or themes.ALTIUM_ID)
+
+    _FONT_KEYS = {"sch": "fontSch", "pcb": "fontPcb", "ui": "fontUi"}
+    # Kayıt yoksa üç yazı tipi de Segoe UI (kullanıcı isteği). Diyalogda
+    # "Özgün yazı tipi" seçilip kaydedilirse '' saklanır ve özgüne dönülür.
+    DEFAULT_FONT = "Segoe UI"
+
+    def _fonts(self):
+        """@brief Kayıtlı yazı tipleri {"sch", "pcb", "ui"} ('' = özgün; kayıt yoksa Segoe UI)."""
+        return {k: themes.clean_font(self.settings.value(s, self.DEFAULT_FONT, type=str))
+                for k, s in self._FONT_KEYS.items()}
+
+    def theme_set(self):
+        """@brief Üretime verilecek tema ayarı: tüm temalar (hazır + kullanıcı) +
+        açılış temaları + yazı tipleri. Klasör her üretimde yeniden okunur
+        (elle eklenen KiCad teması da hemen girer); silinmiş tema viewer'da
+        Altium'a düşer.
+        """
+        sch, pcb = self._theme_ids()
+        return {"packs": themes.load_all(), "sch": sch, "pcb": pcb, "fonts": self._fonts()}
+
+    def open_theme_dialog(self):
+        """@brief Renk Temaları ve Yazı Tipleri diyaloğunu açar; Tamam'da
+        açılış temalarını ve yazı tiplerini kaydeder."""
+        sch, pcb = self._theme_ids()
+        dlg = ThemeDialog(self, sch, pcb, fonts=self._fonts())
+        if dlg.exec_() == QtWidgets.QDialog.Accepted:
+            sch, pcb = dlg.selected_ids()
+            self.settings.setValue("schTheme", sch)
+            self.settings.setValue("pcbTheme", pcb)
+            fonts = dlg.selected_fonts()
+            for k, s in self._FONT_KEYS.items():
+                self.settings.setValue(s, fonts.get(k, ""))
+            self.log(tr("Renk temaları kaydedildi · şematik: {a0} · PCB: {a1}").format(
+                a0=self._theme_name(sch), a1=self._theme_name(pcb)))
+            orig = tr("özgün")
+            self.log(tr("Yazı tipleri · şematik: {a0} · PCB etiketleri: {a1} · arayüz: {a2}").format(
+                a0=fonts["sch"] or orig, a1=fonts["pcb"] or orig, a2=fonts["ui"] or orig))
+
+    def _theme_name(self, pid):
+        """@brief Tema kimliğinin görünen adı."""
+        p = themes.find(themes.load_all(), pid)
+        return p["name"] if p else tr("Altium (orijinal)")
 
     # === Menü çubuğu ===
     def _add_action(self, menu, text, slot, shortcut=None, tip=None,
@@ -547,6 +608,8 @@ class MainWindow(QtWidgets.QMainWindow):
             self._lang_actions[code] = act
 
         set_menu.addSeparator()
+        self._add_action(set_menu, "Renk Temaları ve Yazı Tipleri…", self.open_theme_dialog,
+                         tip="Şematik ve PCB renk temalarını ve görüntüleyici yazı tiplerini ayarla")
         self._add_action(set_menu, "Sayfalar Arası Renk…",
                          lambda: self.pick_color("inter"))
         self._add_action(set_menu, "Sayfa İçi Renk…",
@@ -1107,6 +1170,7 @@ class MainWindow(QtWidgets.QMainWindow):
             exclude_prefixes=exclude_prefixes or None,
             hide_title_block=hide_title_block,
             variant=variant,
+            theme_set=self.theme_set() if mode in ("html", "pcbgeo", "combined") else None,
         )
         self.worker.log_signal.connect(self.log)
         self.worker.progress_signal.connect(self.on_progress)

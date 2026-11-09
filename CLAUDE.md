@@ -5,14 +5,14 @@ Wavenumber'ın ticari "viz sch 1.0" ürününün açık-kaynak alternatifi.
 [altium_monkey](https://github.com/wavenumber-eng/altium_monkey) kütüphanesi
 (Eli Hughes / Wavenumber) üzerine kurulu.
 
-**Mevcut sürüm**: `APP_VERSION` sabiti **`viewer.py`'de** tutulur (şu an 2.39.0);
+**Mevcut sürüm**: `APP_VERSION` sabiti **`viewer.py`'de** tutulur (şu an 2.40.0);
 `gui.py` oradan import eder (v2.9.29'da taşındı — HTML çıktıları da sürümü
 gösterebilsin diye, tek kaynak). Yeni özellik/düzeltme ekleyince bu sabiti
 güncelle (semver: major.minor.patch). Sürüm pencere başlığında, alt durum
 çubuğunda, üretim log'unun başında, "Hakkında" diyaloğunda ve birleşik HTML'in
 sağ üst rozetinde (`{proje} · v{APP_VERSION}`) görünür.
 
-## Beş Dosya
+## Dosyalar
 
 - **`viewer.py`** — Tüm üretim mantığı. Ortak `_collect_data()` helper'ı sayfaları,
   netleri, komponentleri, sheet symbol'leri (block'ları), netlist'i (pin→net)
@@ -114,6 +114,14 @@ sağ üst rozetinde (`{proje} · v{APP_VERSION}`) görünür.
   kurulur (bkz. "Üst menü + dil desteği").
 - **`deps.py`** — Bağımlılık kataloğu + başlangıç denetimi (bkz. aşağıdaki bölüm).
 - **`i18n.py`** — Arayüz dil desteği (TR kaynak → EN çeviri kataloğu, bkz. aşağı).
+- **`themes.py`** (v2.40.0) — Renk teması paketleri: hazır temalar, KiCad tema
+  JSON'u okuma/yazma, renk doğrulama, kullanıcı tema klasörü, PCB katman
+  eşlemesi, okunurluk uyarlaması (`sch_theme_readable` buraya taşındı). Üçüncü
+  parti import YOK. Bkz. "Renk temaları" bölümü.
+- **`theme_dialog.py`** (v2.40.0) — "Renk Temaları" diyaloğu (KiCad Tercihler →
+  Renkler sayfasının karşılığı).
+- **`theme_library.py`** (v2.40.0) — Üçüncü parti hazır temalar (ÜRETİLMİŞ veri:
+  KiCad tema dosyalarından normalize edildi; kaynak, telif, lisans alanlarıyla).
 
 ## Üst menü + dil desteği (TR/EN) — v2.20.0+
 
@@ -123,7 +131,7 @@ sağ üst rozetinde (`{proje} · v{APP_VERSION}`) görünür.
 Temizle, Çıkış `Ctrl+Q`) · **Üret** (üç
 görüntüleyici `Ctrl+1..3` + beş veri çıktısı — hepsi mevcut buton slotlarını
 yeniden kullanır) · **Görünüm** (Tam Ekran `F11`, işaretlenebilir) ·
-**Ayarlar** (Dil alt menüsü, iki renk seçici) · **Yardım** (Hakkında `F1`,
+**Ayarlar** (Dil alt menüsü, Renk Temaları…, iki renk seçici) · **Yardım** (Hakkında `F1`,
 Sürümleri Kopyala, Bağımlılık Durumu). Menü kodla kuruluyor çünkü
 işaretlenebilir/dışlamalı dil eylemleri ve üretim sırasında toplu kilitleme
 (`_menu_action_items`) Designer XML'inde ifade edilemez. Üretim başlayınca
@@ -418,6 +426,166 @@ doğrudan boru hattına sokma — parametre hatası verir).
 https://github.com/settings/personal-access-tokens → Repository permissions →
 **Contents: Read and write** verilirse bu geçici yol gereksizleşir.
 
+## Renk temaları — paketler, GUI diyaloğu, PCB (v2.40.0+)
+
+Kullanıcı isteği: "sch ve pcb için tema paketlerini standart eklenebilir bir
+sisteme entegre edelim" + KiCad'in Tercihler → Renkler ekran görüntüsü.
+Önce formatlar araştırıldı (tweakcn/shadcn, Base16, KiCad JSON, Altium
+`.PCBSysColors`); sonuç: çizim renkleri için **KiCad tema JSON'u**, tweakcn
+yalnız arayüz renklerine uyar (rol bilgisi yok, `chart-1..5` çoğu temada aynı
+ton, PCB için en çok 8 ayırt edilebilir renk) → bu sürümde YOK.
+
+**Paket = KiCad'in renk teması dosyası** (`{"meta", "schematic", "board":
+{…, "copper": {f, b, in1..in30}}}`). KiCad teması dönüştürülmeden içe aktarılır,
+dışa aktarılan dosya KiCad'e konabilir (renkler `rgb(...)`/`rgba(...)`
+yazımıyla; dosyadaki bilinmeyen bölüm/anahtarlar — `3d_viewer`, `erc_error`,
+bool `override_item_colors` — `raw` ile KORUNUR). Bölümler isteğe bağlı:
+`board`'u olmayan tema yalnız şematik listesinde görünür (pointhi'nin 11
+temasının 7'si böyle).
+
+- **Hazır temalar** `themes.py`'de Python verisi (PyInstaller'a veri dosyası
+  girmesin — i18n'deki kararın aynısı): 11 şematik (v2.36.0'daki tablo,
+  birebir) + 4 PCB (`kicad`, `nord`, `behave`, `eagle` — pointhi'nin
+  `kicad_2020` / `nord` / `behave-dark` / `eagle-dark` board bölümleri, CC0).
+  Salt okunur; GUI'de renge tıklanınca kopyası önerilir.
+- **Tema kütüphanesi** (`theme_library.LIBRARY`, kullanıcı isteği: "internete
+  tema araması yap daha çok tema ekleyelim"): KiCad'in resmi eklenti deposu
+  (`repository.kicad.org`, 18 renk teması) + GitHub taraması. **Ölçütler**:
+  (1) lisans dağıtıma izin vermeli — CC0 / MIT / Apache-2.0; lisanssız depolar
+  (en popüleri cosmopotamian/KiCAD_Themes, 82★) ve Arcana (CC-BY-NC-SA,
+  ticari kullanım yasak) ALINMADI — kullanıcı kendisi içe aktarabilir;
+  (2) **kopya ayıklama ölçümle**: board bölümü KiCad varsayılanının birebir
+  kopyası olanlarda (tokyo-night-hy, hartia, nuova-elettronica) ve Eagle
+  Dark'ın kopyası olanda (dragonmux) board ALINMADI; şematiği Dracula'nın
+  birebir kopyası olan Vampire hiç alınmadı; pointhi'nin chschlue çatalı
+  tekrar; (3) okunurluk kuralını karşılamayan KiCadMaxColors (siyah zemin +
+  parlak dolu gövde) alınmadı. Eklenen 18: Catppuccin Latte/Frappé/Macchiato/
+  Mocha, Dracula, Tokyo Night ×2, Gruvbox, Gruvbox Light, Witch Hazel,
+  Monokai High Contrast, Skyline, shirokuma Dark/Light, dragonmux, Hartia,
+  Nuova Elettronica, Blue-Green Dark (yalnız PCB). Toplam **29 hazır tema:
+  28 şematik, 18 PCB**; HTML'e etkisi şematikte +10 KB, PCB'de +5 KB.
+  **Lisans bildirimi uygulamanın İÇİNDE**: MIT/Apache telif satırı + lisans
+  metni dağıtılan kopyada olmalı → `themes.notices_text()`, diyalogda
+  **Lisanslar…** düğmesi; test her MIT/Apache temasının telif satırını arar.
+  Kütüphaneyi yeniden üretmek için kaynak JSON'lar `parse_pack` ile normalize
+  edilip yalnız `SCH_KEYS` / `BOARD_KEYS` alınır (üretim betiği depoda yok).
+- **Yarı saydam tema renkleri** (shirokuma'da gövde dolgusu ve not rengi
+  `rgba`): `sch_theme_readable` eskiden `_th_rgb` saydamda None verdiği için
+  o temanın TÜM okunurluk uyarlamasını sessizce atlıyordu; artık kontrast
+  zemine karıştırılmış etkin renkle ölçülür (`_th_over`), düzeltilen renk
+  opak yazılır. Opak renklerde sonuç değişmedi (eski 11 tema aynı).
+- **Kullanıcı temaları**: `themes.user_theme_dir()` altında birer JSON —
+  Windows `%APPDATA%\SchematicViz\themes`, macOS `~/Library/Application
+  Support/…`, Linux `$XDG_CONFIG_HOME/SchematicViz/themes`;
+  **`SCHVIZ_THEME_DIR`** önceliklidir (testler). Kimlik `u-<dosya-kökü>`
+  (hazır kimliklerle çakışmaz). Klasöre elle KiCad teması atmak da yeter:
+  GUI her üretimde klasörü yeniden okur (`MainWindow.theme_set()`).
+- **GÜVENLİK**: tema verisi üretilen HTML'deki JS'e ve canvas `fillStyle`'ına
+  gömülür → her renk `norm_color()`'dan geçer (`#rgb/#rrggbb/#rrggbbaa`,
+  `rgb()/rgba()`, `transparent`; başka her şey atılır, eksik anahtar yedek
+  zincirle dolar — `_SCH_FALLBACK`). Ad `clean_name` (kontrol karakteri, ⟪⟫,
+  `__X__` yer tutucusu benzeri `__` atılır) + `<option>`'da `html.escape`,
+  JS'te `_js_json` (`</` kaçışlı). Test: adı `Zehir</script><b>"x"` olan tema.
+
+**Üretim API'si**: `generate_viewer / generate_pcb_canvas_viewer /
+generate_combined_viewer(…, theme_set=None)`, `build_html / build_pcb_canvas_html
+(…, theme_set=None)`. `theme_set = {"packs": [...], "sch": id, "pcb": id}`;
+None = yalnız hazır temalar + açılış "altium" (eski davranış — m2_emmc'de
+çıktı farkı yalnız yeni sabitler/seçici; `SCH_THEMES` tablosu bayt bayt aynı).
+GUI yalnız html/pcbgeo/combined modlarında verir. Log: `· Şematik/PCB renk
+temaları: N gömüldü · açılışta: X`.
+
+**Açılış teması kuralı** (`pickTheme`, şematik + PCB aynı): GUI'de seçilen
+tema `SCH_THEME_DEF` / `PCB_THEME_DEF` olarak gömülür. Tarayıcıda başka tema
+seçilince `{theme, themeDef}` saklanır (`schviz-ui` / `schviz-pcb-ui`) ve yalnız
+**aynı açılış temasıyla** üretilmiş HTML'de geri yüklenir; GUI'de açılış teması
+değişince yeni seçim kazanır. `themeDef`'siz eski kayıt (v2.40.0 öncesi) açılış
+"altium" iken korunur. Artık olmayan tema → açılış teması.
+
+**PCB teması** (`themes.pcb_layer_keys` / `pcb_theme_colors`, Python'da):
+katmanın iç anahtarı `k` → KiCad anahtarı: TOP/BOTTOM → `copper.f/b`, MIDn →
+`copper.in{n}`, düzlem n → `in{MID sayısı + n}`, MULTI_LAYER → `pad_through_hole`
+(yoksa `via_through`), overlay/solder/paste → `f_/b_silks/mask/paste`, KEEPOUT →
+`margin`. Mekanikler ADDAN tanınır ("Top Courtyard" → `f_crtyd`, assembly/fab/
+3d body → `*_fab`, "Route Tool Path"/outline → `edge_cuts`, dimension →
+`dwgs_user`); kalanlar sırayla `user_1..9`, sonra eco1/eco2/cmts/dwgs.
+Karşılığı olmayan katman **özgün rengini korur** (`c[i] = null`). Gömülen:
+`PCB_THEMES = [[id, ad, koyu, {bg, fr4, edge, hole, c:[katman sırasıyla]}]]`.
+Levha dolgusu KiCad 2B'de yok → zeminin açıklığı ±0.07 kaydırılarak türetilir;
+delik = zemin. JS: `setPcbTheme` katman `color`'larını değiştirir
+(`origColors` saklanır), `bgOver` zemini geçersiz kılar; **Zemin** düğmesi önce
+tema zeminini bırakır, sonra sabit zeminlerde döner. 3D'ye uygulanmaz.
+Seçici `#pcb-theme-sel` (`tb-more`); birleşik görünümde araç çubuğuyla kabuğa
+taşınır. Açık/Koyu grubu **bölümün** zeminine göre (Nord'un şematiği açık,
+board'u koyu).
+
+**GUI diyaloğu** (`theme_dialog.ThemeDialog`, Ayarlar → **Renk Temaları…** ve
+Görüntüleyiciler grubunda `themesBtn`): Şematik / PCB sekmesi; tema seçici
+(seçim = açılış teması, `QSettings` `schTheme` / `pcbTheme`), renk listesi
+(tıkla → `QColorDialog`, PCB'de alfa), canlı önizleme (şematik önizlemesi
+okunurluk uyarlaması UYGULANMIŞ renklerle — HTML'in gösterdiği), Kopyala /
+Yeniden Adlandır / Sil / İçe Aktar / Dışa Aktar / Tema Klasörünü Aç.
+Değişiklikler bellekte tutulur, dosyalar yalnız **Tamam**'da yazılır/silinir.
+**Blok (sayfa sembolü) dolgusu ayrı ve düzenlenebilir** (kullanıcı isteği:
+"sembol ile blok sembolün iç rengi değiştirilebilir olmalı"; listede "Sayfa
+sembolü (blok) dolgusu"). **Tüm hazır temalarda blok ayırt edilir**
+(kullanıcı isteği: "var olan tüm temalarda blok sembol iç rengini farklı
+yapalım, blok yapı olduğu anlaşılsın"): `derive_sheet_fill()` temanın kendi
+blok sınır renginin zemine karışmış tonunu üretir (açıkta ~%16, koyuda ~%30);
+ton zeminden VE sembol gövdesinden Oklab ΔE ≥ 0.05 (`_SHEET_FILL_MIN_DE`)
+farklı olmalı, tutmazsa oran ve sırayla diğer tema renkleri (`sheet_label`,
+`sheet_name`, `label_hier`, `bus`…) denenir. 28 temada ölçüm: en düşük fark
+0.059 (Blue Tone, gövdeye karşı); örn. KiCad sarı gövde / açık kırmızımsı blok,
+Black/White gri gövde / daha açık gri blok. Yazarın kendi blok rengi (Tokyo
+Night, Gruvbox, wDark'ın siyahı) bu kuralla DEĞİŞTİRİLDİ — tutarlılık için.
+İçe aktarılan temada blok SAYDAMSA aynı türetme uygulanır; kullanıcının opak
+rengi her zaman korunur. Bu değişiklikle eski 11 temanın blok görünümü
+v2.36.1'den farklıdır (bilinçli). Okunurlukta blok içi roller
+(`_TH_ON_SHEET` = sheet, sheet_label) blok dolgusuna, gövde içi roller
+(`_TH_ON_BODY` = component_outline, pin_name) gövdeye karşı ölçülür; ilk yön
+(zeminin tersi) yetmezse ÖBÜR yön denenir — beyaz zeminde lacivert blok:
+blok yazısı 3.24 / 3.01 (zemin / blok). "Altium (orijinal)"
+şematikte tema olarak ifade edilemez → kopyası KiCad'den başlar; PCB'de
+`themes.ALTIUM_BOARD` (= `_GEO_LAYER_STYLE`, test denetler) kopyalanır.
+
+**Yazı tipleri** (kullanıcı isteği: "şema yazı tipini de ayarlayabilir miyiz …
+hepsini ayarlayabilelim"): diyaloğun **Yazı Tipleri** sekmesi, üç ayar
+(`QSettings` `fontSch` / `fontPcb` / `fontUi`, `theme_set["fonts"]`; kayıt
+yoksa üçü de **Segoe UI** — kullanıcı isteği, `MainWindow.DEFAULT_FONT`;
+"Özgün yazı tipi" seçilip kaydedilirse '' saklanır. viewer.py API'sinin
+varsayılanı DEĞİŞMEDİ: `theme_set` verilmezse özgün yazı tipleri):
+1. **Şematik yazıları** — `dlFont()` seçilen aileyi özgün ailenin ÖNÜNE koyar
+   (`"Seçilen", "Özgün", sans-serif`). Metin katmanı span'ları aynı dizgeyi
+   kullandığından seçim/tıklama hizası korunur (ölçüldü: span genişliği 155 px,
+   kanvas `measureText` 154.7 px). Değişince `d._pa/_pt` paketleri +
+   `tlMetCache` atılır, katman yeniden kurulur (`setSchFont`). Tarayıcıda da
+   seçici var (`#font-sel`, `tb-more`, hazır liste `themes.HTML_FONT_CHOICES`);
+   açılış/tercih kuralı temanınkiyle aynı (`schviz-ui.font` + `fontDef`).
+2. **PCB etiketleri** — görüntüleyicinin canvas'a yazdıkları (pad no / net,
+   ölçü, seçim etiketi): `LBL_FONT` sabiti. **Silkscreen yazıları DEĞİŞMEZ**
+   (Altium'un çizdiği şekiller — glif poligonu / stroke).
+3. **Arayüz** — `_apply_ui_font()` `</head>`'den önce tek `!important` kural
+   ekler (şematik, PCB, 3D, birleşik kabuk); `.tl > span` ve SVG not yazıları
+   hariç (arayüz kuralı şema yazısını ezmesin). Seçilmediyse HTML'e dokunmaz.
+**Yazı tipi DOSYASI gömülmez** (sistem fontlarının çoğunun lisansı dağıtıma
+izin vermez): açan bilgisayarda yoksa özgün yazı tipi kullanılır. Ad
+`clean_font()`'tan geçer (yalnız harf/rakam/boşluk/.-_; CSS'e ve JS'e
+gömülüyor) — tarayıcıdaki kayıtlı ad da JS'te süzülür. Diyalog listesi =
+bu bilgisayarın aileleri ∪ `HTML_FONT_CHOICES` (başka sistemlerde yaygın
+olanlar da seçilebilsin; ekransız Qt'de aile listesi boş geliyor).
+Doğrulama: headless Edge **18/18**.
+
+**Doğrulama**: `tests/test_themes.py` (renk doğrulama ve reddedilen 9 zararlı
+biçim, KiCad biçimi gidiş-dönüşü ve ek bölümlerin korunması, yükleme hataları,
+katman eşlemesi) · `test_generation.test_theme_embedding` (zararlı adlı tema,
+açılış temaları, `c` uzunluğu = katman sayısı) · `test_gui.test_theme_dialog`
+(kopyala → renk → Tamam → dosya; İngilizcede Türkçe metin yok) · headless Edge
++ CDP **27/27** (açılış teması, piksel zemini, katman kutucukları, tercih
+kuralının üç durumu, Zemin düğmesi, birleşik görünümde kabuktaki seçicinin
+iframe'i boyaması, 0 JS hatası).
+**Ekransız Qt notu**: `offscreen` platformunda font yok → diyalog ekran
+görüntüsü boş yazılı çıkar; `QT_QPA_FONTDIR=C:/Windows/Fonts` ile yazılar gelir.
+
 ## Altium varyantı / DNP (v2.39.0+)
 
 Şemadaki "DNP" yazıları tasarımcının elle koyduğu **serbest metinlerdir**
@@ -588,9 +756,12 @@ birleşik kabuk) enjekte edilir — f-string'lerde `{_GESTURE_JS}`, 3D'nin raw
 Şematik toolbar'ında **tema seçici** (`#theme-sel`, `tb-more`): "Altium
 (orijinal)" + 6 açık (KiCad varsayılan, wLight, Solarized Light, Nord, Blue
 Tone, Black/White) + 5 koyu (Solarized Dark, wDark, Behave Dark, Monokai,
-Eagle Dark). Seçim `schviz-ui.theme`'de (tarayıcıya bağlı, üretimde gömülü
-varsayılan YOK). Birleşik görünümde seçici üst çubuğa taşınır, iframe'e etki
-eder. Renkler `_SCH_THEMES`'te: "KiCad" = KiCad 10'un kendi "KiCad Default"
+Eagle Dark) + kullanıcı temaları (v2.40.0). Seçim `schviz-ui.theme`'de
+(tarayıcıya bağlı); v2.40.0'dan beri üretimde GUI'nin seçtiği **açılış teması**
+gömülür (`SCH_THEME_DEF`, kural: "Renk temaları" bölümü). Birleşik görünümde
+seçici üst çubuğa taşınır, iframe'e etki eder. Renkler v2.40.0'dan beri
+`themes.py`'de (`viewer._SCH_THEMES` = `themes.legacy_sch_table()`, geriye
+uyumluluk adı): "KiCad" = KiCad 10'un kendi "KiCad Default"
 teması, diğerleri github.com/pointhi/kicad-color-schemes (**CC0**) şematik
 bölümlerinden birebir; eksik `worksheet` ← `note`, `sheet_background` ← saydam.
 
@@ -619,6 +790,8 @@ bölümlerinden birebir; eksik `worksheet` ← `note`, `sheet_background` ← sa
   `sch_theme_readable(c)` çıktısını gömer. (1) `sheet_background` :=
   `component_body` — KiCad temalarında bu alan 9 temada SAYDAM (blok zeminle
   aynı), wDark'ta siyah, wLight'ta yeşildi; artık bloklar IC'ler gibi dolu.
+  (v2.40.0: blok dolgusu ayrı ve düzenlenebilir; hazır temalarda gövdeden ve
+  zeminden ayırt edilen bir ton türetilir — bkz. "Renk temaları".)
   (2) `_TH_ON_BG` rolleri zemine, `_TH_ON_BODY` rolleri (gövde içindekiler)
   ayrıca gövdeye karşı WCAG kontrastı ≥ `_TH_MIN_CONTRAST` (3.0) olacak
   şekilde HLS açıklığı 0.01 adımla kaydırılır (ton/doygunluk korunur, ilk

@@ -92,7 +92,7 @@ from altium_monkey.altium_schdoc import AltiumSchDoc
 
 # Uygulama sürümü — tek kaynak burası; gui.py buradan import eder.
 # HTML çıktılarında sağ üst köşedeki rozette görünür (build saati yerine).
-APP_VERSION = "2.39.0"
+APP_VERSION = "2.40.0"
 
 # Önerilen minimum altium_monkey sürümü. Bu sürümden öncesinde:
 #   · 2026.6.21 öncesi — STM32 gibi IC'lerde dikey pin adları yatay çiziliyordu.
@@ -919,200 +919,117 @@ _SCH_ROLE_BY_CLASS = {
 }
 
 
-# (id, görünen ad, koyu mu, {KiCad anahtarı: renk}) — sıra = seçim listesindeki
-# sıra (önce açık, sonra koyu). "altium" kimliği ayrılmıştır: orijinal renkler.
-# Kaynak: KiCad 10 "KiCad Default" + github.com/pointhi/kicad-color-schemes (CC0).
-_SCH_THEMES = [
-    ('kicad', 'KiCad', False, {
-        'background': '#f5f4ef', 'wire': '#009600', 'bus': '#000084',
-        'junction': '#009600', 'component_outline': '#840000', 'component_body': '#ffffc2',
-        'pin': '#840000', 'pin_name': '#006464', 'pin_number': '#a90000',
-        'reference': '#006464', 'value': '#006464', 'fields': '#840084',
-        'label_local': '#0f0f0f', 'label_global': '#840000', 'label_hier': '#725600',
-        'sheet': '#840000', 'sheet_background': 'rgba(255,255,255,0)',
-        'sheet_name': '#006464', 'sheet_filename': '#725600', 'sheet_label': '#006464',
-        'no_connect': '#000084', 'note': '#0000c2', 'worksheet': '#840000',
-    }),
-    ('wlight', 'wLight', False, {
-        'background': '#fffcf8', 'wire': '#000080', 'bus': '#0000ff',
-        'junction': '#000080', 'component_outline': '#000000', 'component_body': '#fffed0',
-        'pin': '#000000', 'pin_name': '#000000', 'pin_number': '#808080',
-        'reference': '#000080', 'value': '#000084', 'fields': '#840084',
-        'label_local': '#000080', 'label_global': '#800000', 'label_hier': '#800000',
-        'sheet': '#000000', 'sheet_background': '#c0ffb8', 'sheet_name': '#000080',
-        'sheet_filename': '#000080', 'sheet_label': '#800000', 'no_connect': '#000084',
-        'note': '#008000', 'worksheet': '#000000',
-    }),
-    ('sol-light', 'Solarized Light', False, {
-        'background': '#fdf6e3', 'wire': '#859900', 'bus': '#268bd2',
-        'junction': '#859900', 'component_outline': '#586e75', 'component_body': '#eee8d5',
-        'pin': '#586e75', 'pin_name': '#cb4b16', 'pin_number': '#b58900',
-        'reference': '#268bd2', 'value': '#6c71c4', 'fields': '#93a1a1',
-        'label_local': '#2aa198', 'label_global': '#2aa198', 'label_hier': '#2aa198',
-        'sheet': '#586e75', 'sheet_background': 'rgba(255,255,255,0)',
-        'sheet_name': '#268bd2', 'sheet_filename': '#6c71c4', 'sheet_label': '#cb4b16',
-        'no_connect': '#6c71c4', 'note': '#586e75', 'worksheet': '#dc322f',
-    }),
-    ('nord', 'Nord', False, {
-        'background': '#eceff4', 'wire': '#a3be8c', 'bus': '#81a1c1',
-        'junction': '#a3be8c', 'component_outline': '#4c566a', 'component_body': '#e5e9f0',
-        'pin': '#4c566a', 'pin_name': '#434c5e', 'pin_number': '#434c5e',
-        'reference': '#5e81ac', 'value': '#5e81ac', 'fields': '#5e81ac',
-        'label_local': '#434c5e', 'label_global': '#bf616a', 'label_hier': '#ebcb8b',
-        'sheet': '#b48ead', 'sheet_background': 'rgba(255,255,255,0)',
-        'sheet_name': '#b48ead', 'sheet_filename': '#b48ead', 'sheet_label': '#ebcb8b',
-        'no_connect': '#81a1c1', 'note': '#5e81ac', 'worksheet': '#3b4252',
-    }),
-    ('blue-tone', 'Blue Tone', False, {
-        'background': '#ffffff', 'wire': '#428437', 'bus': '#6e3ba0',
-        'junction': '#428437', 'component_outline': '#313184', 'component_body': '#d2d4ff',
-        'pin': '#3d3384', 'pin_name': '#411d64', 'pin_number': '#5a4eca',
-        'reference': '#3a7384', 'value': '#3a7484', 'fields': '#006784',
-        'label_local': '#000000', 'label_global': '#842784', 'label_hier': '#542682',
-        'sheet': '#523d65', 'sheet_background': 'rgba(0,0,0,0)', 'sheet_name': '#008484',
-        'sheet_filename': '#008484', 'sheet_label': '#552784', 'no_connect': '#5d0084',
-        'note': '#0000c2', 'worksheet': '#00001b',
-    }),
-    ('bw', 'Black/White', False, {
-        'background': '#ffffff', 'wire': '#000000', 'bus': '#000000',
-        'junction': '#000000', 'component_outline': '#000000', 'component_body': '#c0c0c0',
-        'pin': '#000000', 'pin_name': '#000000', 'pin_number': '#000000',
-        'reference': '#000000', 'value': '#000000', 'fields': '#000000',
-        'label_local': '#000000', 'label_global': '#000000', 'label_hier': '#000000',
-        'sheet': '#000000', 'sheet_background': 'rgba(255,255,255,0)',
-        'sheet_name': '#000000', 'sheet_filename': '#000000', 'sheet_label': '#000000',
-        'no_connect': '#000000', 'note': '#000000', 'worksheet': '#000000',
-    }),
-    ('sol-dark', 'Solarized Dark', True, {
-        'background': '#002b36', 'wire': '#859900', 'bus': '#268bd2',
-        'junction': '#859900', 'component_outline': '#93a1a1', 'component_body': '#073642',
-        'pin': '#93a1a1', 'pin_name': '#cb4b16', 'pin_number': '#b58900',
-        'reference': '#268bd2', 'value': '#6c71c4', 'fields': '#586e75',
-        'label_local': '#2aa198', 'label_global': '#2aa198', 'label_hier': '#2aa198',
-        'sheet': '#93a1a1', 'sheet_background': 'rgba(255,255,255,0)',
-        'sheet_name': '#268bd2', 'sheet_filename': '#6c71c4', 'sheet_label': '#cb4b16',
-        'no_connect': '#6c71c4', 'note': '#93a1a1', 'worksheet': '#dc322f',
-    }),
-    ('wdark', 'wDark', True, {
-        'background': '#282c34', 'wire': '#98c379', 'bus': '#61afef',
-        'junction': '#98c379', 'component_outline': '#e06c75', 'component_body': '#545862',
-        'pin': '#e06c75', 'pin_name': '#98c379', 'pin_number': '#e06c75',
-        'reference': '#56b6c2', 'value': '#56b6c2', 'fields': '#56b6c2',
-        'label_local': '#e5c07b', 'label_global': '#e06c75', 'label_hier': '#c678dd',
-        'sheet': '#c678dd', 'sheet_background': '#000000', 'sheet_name': '#c678dd',
-        'sheet_filename': '#c678dd', 'sheet_label': '#c678dd', 'no_connect': '#61afef',
-        'note': '#61afef', 'worksheet': '#7f848e',
-    }),
-    ('behave', 'Behave Dark', True, {
-        'background': '#232932', 'wire': '#8dd272', 'bus': '#4487aa',
-        'junction': '#8dd272', 'component_outline': '#c4626b', 'component_body': '#513c56',
-        'pin': '#c4626b', 'pin_name': '#669696', 'pin_number': '#c4626b',
-        'reference': '#a683e1', 'value': '#669696', 'fields': '#786596',
-        'label_local': '#4487aa', 'label_global': '#c46c2d', 'label_hier': '#c3ae72',
-        'sheet': '#856fa5', 'sheet_background': 'rgba(0,0,0,0)', 'sheet_name': '#669696',
-        'sheet_filename': '#856fa5', 'sheet_label': '#c47a4f', 'no_connect': '#95dbdf',
-        'note': '#4487aa', 'worksheet': '#4487aa',
-    }),
-    ('monokai', 'Monokai', True, {
-        'background': '#3b3a32', 'wire': '#a6e22e', 'bus': '#66d9ef',
-        'junction': '#a6e22e', 'component_outline': '#f92672', 'component_body': '#49483e',
-        'pin': '#f92672', 'pin_name': '#66d9ef', 'pin_number': '#f92672',
-        'reference': '#66d9ef', 'value': '#66d9ef', 'fields': '#ae81ff',
-        'label_local': '#f8f8f2', 'label_global': '#f92672', 'label_hier': '#ffe792',
-        'sheet': '#ae81ff', 'sheet_background': 'rgba(0,0,0,0)', 'sheet_name': '#66d9ef',
-        'sheet_filename': '#ffe792', 'sheet_label': '#ffe792', 'no_connect': '#66d9ef',
-        'note': '#fd971f', 'worksheet': '#635778',
-    }),
-    ('eagle', 'Eagle Dark', True, {
-        'background': '#212121', 'wire': '#00a000', 'bus': '#0060c0',
-        'junction': '#00a000', 'component_outline': '#c00000', 'component_body': '#2c2c2c',
-        'pin': '#c00000', 'pin_name': '#c0c0c0', 'pin_number': '#c00000',
-        'reference': '#c0c0c0', 'value': '#c0c0c0', 'fields': '#8000a0',
-        'label_local': '#c0c0c0', 'label_global': '#00a0e0', 'label_hier': '#a0a000',
-        'sheet': '#8000a0', 'sheet_background': 'rgba(255,255,255,0)',
-        'sheet_name': '#00a0cc', 'sheet_filename': '#a0a000', 'sheet_label': '#a0a000',
-        'no_connect': '#612be0', 'note': '#c0c000', 'worksheet': '#c00000',
-    }),
-]
+# Şematik renk temaları + okunurluk uyarlaması themes.py'ye taşındı (v2.40.0:
+# kullanıcı temaları, KiCad JSON içe/dışa aktarma, PCB temaları). Eski adlar
+# geriye uyumluluk için burada da duruyor.
+import themes as _themes
+from themes import (sch_theme_readable, _th_rgb, _th_lum, _th_contrast,  # noqa: F401
+                    _TH_MIN_CONTRAST, _TH_ON_BG, _TH_ON_BODY)
+_SCH_THEMES = _themes.legacy_sch_table()
 
 
-# Okunurluk uyarlaması (v2.36.1, kullanıcı bildirimi: "blok tasarımların kutu
-# içi zemin ile aynı renkte kalmış … wdark'ta mor ve siyah göz yoruyor").
-# Tema tablosu kaynakla BİREBİR kalır; uyarlama üretimde uygulanır:
-#  1. Sheet symbol (blok) dolgusu = component_body. KiCad temalarının
-#     `sheet_background`'ı 9 temada saydam (blok zeminle aynı görünüyordu),
-#     wDark'ta siyah, wLight'ta yeşildi — artık bloklar IC'ler gibi dolu.
-#  2. Çizgi/yazı rolleri zemine (ve gövde içindekiler gövde dolgusuna) karşı
-#     WCAG kontrastı en az _TH_MIN_CONTRAST olacak şekilde, TON (hue) ve
-#     doygunluk korunarak yalnız açıklığı kaydırılır. Ölçülen en kötüler:
-#     Nord tel 1.8 / hiyerarşik etiket 1.4, Eagle fields/sheet 1.9, koyu
-#     temalarda komponent çizgisi gövdeye karşı 2.2–2.5.
-_TH_MIN_CONTRAST = 3.0
-_TH_ON_BG = ("wire", "bus", "junction", "component_outline", "pin", "pin_number",
-             "pin_name", "reference", "value", "fields", "label_local",
-             "label_global", "label_hier", "sheet", "sheet_name",
-             "sheet_filename", "sheet_label", "no_connect", "note", "worksheet")
-_TH_ON_BODY = ("component_outline", "pin_name", "sheet", "sheet_label")
+def _theme_set(ts):
+    """@brief Üretime verilen tema ayarını tamamlar.
 
-
-def _th_rgb(c):
-    """@brief '#rrggbb' → (r, g, b) 0..1; başka biçimde None."""
-    c = (c or "").strip()
-    if len(c) == 7 and c[0] == "#":
-        return tuple(int(c[i:i + 2], 16) / 255 for i in (1, 3, 5))
-    return None
-
-
-def _th_lum(rgb):
-    """@brief WCAG bağıl parlaklık."""
-    f = lambda v: v / 12.92 if v <= 0.03928 else ((v + 0.055) / 1.055) ** 2.4
-    r, g, b = (f(v) for v in rgb)
-    return 0.2126 * r + 0.7152 * g + 0.0722 * b
-
-
-def _th_contrast(a, b):
-    """@brief İki rengin WCAG kontrast oranı (1..21)."""
-    la, lb = _th_lum(a), _th_lum(b)
-    return (max(la, lb) + 0.05) / (min(la, lb) + 0.05)
-
-
-def sch_theme_readable(colors: dict) -> dict:
-    """@brief Tema renklerini okunurluk kuralına göre uyarlanmış KOPYA döndürür.
-
-    @details Bkz. yukarıdaki açıklama. Eşiği zaten geçen renge DOKUNULMAZ;
-    geçmeyen rengin HLS açıklığı zemin açıksa koyulaştırılarak, koyuysa
-    açılarak 0.01 adımlarla kaydırılır (ilk yeten değer — en küçük değişiklik).
-    Zemin ile gövde dolgusu aynı tarafta (ikisi de açık / ikisi de koyu)
-    olduğundan tek yön ikisini birden sağlar.
-
-    @param colors {KiCad anahtarı: renk}
-    @return uyarlanmış yeni sözlük
+    @param ts None ya da {"packs": [...], "sch": id, "pcb": id,
+              "fonts": {"sch": aile, "pcb": aile, "ui": aile}} ('' = özgün)
+    @return {"packs": [...], "sch": id, "pcb": id} — paket verilmediyse yalnız
+            hazır temalar, açılış teması verilmediyse "altium" (özgün renkler)
     """
-    import colorsys
-    c = dict(colors)
-    c["sheet_background"] = c["component_body"]
-    bg, body = _th_rgb(c["background"]), _th_rgb(c["component_body"])
-    if not bg or not body:
-        return c
-    darken = _th_lum(bg) > 0.18
-    for k in _TH_ON_BG:
-        rgb = _th_rgb(c.get(k))
-        if not rgb:
-            continue
-        refs = [bg] + ([body] if k in _TH_ON_BODY else [])
-        ok = lambda x: min(_th_contrast(x, r) for r in refs) >= _TH_MIN_CONTRAST
-        if ok(rgb):
-            continue
-        h, l, s = colorsys.rgb_to_hls(*rgb)
-        for i in range(1, 101):
-            nl = max(0.0, l - i * 0.01) if darken else min(1.0, l + i * 0.01)
-            # Denetim YUVARLANMIŞ renkle yapılır: #rrggbb'ye yuvarlama kontrastı
-            # eşiğin hemen altına düşürebiliyordu (sol-dark fields 2.998).
-            q = tuple(round(v * 255) for v in colorsys.hls_to_rgb(h, nl, s))
-            if ok(tuple(v / 255 for v in q)) or nl in (0.0, 1.0):
-                c[k] = "#%02x%02x%02x" % q
-                break
-    return c
+    ts = dict(ts or {})
+    packs = ts.get("packs")
+    if packs is None:
+        packs = _themes.builtin_packs()
+    ids = {p["id"] for p in packs}
+    sch = ts.get("sch") or "altium"
+    pcb = ts.get("pcb") or "altium"
+    if sch != "altium" and sch not in {p["id"] for p in packs if p.get("schematic")}:
+        sch = "altium"
+    if pcb != "altium" and pcb not in {p["id"] for p in packs if p.get("board")}:
+        pcb = "altium"
+    f = ts.get("fonts") or {}
+    fonts = {k: _themes.clean_font(f.get(k)) for k in ("sch", "pcb", "ui")}
+    return {"packs": packs, "sch": sch, "pcb": pcb, "fonts": fonts, "_ids": ids}
+
+
+def _theme_options(packs, section, kicad_label=True):
+    """@brief Tema seçicisinin <option> listesi (Altium + Açık + Koyu grupları).
+
+    @param packs Paketler
+    @param section "schematic" | "board"
+    @param kicad_label Hazır KiCad teması "KiCad (varsayılan)" diye yazılsın mı
+    @return HTML metni
+    """
+    import html as _html
+    def opt(p):
+        label = ("⟪KiCad (varsayılan)⟫" if (kicad_label and p["id"] == "kicad")
+                 else _html.escape(p["name"]))
+        return f'<option value="{_html.escape(p["id"])}">{label}</option>'
+    # Açık/koyu grubu BÖLÜMÜN zeminine göre: Nord'un şematiği açık, board'u koyu
+    sel = [(p, _themes.is_dark(p[section]["background"])) for p in packs if p.get(section)]
+    return ('<option value="altium">⟪Altium (orijinal)⟫</option>'
+            '<optgroup label="⟪Açık⟫">'
+            + "".join(opt(p) for p, dark in sel if not dark)
+            + '</optgroup><optgroup label="⟪Koyu⟫">'
+            + "".join(opt(p) for p, dark in sel if dark)
+            + '</optgroup>')
+
+
+def _apply_ui_font(html, theme_set):
+    """@brief Görüntüleyici ARAYÜZÜNÜN yazı tipini (panel, araç çubuğu, liste)
+    GUI'de seçilen aileyle geçersiz kılar; seçilmediyse HTML'e dokunmaz.
+
+    @details Her şablon kendi yazı tipini CSS'te tanımladığından tek bir
+    `!important` kuralı `</head>`'den önce eklenir. Şematik metin katmanının
+    span'ları (`.tl > span`, şema yazı tipini satır-içi taşır) ve SVG not
+    yazıları hariç tutulur.
+
+    @param html Görüntüleyici HTML'i
+    @param theme_set Tema ayarı (fonts.ui)
+    @return HTML
+    """
+    fam = _theme_set(theme_set)["fonts"]["ui"]
+    if not fam:
+        return html
+    stack = _themes.css_font_stack(fam, '"Segoe UI", system-ui, sans-serif')
+    css = ('<style id="ui-font">body, body :not(.tl):not(.tl > span):not(text):not(tspan)'
+           ' { font-family: ' + stack + ' !important; }</style>')
+    i = html.find("</head>")
+    return html if i < 0 else html[:i] + css + html[i:]
+
+
+def _font_options(default):
+    """@brief Şematik yazı tipi seçicisinin <option> listesi.
+
+    @param default GUI'de seçilen açılış yazı tipi ('' = özgün); hazır listede
+                   yoksa listeye eklenir
+    @return HTML metni
+    """
+    import html as _html
+    names = list(_themes.HTML_FONT_CHOICES)
+    if default and default not in names:
+        names.insert(0, default)
+    return ('<option value="">⟪Altium (orijinal)⟫</option>'
+            + "".join(f'<option value="{_html.escape(n)}">{_html.escape(n)}</option>'
+                      for n in names))
+
+
+def _log_themes(log, theme_set, section):
+    """@brief Gömülen tema sayısını ve açılış temasını log'a yazar.
+
+    @param log Log callback'i
+    @param theme_set Üretime verilen tema ayarı (None olabilir)
+    @param section "schematic" | "board"
+    """
+    ts = _theme_set(theme_set)
+    n = sum(1 for p in ts["packs"] if p.get(section))
+    pid = ts["sch" if section == "schematic" else "pcb"]
+    p = _themes.find(ts["packs"], pid)
+    name = p["name"] if p else tr("Altium (orijinal)")
+    if section == "schematic":
+        log(tr("  · Şematik renk temaları: {a0} gömüldü · açılışta: {a1}").format(a0=n, a1=name))
+    else:
+        log(tr("  · PCB renk temaları: {a0} gömüldü · açılışta: {a1}").format(a0=n, a1=name))
 
 
 def sch_object_roles(schdoc) -> dict:
@@ -4278,6 +4195,7 @@ def generate_viewer(
     progress: Callable[[int, str], None] = None,
     hide_title_block: bool = False,
     variant=ACTIVE_VARIANT,
+    theme_set=None,
 ):
     """@brief Tam interaktif HTML viewer üret (gömülü SVG'lerle, büyük dosya).
 
@@ -4290,6 +4208,8 @@ def generate_viewer(
     @param hide_title_block Sayfa anteti / firma logosu (özel şablon grafikleri
                             + standart antet) çizilmesin mi
     @param variant Açılışta seçili varyant (ACTIVE_VARIANT · ad · None)
+    @param theme_set Renk temaları {"packs", "sch", "pcb"}: gömülecek temalar +
+                     açılış teması (None = hazır temalar, özgün Altium renkleri)
     """
     prog = progress or (lambda percent, label: None)
     prog(2, tr('Şematik verisi toplanıyor'))
@@ -4304,7 +4224,9 @@ def generate_viewer(
         data["sheets"], data["net_list"], data["components"], timestamp,
         inter_sheet_color, intra_sheet_color, pcb=data.get("pcb"),
         project_name=data["project_name"], variants=data.get("variants"),
+        theme_set=theme_set,
     )
+    _log_themes(log, theme_set, "schematic")
     out = Path(output_path)
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(html, encoding="utf-8")
@@ -4323,6 +4245,7 @@ def generate_combined_viewer(
     progress: Callable[[int, str], None] = None,
     hide_title_block: bool = False,
     variant=ACTIVE_VARIANT,
+    theme_set=None,
 ):
     """@brief Şematik + PCB tek HTML'de yan yana, çift yönlü cross-probe.
 
@@ -4347,6 +4270,7 @@ def generate_combined_viewer(
     @param hide_title_block Sayfa anteti / firma logosu (özel şablon grafikleri
                             + standart antet) çizilmesin mi
     @param variant Açılışta seçili varyant (ACTIVE_VARIANT · ad · None)
+    @param theme_set Renk temaları {"packs", "sch", "pcb"} (bkz. generate_viewer)
     @return Üretilen sonuç.
     """
     prog = progress or (lambda percent, label: None)
@@ -4381,7 +4305,9 @@ def generate_combined_viewer(
         data["sheets"], data["net_list"], data["components"], timestamp,
         inter_sheet_color, intra_sheet_color, pcb=data.get("pcb"),
         project_name=data["project_name"], variants=data.get("variants"),
+        theme_set=theme_set,
     )
+    _log_themes(log, theme_set, "schematic")
     phys_variants = _physical_variant_view(project_path, variant)
 
     comp_info = {
@@ -4409,7 +4335,8 @@ def generate_combined_viewer(
     if have_pcb:
         pcb_html = build_pcb_canvas_html(geo, comp_info, timestamp,
                                          Path(project_path).stem, pcb_path.name,
-                                         variants=phys_variants)
+                                         variants=phys_variants, theme_set=theme_set)
+        _log_themes(log, theme_set, "board")
     else:
         log(tr('  · PCB yok — birleşik görünümde sağ panel boş olacak.'))
         pcb_html = empty_pcb_html
@@ -4431,9 +4358,11 @@ def generate_combined_viewer(
 
     # 4) Kabuk: üç iframe + splitter + köprü
     prog(94, tr('Birleştiriliyor ve yazılıyor'))
+    td_html = _apply_ui_font(td_html, theme_set) if td_html else td_html
     shell = build_combined_shell(sch_html, pcb_html, timestamp,
                                  Path(project_path).stem, have_pcb,
                                  td_html=td_html, have_3d=have_3d)
+    shell = _apply_ui_font(shell, theme_set)
     out = Path(output_path)
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(shell, encoding="utf-8")
@@ -5899,6 +5828,8 @@ __MOBILE_META__
       <button class="tb tb-more" id="b-meas" title="⟪Ölçüm ( M )⟫">⟪Ölç⟫</button>
       <button class="tb active tb-more" id="b-pin" title="⟪Pad no + net ( P )⟫">Pin</button>
       <button class="tb tb-more" id="b-bg" title="⟪Zemin rengi⟫">⟪Zemin⟫</button>
+      <select class="tool-sel tb-more" id="pcb-theme-sel"
+              title="⟪PCB renk teması (KiCad tarzı) — tercih bu tarayıcıda hatırlanır⟫">__PCBTHEMEOPTS__</select>
       <button class="tb tb-more" id="b-png" title="⟪Görünümü PNG indir⟫">PNG</button>
       <button class="tb tb-more" id="b-help" title="⟪Yardım ( ? )⟫">?</button>
     </div>
@@ -5951,6 +5882,15 @@ const PROJECT = __PROJECTJSON__;
 let G = null;                       // geometri (gzip'ten çözülür)
 // Varyant: takılmayan parçalar (fiziksel designator; bkz. project_variant_view)
 const VARIANTS = __VARIANTS__;
+// PCB renk temaları (themes.py): [[id, ad, koyu, {bg, fr4, edge, hole, c:[katman rengi|null]}]]
+// `c` bu board'un katman SIRASINA göre Python'da eşlendi (KiCad anahtarları);
+// null = temada karşılığı yok, katman özgün renginde kalır.
+const PCB_THEMES = __PCBTHEMES__;
+const PCB_THEME_DEF = __PCBTHEMEDEF__;
+// Görüntüleyicinin çizdiği etiketlerin yazı tipi (pad no / net / ölçü / seçim);
+// GUI'de seçilen aile özgün listenin önüne konur. Silkscreen yazıları
+// Altium'un çizdiği şekillerdir, bundan etkilenmez.
+const LBL_FONT = __PCBFONT__;
 let varIdx = VARIANTS.cur;
 let DNP = new Set(), dnpComps = [];
 function dnpRefresh() {
@@ -5998,6 +5938,30 @@ window.addEventListener('resize', () => applyPanels());
 // === Görünüm dönüşümü: ekran = t + s·R(rot)·diag(mir,1)·p  (p: mm) ===
 let scale = 4, tx = 0, ty = 0, rot = 0, mir = 1;
 let BG = ['#0a0a0a', '#2b2f36', '#7d838c', '#e8e8e8'], bgi = 0;
+// Tema: katman renkleri + zemin/levha/kenar/delik. "Altium (orijinal)" = null.
+// "Zemin" düğmesi tema zeminini bırakıp sabit zeminler arasında döner.
+let pcbTheme = null, bgOver = null, origColors = null;
+function pickTheme(st, def, list) {   // şematikteki kuralın aynısı
+  const ok = id => id === 'altium' || list.some(t => t[0] === id);
+  if (st.theme && ok(st.theme)
+      && (st.themeDef === def || (st.themeDef === undefined && def === 'altium'))) return st.theme;
+  return ok(def) ? def : 'altium';
+}
+function setPcbTheme(id, silent) {
+  pcbTheme = PCB_THEMES.find(t => t[0] === id) || null;
+  const sel = document.getElementById('pcb-theme-sel');
+  if (sel) sel.value = pcbTheme ? pcbTheme[0] : 'altium';
+  if (!silent) uiSet({ theme: pcbTheme ? pcbTheme[0] : 'altium', themeDef: PCB_THEME_DEF });
+  if (!G) return;
+  if (!origColors) origColors = G.layers.map(L => L.color);
+  const T = pcbTheme && pcbTheme[3];
+  G.layers.forEach((L, i) => { L.color = (T && T.c[i]) || origColors[i]; });
+  bgOver = T ? T.bg : null;
+  renderLayers(); draw();
+}
+const thBoard = () => pcbTheme ? pcbTheme[3].fr4 : '#0e3b21';
+const thEdge = () => (pcbTheme && pcbTheme[3].edge) || '#c8b400';
+const thHole = () => pcbTheme ? pcbTheme[3].hole : '#0b0b0b';
 const rad = () => rot * Math.PI / 180;
 function w2s(x, y) {
   const c = Math.cos(rad()), s = Math.sin(rad()), mx = x * mir;
@@ -6188,13 +6152,13 @@ function draw() {
     cv.width = Math.round(r.width * dpr); cv.height = Math.round(r.height * dpr);
   }
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-  ctx.fillStyle = BG[bgi]; ctx.fillRect(0, 0, r.width, r.height);
+  ctx.fillStyle = bgOver || BG[bgi]; ctx.fillRect(0, 0, r.width, r.height);
   ctx.save();
   ctx.translate(tx, ty); ctx.scale(scale * mir, scale); ctx.rotate(rad() * mir);
   // board gövdesi (FR4)
   ctx.beginPath(); polyPath(G.outline);
-  ctx.fillStyle = '#0e3b21'; ctx.fill();
-  ctx.strokeStyle = '#c8b400'; ctx.lineWidth = 0.15; ctx.stroke();
+  ctx.fillStyle = thBoard(); ctx.fill();
+  ctx.strokeStyle = thEdge(); ctx.lineWidth = 0.15; ctx.stroke();
   // Çizim sırası = katman sırası; "↑" ile seçilen katman EN SONA alınır
   // (canvas'ta sonra çizilen üstte kalır). Kontrast kipinde soluk katmanlar
   // ÖNCE çizilir → aktif yüz hep üstte kalır.
@@ -6207,7 +6171,7 @@ function draw() {
   G.layers.forEach((L, i) => { if (vis[i] && i !== topLayer && !dimmed(i)) drawL(i); });
   if (topLayer >= 0 && vis[topLayer]) drawL(topLayer);
   // delikler en üstte (pad/via içleri)
-  ctx.fillStyle = '#0b0b0b';
+  ctx.fillStyle = thHole();
   G.vias.forEach(v => { if (v[3] > 0) { ctx.beginPath(); ctx.arc(v[0], v[1], v[3] / 2, 0, 7); ctx.fill(); } });
   G.pads.forEach(p => { if (p[7] > 0) { ctx.beginPath(); ctx.arc(p[1], p[2], p[7] / 2, 0, 7); ctx.fill(); } });
   // net vurgusu: board karartılır, net parlak renkte tekrar çizilir
@@ -6269,7 +6233,7 @@ function drawOverlay(r) {
       ctx.strokeStyle = '#00e5ff'; ctx.lineWidth = 1.8;
       ctx.strokeRect(x0, y0, x1 - x0, y1 - y0);
       ctx.setLineDash([]);
-      ctx.font = 'bold 12px Consolas,monospace';
+      ctx.font = 'bold 12px ' + LBL_FONT;
       ctx.strokeStyle = '#04222a'; ctx.lineWidth = 3;
       ctx.strokeText(lbl, x0, y0 - 4);
       ctx.fillStyle = '#00e5ff'; ctx.fillText(lbl, x0, y0 - 4);
@@ -6303,12 +6267,12 @@ function drawOverlay(r) {
       if (px < 9) return;
       const fs = Math.max(6, Math.min(px * 0.42, 15));
       const net = p[8] >= 0 ? G.nets[p[8]] : '';
-      ctx.font = 'bold ' + fs + 'px Consolas,monospace';
+      ctx.font = 'bold ' + fs + 'px ' + LBL_FONT;
       ctx.strokeStyle = '#000'; ctx.lineWidth = fs * 0.3; ctx.fillStyle = '#fff';
       const dy = net ? -fs * 0.55 : 0;
       ctx.strokeText(p[10], s.x, s.y + dy); ctx.fillText(p[10], s.x, s.y + dy);
       if (net) {
-        ctx.font = (fs * 0.82) + 'px Consolas,monospace';
+        ctx.font = (fs * 0.82) + 'px ' + LBL_FONT;
         ctx.strokeText(net, s.x, s.y + fs * 0.6); ctx.fillText(net, s.x, s.y + fs * 0.6);
       }
     });
@@ -6322,7 +6286,7 @@ function drawOverlay(r) {
     ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y); ctx.stroke();
     [a, b].forEach(q => { ctx.beginPath(); ctx.arc(q.x, q.y, 3.5, 0, 7); ctx.stroke(); });
     const txt = d.toFixed(3) + ' mm (' + (d / 0.0254).toFixed(1) + ' mil)';
-    ctx.font = 'bold 12px Consolas,monospace'; ctx.textAlign = 'center';
+    ctx.font = 'bold 12px ' + LBL_FONT; ctx.textAlign = 'center';
     ctx.strokeStyle = '#1a1a00'; ctx.lineWidth = 3;
     ctx.strokeText(txt, (a.x + b.x) / 2, (a.y + b.y) / 2 - 6);
     ctx.fillStyle = '#ffeb3b'; ctx.fillText(txt, (a.x + b.x) / 2, (a.y + b.y) / 2 - 6);
@@ -6719,7 +6683,11 @@ document.getElementById('b-pin').onclick = () => {
   document.getElementById('b-pin').classList.toggle('active', padLabels);
   draw();
 };
-document.getElementById('b-bg').onclick = () => { bgi = (bgi + 1) % BG.length; draw(); };
+document.getElementById('b-bg').onclick = () => {
+  if (bgOver) bgOver = null; else bgi = (bgi + 1) % BG.length;
+  draw();
+};
+document.getElementById('pcb-theme-sel').addEventListener('change', e => setPcbTheme(e.target.value));
 // Yüz tamamen gizliyse bakır + overlay'ini aç (kontrast kipinde aktif yüzde
 // görecek bir şey olsun).
 function ensureSideShown(s) {
@@ -7088,6 +7056,8 @@ async function gunzipB64(b64) {
   renderLayers(); renderNets(); renderComps(); bomRender();
   {
     const st = uiGet();
+    const thId = pickTheme(st, PCB_THEME_DEF, PCB_THEMES);
+    if (thId !== 'altium') setPcbTheme(thId, true);
     if (st.propD !== undefined) propPref.d = !!st.propD;
     if (st.propM !== undefined) propPref.m = !!st.propM;
     navOpen = st.nav !== undefined ? !!st.nav : window.innerWidth >= 820;
@@ -7103,7 +7073,8 @@ async function gunzipB64(b64) {
 """
 
 
-def build_pcb_canvas_html(geo, comp_info, timestamp, project_name, pcb_name="", variants=None):
+def build_pcb_canvas_html(geo, comp_info, timestamp, project_name, pcb_name="", variants=None,
+                          theme_set=None):
     """@brief Geometri tabanlı (canvas) PCB görüntüleyici HTML'i üret.
 
     @param geo extract_pcb_geometry() çıktısı
@@ -7112,30 +7083,41 @@ def build_pcb_canvas_html(geo, comp_info, timestamp, project_name, pcb_name="", 
     @param project_name Proje adı
     @param pcb_name PcbDoc dosya adı
     @param variants project_variant_view çıktısı (takılmayan parçalar işaretlenir)
+    @param theme_set Renk temaları {"packs", "sch", "pcb"} (bkz. _theme_set)
     @return HTML metni
     """
     import gzip as _gzip, base64 as _b64
     variants = variants or {"cur": -1, "list": []}
+    theme_set = _theme_set(theme_set)
+    pcb_packs = [p for p in theme_set["packs"] if p.get("board")]
+    pcb_themes = [[p["id"], p["name"], _themes.is_dark(p["board"]["background"]),
+                   _themes.pcb_theme_colors(p["board"], geo.get("layers") or [])]
+                  for p in pcb_packs]
     gz = _b64.b64encode(_gzip.compress(
         json.dumps(geo, separators=(",", ":")).encode("utf-8"), 6)).decode()
-    return _tr_html(_PCB_CANVAS_TPL
+    return _apply_ui_font(_tr_html(_PCB_CANVAS_TPL
             .replace("__MOBILE_META__", _MOBILE_META)
             .replace("__GESTURE__", _GESTURE_JS)
             .replace("__VARSEL__", _variant_select_html(
                 variants, "tool-sel tb-more",
                 "⟪Altium varyantı: takılmayan parçalar çarpıyla işaretlenir⟫"))
             .replace("__VARIANTS__", _js_json(variants))
+            .replace("__PCBTHEMEOPTS__", _theme_options(pcb_packs, "board"))
+            .replace("__PCBTHEMES__", _js_json(pcb_themes))
+            .replace("__PCBTHEMEDEF__", _js_json(theme_set["pcb"]))
+            .replace("__PCBFONT__", _js_json(_themes.css_font_stack(
+                theme_set["fonts"]["pcb"], "Consolas,monospace")))
             .replace("__GEO_GZ__", gz)
             .replace("__COMPINFO__", json.dumps(comp_info))
             .replace("__PROJECTJSON__", json.dumps(project_name))
             .replace("__PROJECT__", project_name)
             .replace("__PCBNAME__", pcb_name or project_name)
-            .replace("__TIME__", timestamp))
+            .replace("__TIME__", timestamp)), theme_set)
 
 
 @_with_library_logs
 def generate_pcb_canvas_viewer(project_path, output_path, log=print, progress=None,
-                               variant=ACTIVE_VARIANT):
+                               variant=ACTIVE_VARIANT, theme_set=None):
     """@brief Geometri tabanlı PCB görüntüleyici üret (küçük dosya, akıcı zoom).
 
     @details
@@ -7148,6 +7130,7 @@ def generate_pcb_canvas_viewer(project_path, output_path, log=print, progress=No
     @param log Log callback'i
     @param progress İlerleme callback'i (yüzde, etiket)
     @param variant Açılışta seçili varyant (ACTIVE_VARIANT · ad · None)
+    @param theme_set Renk temaları {"packs", "sch", "pcb"} (bkz. generate_viewer)
     @return True/False
     """
     from altium_monkey.altium_pcbdoc import AltiumPcbDoc
@@ -7182,7 +7165,9 @@ def generate_pcb_canvas_viewer(project_path, output_path, log=print, progress=No
     prog(85, tr('HTML oluşturuluyor'))
     ts = datetime.datetime.now().strftime("%H:%M:%S")
     html = build_pcb_canvas_html(geo, comp_info, ts, Path(project_path).stem, pcb_path.name,
-                                 variants=_physical_variant_view(project_path, variant, log))
+                                 variants=_physical_variant_view(project_path, variant, log),
+                                 theme_set=theme_set)
+    _log_themes(log, theme_set, "board")
     out = Path(output_path)
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(html, encoding="utf-8")
@@ -8470,7 +8455,8 @@ def build_sheet_hierarchy(sheets):
 
 
 def build_html(sheets, net_list, components, timestamp,
-               inter_color, intra_color, pcb=None, project_name="", variants=None):
+               inter_color, intra_color, pcb=None, project_name="", variants=None,
+               theme_set=None):
     """@brief Şematik viewer'ın tam HTML belgesini kurar (gömülü SVG + JS).
 
     @param sheets
@@ -8482,9 +8468,12 @@ def build_html(sheets, net_list, components, timestamp,
     @param pcb AltiumPcbDoc PCB nesnesi
     @param project_name Proje adı (not/kutu localStorage anahtarı + kayıt dosya adı)
     @param variants project_variant_view çıktısı (takılmayan parçalar işaretlenir)
+    @param theme_set Renk temaları {"packs", "sch", "pcb"} (bkz. _theme_set;
+           None = yalnız hazır temalar, açılışta özgün Altium renkleri)
     @return Üretilen sonuç.
     """
     pcb = pcb or {"available": False}
+    theme_set = _theme_set(theme_set)
     variants = variants or {"cur": -1, "list": []}
     var_sel = _variant_select_html(variants, "tool-sel tb-more",
                                    "⟪Altium varyantı: takılmayan parçalar çarpıyla işaretlenir⟫")
@@ -8506,20 +8495,15 @@ def build_html(sheets, net_list, components, timestamp,
     draw_gz = _b64.b64encode(_gzip.compress(json.dumps(
         {"s": dl_map, "im": list(dl_imgs.keys())},
         separators=(",", ":")).encode("utf-8"), 6)).decode()
-    # Şematik renk temaları (bkz. _SCH_THEMES): JS tablosu + seçim listesi
-    sch_themes_json = json.dumps([[t[0], t[1], t[2], sch_theme_readable(t[3])]
-                                  for t in _SCH_THEMES],
-                                 separators=(",", ":"))
-    _th_opt = lambda t: (f'<option value="{t[0]}">'
-                         + ("⟪KiCad (varsayılan)⟫" if t[0] == "kicad" else t[1])
-                         + '</option>')
-    theme_opts = (
-        '<option value="altium">⟪Altium (orijinal)⟫</option>'
-        '<optgroup label="⟪Açık⟫">'
-        + "".join(_th_opt(t) for t in _SCH_THEMES if not t[2])
-        + '</optgroup><optgroup label="⟪Koyu⟫">'
-        + "".join(_th_opt(t) for t in _SCH_THEMES if t[2])
-        + '</optgroup>')
+    # Şematik renk temaları (themes.py — hazır + kullanıcı temaları): JS
+    # tablosu + seçim listesi + GUI'de seçilen açılış teması
+    sch_packs = [p for p in theme_set["packs"] if p.get("schematic")]
+    sch_themes_json = _js_json([[p["id"], p["name"], _themes.is_dark(p["schematic"]["background"]),
+                                 sch_theme_readable(p["schematic"])] for p in sch_packs])
+    sch_theme_def = _js_json(theme_set["sch"])
+    theme_opts = _theme_options(sch_packs, "schematic")
+    sch_font_def = _js_json(theme_set["fonts"]["sch"])
+    font_opts = _font_options(theme_set["fonts"]["sch"])
     _used_low = {f.lower() for f in dl_used}
     font_css = "\n".join(css for css, fam in dl_faces.items()
                          if fam and any(fam.lower() in u for u in _used_low))
@@ -8550,7 +8534,7 @@ def build_html(sheets, net_list, components, timestamp,
             if box and pl.get("sheet_id"):
                 sch_boxes.setdefault(pl["sheet_id"], {})[c["designator"]] = box
 
-    return _tr_html(f"""<!DOCTYPE html>
+    return _apply_ui_font(_tr_html(f"""<!DOCTYPE html>
 <html lang="tr"><head>
 <meta charset="utf-8">
 {_MOBILE_META}
@@ -9138,6 +9122,8 @@ def build_html(sheets, net_list, components, timestamp,
     </label>
     <select class="tool-sel tb-more" id="theme-sel"
             title="⟪Şematik renk teması (KiCad tarzı) — tercih bu tarayıcıda hatırlanır⟫">{theme_opts}</select>
+    <select class="tool-sel tb-more" id="font-sel"
+            title="⟪Şematik yazı tipi — açan bilgisayarda yoksa özgün yazı tipi kullanılır⟫">{font_opts}</select>
     {var_sel}
     <div class="toolbar-sep tb-more"></div>
     <button class="tool-btn tb-more" id="anno-note"
@@ -9328,6 +9314,34 @@ let DLIMG = [];                  // gömülü görseller (Image nesneleri)
 // rol → tema rengi kullanılır; "Altium (orijinal)" (schTheme = null) seçiliyken
 // roller yok sayılır ve çizim eskisiyle birebir aynıdır.
 const SCH_THEMES = {sch_themes_json};    // [[id, ad, koyu, {{anahtar: renk}}], …]
+const SCH_THEME_DEF = {sch_theme_def};    // GUI'de seçilen açılış teması
+// Şematik yazı tipi (v2.40.0): seçilen aile özgün ailenin ÖNÜNE konur — açan
+// bilgisayarda yoksa özgün yazı tipiyle çizilir. Metin katmanı aynı dizgeyi
+// (dlFont) kullandığından seçim / tıklama hizası korunur.
+const SCH_FONT_DEF = {sch_font_def};   // '' = özgün
+const GENERIC_FONTS = ['sans-serif', 'serif', 'monospace', 'system-ui', 'cursive', 'fantasy'];
+let schFontFam = '';
+function setSchFont(fam, silent) {{
+  schFontFam = fam || '';
+  const sel = document.getElementById('font-sel');
+  if (sel) sel.value = schFontFam;
+  if (!silent) lsSet({{ font: schFontFam, fontDef: SCH_FONT_DEF }});
+  // Yazı tipi dlPrep paketlerine ve metrik önbelleğine işlenmiş: hepsi atılır
+  if (DL) Object.values(DL).forEach(d => {{ delete d._pa; delete d._pt; }});
+  tlMetCache.clear();
+  schDraw(); tlDropAll(); tlUpdate();
+}}
+// Açılış teması: GUI'de seçilen (`def`). Tarayıcıda başka tema seçilmişse o
+// hatırlanır — ama yalnız AYNI açılış temasıyla üretilmiş HTML'de; GUI'de
+// açılış teması değişince yeni seçim kazanır (kayıttaki themeDef farklıdır).
+// v2.40.0 öncesi kayıtlarda themeDef yok → açılış "altium" iken eski kayıt
+// korunur (önceki davranış). Artık olmayan tema → açılış teması.
+function pickTheme(st, def, list) {{
+  const ok = id => id === 'altium' || list.some(t => t[0] === id);
+  if (st.theme && ok(st.theme)
+      && (st.themeDef === def || (st.themeDef === undefined && def === 'altium'))) return st.theme;
+  return ok(def) ? def : 'altium';
+}}
 // Temada karşılığı olmayan yardımcı roller → KiCad anahtarı
 const TH_ALIAS = {{ graphic_fill: 'component_body', label_fill: 'background',
                     netclass_flag: 'note', junction: 'wire' }};
@@ -9364,13 +9378,15 @@ function setSchTheme(id, silent) {{
   thCache = new Map();
   const sel = document.getElementById('theme-sel');
   if (sel) sel.value = schTheme ? schTheme[0] : 'altium';
-  if (!silent) lsSet({{ theme: schTheme ? schTheme[0] : 'altium' }});
+  if (!silent) lsSet({{ theme: schTheme ? schTheme[0] : 'altium', themeDef: SCH_THEME_DEF }});
   schDraw();
 }}
 
 function dlFont(ts, fs) {{       // metin stili + boyut → CSS font dizgesi
   const fam = String(ts[0] || 'sans-serif').replace(/["\\\\]/g, '');
-  return ((ts[3] || '') + ' ' + (ts[2] || '') + ' ' + fs + 'px "' + fam
+  const ov = !schFontFam ? ''
+    : (GENERIC_FONTS.includes(schFontFam) ? schFontFam : '"' + schFontFam + '"') + ', ';
+  return ((ts[3] || '') + ' ' + (ts[2] || '') + ' ' + fs + 'px ' + ov + '"' + fam
           + '", sans-serif').trim();
 }}
 // Yuvarlatılmış dikdörtgen — Path2D.roundRect her yerde yok, arcTo her yerde var
@@ -10786,10 +10802,19 @@ function lsSet(patch) {{ try {{
     document.getElementById('inter-color-picker').value = st.inter; }}
   if (st.intra) {{ INTRA_COLOR = st.intra;
     document.getElementById('intra-color-picker').value = st.intra; }}
-  if (st.theme) setSchTheme(st.theme, true);
+  const thId = pickTheme(st, SCH_THEME_DEF, SCH_THEMES);
+  if (thId !== 'altium') setSchTheme(thId, true);
+  // Yazı tipi: temadaki kuralın aynısı (aynı açılış değeriyle üretilmiş HTML'de
+  // tarayıcı seçimi korunur). Kayıttaki ad tırnak / ayraç içeremez (CSS'e girer).
+  const fOk = typeof st.font === 'string' && /^[^"'\\\\,;<>{{}}()]{{0,60}}$/.test(st.font);
+  const fId = (fOk && (st.fontDef === SCH_FONT_DEF
+                       || (st.fontDef === undefined && SCH_FONT_DEF === ''))) ? st.font : SCH_FONT_DEF;
+  if (fId) setSchFont(fId, true);
 }})();
 document.getElementById('theme-sel').addEventListener('change',
   e => setSchTheme(e.target.value));
+document.getElementById('font-sel').addEventListener('change',
+  e => setSchFont(e.target.value));
 
 // === Şematik hiyerarşi paneli + KiCad tarzı sayfa gezinme =================
 // Ağaç Python'da sheet symbol referanslarından kuruldu (build_sheet_hierarchy).
@@ -12561,7 +12586,7 @@ window.addEventListener('message', ev => {{
 }})();
 </script>
 </body></html>
-""")
+"""), theme_set)
 
 
 if __name__ == "__main__":

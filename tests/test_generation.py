@@ -46,6 +46,22 @@ class _ProjectBase:
             "pnp": ("generate_pnp_csv", "pnp.csv", {}),
             "icmap": ("generate_ic_map_xlsx", "ic_harita.xlsx", {}),
         }
+        # Renk temaları: hazır + HTML'e zararlı adlı bir kullanıcı teması,
+        # açılış temaları seçili (themes.py / v2.40.0)
+        import themes
+        user = themes.parse_pack(
+            {"meta": {"name": 'Zehir</script><b>"x"'},
+             "schematic": {"background": "#101010", "wire": "#00ff00",
+                           "component_body": "#202020", "note": "#ffffff"},
+             "board": {"background": "#ffffff", "copper": {"f": "#ff0000"}}}, "u-zehir")
+        cls.theme_set = {"packs": themes.builtin_packs() + [user],
+                         "sch": "u-zehir", "pcb": "u-zehir",
+                         "fonts": {"sch": "Courier New", "pcb": "Arial",
+                                   "ui": 'Georgia"</style>'}}   # ui: geçersiz → atılır
+        jobs["sch_theme"] = ("generate_viewer", "sematik_tema.html",
+                             {"theme_set": cls.theme_set})
+        jobs["pcb_theme"] = ("generate_pcb_canvas_viewer", "pcb_tema.html",
+                             {"theme_set": cls.theme_set})
         if cls.MCU:
             jobs["mcupin"] = ("generate_mcu_pinout_xlsx", "mcu_pin.xlsx",
                               {"mcu_designator": cls.MCU})
@@ -130,14 +146,18 @@ class _ProjectBase:
         self.assertIn('<option value="altium">', text)
         # Okunurluk uyarlaması: blok dolgusu = gövde, tüm çizgi/yazı rolleri
         # zemine (gövde içindekiler gövdeye de) karşı eşiği geçiyor.
+        # Yarı saydam renkler (shirokuma) zemine karıştırılmış ETKİN renkle ölçülür.
+        import themes
         v = self.viewer
         for tid, _name, _dark, colors in v._SCH_THEMES:
             c = v.sch_theme_readable(colors)
-            self.assertEqual(c["sheet_background"], c["component_body"], tid)
-            bg, body = v._th_rgb(c["background"]), v._th_rgb(c["component_body"])
+            bg = v._th_rgb(c["background"])
+            body = themes._th_over(c["component_body"], bg)
+            sheet = themes._th_over(c["sheet_background"], bg)
             for k in v._TH_ON_BG:
-                refs = [bg] + ([body] if k in v._TH_ON_BODY else [])
-                worst = min(v._th_contrast(v._th_rgb(c[k]), r) for r in refs)
+                refs = ([bg] + ([body] if k in v._TH_ON_BODY else [])
+                        + ([sheet] if k in themes._TH_ON_SHEET else []))
+                worst = min(v._th_contrast(themes._th_over(c[k], bg), r) for r in refs)
                 self.assertGreaterEqual(worst, v._TH_MIN_CONTRAST - 1e-6, f"{tid}.{k}")
 
     def test_schematic_viewer_english(self):
@@ -161,6 +181,65 @@ class _ProjectBase:
         text = self.html("pcb")
         self.assertIn("const GEO_GZ", text)
         assert_js_valid(self, text, f"{self.PROJECT}_pcb")
+
+    def _js_const(self, text, name):
+        """@brief Satır-içi script'teki `const AD = <JSON>;` değerini çözer."""
+        import re
+        m = re.search(r"const " + name + r" = (.+?);[ \t]*(?://[^\n]*)?\n", text)
+        self.assertIsNotNone(m, name)
+        return json.loads(m.group(1))
+
+    def test_theme_embedding(self):
+        """Renk temaları: kullanıcı teması gömülü, açılış teması seçili, ad kaçışlı."""
+        text = self.html("sch_theme")
+        assert_js_valid(self, text, f"{self.PROJECT}_sch_theme")
+        self.assertEqual(self._js_const(text, "SCH_THEME_DEF"), "u-zehir")
+        table = self._js_const(text, "SCH_THEMES")
+        self.assertEqual([t[0] for t in table][-1], "u-zehir")
+        self.assertEqual(len(table), len(self.viewer._SCH_THEMES) + 1)
+        self.assertTrue(table[-1][2], "koyu zemin → koyu grup")
+        self.assertIn('<option value="u-zehir">Zehir&lt;/script&gt;&lt;b&gt;&quot;x&quot;</option>',
+                      text)
+        self.assertNotIn("Zehir</script>", text)
+        # yazı tipleri: şematik açılış yazı tipi gömülü, geçersiz arayüz adı atıldı
+        self.assertEqual(self._js_const(text, "SCH_FONT_DEF"), "Courier New")
+        self.assertIn('<option value="Courier New">Courier New</option>', text)
+        self.assertNotIn('id="ui-font"', text)
+        self.assertNotIn('Georgia"</style>', text)
+        # varsayılan üretim: açılış teması özgün Altium, yazı tipi özgün
+        self.assertEqual(self._js_const(self.html("sch"), "SCH_THEME_DEF"), "altium")
+        self.assertEqual(self._js_const(self.html("sch"), "SCH_FONT_DEF"), "")
+        if not self.HAS_PCB:
+            return
+        import base64, gzip, re
+        pcb = self.html("pcb_theme")
+        assert_js_valid(self, pcb, f"{self.PROJECT}_pcb_theme")
+        self.assertEqual(self._js_const(pcb, "PCB_THEME_DEF"), "u-zehir")
+        pt = self._js_const(pcb, "PCB_THEMES")
+        import themes
+        self.assertEqual([t[0] for t in pt],
+                         [p["id"] for p in themes.builtin_packs() if p["board"]] + ["u-zehir"])
+        geo = json.loads(gzip.decompress(base64.b64decode(
+            re.search(r'const GEO_GZ = "([^"]+)"', pcb).group(1))))
+        for t in pt:
+            self.assertEqual(len(t[3]["c"]), len(geo["layers"]), t[0])
+        top = [i for i, L in enumerate(geo["layers"]) if L["k"] == "TOP"][0]
+        self.assertEqual(pt[-1][3]["c"][top], "#ff0000")
+        self.assertFalse(pt[-1][2], "açık zemin → açık grup")
+        self.assertIn('id="pcb-theme-sel"', pcb)
+        self.assertEqual(self._js_const(self.html("pcb"), "PCB_THEME_DEF"), "altium")
+        self.assertEqual(self._js_const(pcb, "LBL_FONT"), '"Arial", Consolas,monospace')
+        self.assertEqual(self._js_const(self.html("pcb"), "LBL_FONT"), "Consolas,monospace")
+
+    def test_ui_font(self):
+        """Arayüz yazı tipi: `</head>`'den önce tek kural; seçilmediyse HTML'e dokunulmaz."""
+        v = self.viewer
+        html = "<html><head><title>x</title></head><body></body></html>"
+        self.assertEqual(v._apply_ui_font(html, None), html)
+        out = v._apply_ui_font(html, {"fonts": {"ui": "Segoe UI"}})
+        self.assertIn('<style id="ui-font">body, body :not(.tl):not(.tl > span)', out)
+        self.assertIn('font-family: "Segoe UI", "Segoe UI", system-ui, sans-serif !important', out)
+        self.assertLess(out.index('id="ui-font"'), out.index("</head>"))
 
     def test_combined_viewer(self):
         text = self.html("combined")

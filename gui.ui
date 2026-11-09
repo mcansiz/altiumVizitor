@@ -321,6 +321,19 @@
              </widget>
             </item>
             <item>
+             <widget class="QPushButton" name="themesBtn">
+              <property name="toolTip">
+               <string>Şematik ve PCB renk temalarını yükle, düzenle, yeni tema oluştur; şematik, PCB etiketi ve arayüz yazı tiplerini seç. Tüm temalar üretilen HTML'e gömülür; burada seçilenler açılış ayarıdır.</string>
+              </property>
+              <property name="text">
+               <string>🎨  Renk ve Yazı Tipleri…</string>
+              </property>
+              <property name="cls" stdset="0">
+               <string>ghost</string>
+              </property>
+             </widget>
+            </item>
+            <item>
              <widget class="QGroupBox" name="colorsGroup">
               <property name="title">
                <string>Şematik bağlantı renkleri</string>

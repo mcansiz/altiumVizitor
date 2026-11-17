@@ -63,6 +63,10 @@ a = Analysis(
 #   çalışır), EglFS/linuxfb/vnc/offscreen/minimalegl platformları (gömülü
 #   sistemler/headless), evdev/tuio giriş eklentileri (X11 altında gerekmez),
 #   nadir resim formatları, Pillow'un AVIF/Tk uzantıları.
+#   libxkbcommon: derleme makinesinden (ubuntu-22.04, 1.4) pakete giriyordu
+#   ama libxkbcommon-x11 SİSTEMDEN yükleniyor; yeni dağıtımda (1.13) iki
+#   sürüm karışınca xcb klavye kurulumunda SIGSEGV (issue #1). Sistemdeki
+#   eşleşen sürüm kullanılsın — libxkbcommon-x11'i sağlayan her sistemde var.
 #
 # KALMALI: libqxcb, libQt5XcbQpa, libQt5DBus, xcbglintegrations,
 #   platforminputcontexts, platformthemes, iconengines, libqjpeg/libqgif/
@@ -78,6 +82,7 @@ _DROP_LINUX = (
     r'|plugins[/\\]platforms[/\\]libq(vnc|linuxfb|eglfs|minimalegl|offscreen|wayland)'
     r'|plugins[/\\]imageformats[/\\]libq(tiff|webp|icns|tga|wbmp)'
     r'|PIL[/\\]_avif|libavif|PIL[/\\]_imagingtk'
+    r'|libxkbcommon'
 )
 _DROP = re.compile(
     '(' + _DROP_COMMON + (_DROP_LINUX if IS_LINUX else '') + ')', re.I,

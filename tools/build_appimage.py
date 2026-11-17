@@ -126,6 +126,12 @@ def main() -> int:
     if not (bundle / "AltiumVizitor").is_file():
         raise SystemExit(f"HATA: {bundle}/AltiumVizitor yok")
 
+    # Sistemden yüklenmesi gereken ve pakete girerse yeni dağıtımlarda sürüm
+    # karışıklığıyla çöken kütüphaneler (spec'teki _DROP; issue #1).
+    leaked = sorted(p.name for p in bundle.rglob("libxkbcommon*"))
+    if leaked:
+        raise SystemExit(f"HATA: pakette sistem kütüphanesi kalmış: {leaked}")
+
     log("== AppDir")
     shutil.rmtree(APPDIR, ignore_errors=True)
     lib = APPDIR / "usr" / "lib" / "altiumvizitor"

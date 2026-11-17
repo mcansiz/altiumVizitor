@@ -5,7 +5,7 @@ Wavenumber'ın ticari "viz sch 1.0" ürününün açık-kaynak alternatifi.
 [altium_monkey](https://github.com/wavenumber-eng/altium_monkey) kütüphanesi
 (Eli Hughes / Wavenumber) üzerine kurulu.
 
-**Mevcut sürüm**: `APP_VERSION` sabiti **`viewer.py`'de** tutulur (şu an 2.41.0);
+**Mevcut sürüm**: `APP_VERSION` sabiti **`viewer.py`'de** tutulur (şu an 2.41.1);
 `gui.py` oradan import eder (v2.9.29'da taşındı — HTML çıktıları da sürümü
 gösterebilsin diye, tek kaynak). Yeni özellik/düzeltme ekleyince bu sabiti
 güncelle (semver: major.minor.patch). Sürüm pencere başlığında, alt durum
@@ -378,6 +378,12 @@ PyInstaller ikilisi derleme makinesinin glibc'sine bağlı, wn-geometer zaten
 2.35 istiyor — daha yeni makine eşiği gereksiz yükseltirdi. appimagetool
 1.9.1 SHA-256 ile sabit. Duman testinde Qt platformu `minimal` (offscreen
 Linux paketinden `_DROP` ile atılıyor).
+**libxkbcommon pakete GİRMEZ** (v2.41.1, issue #1): PyInstaller onu
+derleme makinesinden (22.04 → 1.4) topluyordu, `libxkbcommon-x11` ise
+sistemden geliyordu; yeni dağıtımda (libxkbcommon 1.13) karışık sürümler
+xcb klavye kurulumunda SIGSEGV verdi. Duman testi `minimal` platformla
+koştuğu için bunu YAKALAMAZ → `build_appimage.py` pakette `libxkbcommon*`
+kalırsa derlemeyi durdurur.
 
 ## Git / GitHub yetkisi — push ve release için (v2.27.7+)
 

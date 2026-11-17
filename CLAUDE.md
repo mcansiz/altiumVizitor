@@ -385,74 +385,26 @@ xcb klavye kurulumunda SIGSEGV verdi. Duman testi `minimal` platformla
 koştuğu için bunu YAKALAMAZ → `build_appimage.py` pakette `libxkbcommon*`
 kalırsa derlemeyi durdurur.
 
-## Git / GitHub yetkisi — push ve release için (v2.27.7+)
+## Git / GitHub yetkisi + sürüm çıkarma
 
 Uzak depo: `https://github.com/mcansiz/altiumVizitor.git` (**public**).
 
-**Varsayılan credential ÇALIŞMIYOR.** `gh auth login` ile girilen fine-grained
-PAT'te `contents=write` izni yok; hem `gh release create` hem `git push`
-**HTTP 403** veriyor (`X-Accepted-Github-Permissions: contents=write`,
-`remote: Permission to mcansiz/altiumVizitor.git denied to mcansiz`). `gh` kendini
-credential helper olarak da yazdığından Kimlik Yöneticisi'ndeki
-`git:https://github.com` kaydı da bu zayıf PAT'e döndü.
+**Varsayılan credential ÇALIŞIYOR** (v2.41.1'de, 2026-11-17 doğrulandı): düz
+`git push origin master vX.Y.Z`, `gh issue comment` ve `gh release edit` ek
+ayar gerekmeden geçti. v2.27.7–v2.41.0 arasında `gh auth login`'in
+fine-grained PAT'inde `contents=write` yoktu (HTTP 403) ve Kimlik
+Yöneticisi'ndeki eski OAuth token'ı (`GitHub - https://api.github.com/mcansiz`)
+elle okunup kullanılıyordu. O yol artık gereksiz; ayrıca Claude Code'un auto
+modu kimlik deposundan token okumayı ENGELLİYOR. 403 geri gelirse token'ı
+okumaya çalışma, kullanıcıdan PAT'e **Contents: Read and write** vermesini iste.
 
-**Kullanılacak yetki**: Windows Kimlik Yöneticisi'nde `GitHub -
-https://api.github.com/mcansiz` hedefinde duran eski **OAuth token'ı**
-(`gho_…`, scope: `repo, user, workflow`). Push ve release bununla geçiyor
-(ikisi de doğrulandı).
-
-**Token'ı ASLA dosyaya/commit'e/log'a yazma** — repo public. Yalnız çalıştığın
-komutun ortam değişkenine al. Blob **UTF-16 değil UTF-8**'dir (Unicode olarak
-okunursa 20 karakterlik çöp çıkar).
-
-```bash
-# 1) Token'ı Kimlik Yöneticisi'nden oku (scratchpad'e yazılan yardımcı betikle)
-TOK=$(powershell -NoProfile -ExecutionPolicy Bypass -File "$SCRATCH/gettok.ps1" | tr -d '\r\n')
-
-# 2) gh (release, API)
-GH_TOKEN="$TOK" gh release create vX.Y.Z dist/... --title "…" --notes-file "…" --verify-tag
-
-# 3) git push — helper'ı komuta özel geçersiz kıl (kalıcı yapılandırma DEĞİŞTİRME)
-GIT_TERMINAL_PROMPT=0 GH_TOKEN="$TOK" git \
-  -c credential.helper= \
-  -c "credential.helper=!f(){ test \"\$1\" = get && printf 'username=x\npassword=%s\n' \"\$GH_TOKEN\"; }; f" \
-  push origin master vX.Y.Z
-```
-
-`gettok.ps1` (kalıcı değil — gerekince scratchpad'e yeniden yaz; sürüm
-kontrolüne girmez, ama sır da içermez: yalnız Kimlik Yöneticisi'nden okur):
-
-```powershell
-Add-Type -Language CSharp @"
-using System; using System.Runtime.InteropServices;
-public class CM {
-  [StructLayout(LayoutKind.Sequential, CharSet=CharSet.Unicode)] public struct C {
-    public uint F; public uint T; public IntPtr TN; public IntPtr Cm;
-    public System.Runtime.InteropServices.ComTypes.FILETIME LW;
-    public uint BS; public IntPtr B; public uint P; public uint AC; public IntPtr A; public IntPtr TA; public IntPtr U; }
-  [DllImport("advapi32.dll", CharSet=CharSet.Unicode, SetLastError=true)]
-  public static extern bool CredRead(string t, uint ty, uint f, out IntPtr c);
-}
-"@
-$p=[IntPtr]::Zero
-if(-not [CM]::CredRead("GitHub - https://api.github.com/mcansiz",1,0,[ref]$p)){exit 1}
-$c=[Runtime.InteropServices.Marshal]::PtrToStructure($p,[Type][CM+C])
-$b=New-Object byte[] $c.BS; [Runtime.InteropServices.Marshal]::Copy($c.B,$b,0,$c.BS)
-[Text.Encoding]::UTF8.GetString($b)
-```
-
-Kayıtları listelemek için: `cmd //c "cmdkey /list"` (Bash'ten `cmdkey`'i
-doğrudan boru hattına sokma — parametre hatası verir).
-
-**Release biçimi** (önceki sürümlerle tutarlı olsun): başlık
-`vX.Y.Z — <kısa Türkçe konu>`, asset adı `AltiumVizitor-vX.Y.Z-win-x64.exe`
-(`dist/AltiumVizitor.exe`'nin kopyası), gövde TR + EN iki bölüm, her birinde
-"Kurulum / Install" (VC++ Redistributable linki) ve sonda
-`**Full Changelog**: …/compare/<önceki>...<yeni>`.
-
-**Kalıcı düzeltme (kullanıcıya ait)**: fine-grained PAT'e
-https://github.com/settings/personal-access-tokens → Repository permissions →
-**Contents: Read and write** verilirse bu geçici yol gereksizleşir.
+**Sürüm akışı**: `viewer.py`'de `APP_VERSION` + `.github/release-notes/vX.Y.Z.tr.md`
+/ `.en.md` → commit (başlık `vX.Y.Z: konu`) → `git tag vX.Y.Z` → push.
+`release.yml` üç platformda test + derleme yapıp **taslak** release kurar
+(başlık, TR+EN gövde, indirme tablosu, `SHA256SUMS` otomatik). İşler geçince
+taslak incelenip `gh release edit vX.Y.Z --draft=false --latest` ile yayınlanır.
+Hata düzeltmesi bir issue'ya bağlıysa, sorunun çıktığı ortamda doğrulanmadan
+commit'te `Fixes #N` yerine `Refs #N` kullan (push issue'yu otomatik kapatır).
 
 ## Renk temaları — paketler, GUI diyaloğu, PCB (v2.40.0+)
 

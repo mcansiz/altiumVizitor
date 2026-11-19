@@ -5,7 +5,7 @@ Wavenumber'ın ticari "viz sch 1.0" ürününün açık-kaynak alternatifi.
 [altium_monkey](https://github.com/wavenumber-eng/altium_monkey) kütüphanesi
 (Eli Hughes / Wavenumber) üzerine kurulu.
 
-**Mevcut sürüm**: `APP_VERSION` sabiti **`viewer.py`'de** tutulur (şu an 2.41.1);
+**Mevcut sürüm**: `APP_VERSION` sabiti **`viewer.py`'de** tutulur (şu an 2.42.0);
 `gui.py` oradan import eder (v2.9.29'da taşındı — HTML çıktıları da sürümü
 gösterebilsin diye, tek kaynak). Yeni özellik/düzeltme ekleyince bu sabiti
 güncelle (semver: major.minor.patch). Sürüm pencere başlığında, alt durum
@@ -507,6 +507,40 @@ Görüntüleyiciler grubunda `themesBtn`): Şematik / PCB sekmesi; tema seçici
 okunurluk uyarlaması UYGULANMIŞ renklerle — HTML'in gösterdiği), Kopyala /
 Yeniden Adlandır / Sil / İçe Aktar / Dışa Aktar / Tema Klasörünü Aç.
 Değişiklikler bellekte tutulur, dosyalar yalnız **Tamam**'da yazılır/silinir.
+**Önizleme tıklanabilir** (v2.42.0, kullanıcı isteği: "önizlemedeki yerlere
+tıkladığımızda ilgili renk yerini açsın"): `_ClickablePreview` her öğeyi
+çizerken şeklini (mantıksal koordinat, ince çizgi ≥ 6 birim
+`QPainterPathStroker`) anahtar yoluyla `_hits`'e kaydeder; fare altındaki EN
+SON çizilen öğe kesikli mavi vurgu + el imleci + ipucu alır, tıklama
+`picked` → `pick_from_preview` (satırı görünür yapıp vurgular, sonra
+`edit_color`). Şematik önizlemesinde listedeki **28 rengin hepsi** bir öğede
+görünür — eklenenler: direnç R1 (gövde/pin/referans/değer), güç portları
+(+5V, GND: çizgi `component_outline`, yazı `value` — viewer `_dl_role`'ün
+`pwr` kuralı), sayfa pini okları (dolgu `sheet_label_background`, kenar
+`sheet_label` — `sent` kuralı), not çerçevesi (grafik → `note`). Test
+`test_theme_preview_clickable` her `SCH_ROWS` anahtarının önizlemede
+olduğunu denetler — listeye satır eklenince önizlemeye de öğe eklenmeli.
+**Ek dolgu / işaret renkleri** (v2.42.0, kullanıcı isteği: "Altium'daki gibi
+blok pininin sarı alanı ve genel etiketin zemin rengi değişebilsin"):
+`themes.SCH_EXTRA_KEYS` = `label_global_background` (port dolgusu ← zemin),
+`label_hier_background` (harness ← zemin), `sheet_label_background` (sayfa
+pini ← blok dolgusu), `note_background` (metin çerçevesi / serbest çizim
+dolgusu ← gövde dolgusu), `netclass_flag` (direktif / blanket ← not).
+Eskiden bunlar `_dl_role`'de `label_fill` / `graphic_fill` / `sheet_background`
+yardımcı rolleriyle JS takma adından renk alıyordu, ayrı düzenlenemiyordu.
+**Kural: tanımsızsa İZLER** — pakete ve tema dosyasına yalnız elle verilmişse
+girer (`_norm_sch` dosyada varsa alır; `pack_to_kicad` silinmişse dosyadan da
+atar). `sch_theme_readable` tanımsızları EN SONDA, uyarlanmış renklerden
+doldurur (`sch_resolve_extras`) → gömülen her temada beşi de dolu, hazır
+temaların görünümü DEĞİŞMEDİ (ölçüldü: Smart_MCU + VURAN-360 + m2_emmc, 28
+tema, 16 436 tema × stil × parça karşılaştırması, fark 0). Elle verilen port /
+harness / not dolgusu, üstündeki yazının okunurluk ölçümüne ek zemin olarak
+girer (`_TH_ON_EXTRA`). GUI: italik satır = otomatik (ipucunda izlediği renk),
+**↺** elle verilen rengi silip otomatiğe döndürür. `note_background` ve
+`netclass_flag` KiCad'in kendi anahtarları; diğer üçü KiCad'de yok (KiCad
+bilinmeyen anahtarı yok sayar). **Not**: `schdoc.objects` sayfa pinlerini
+(`AltiumSchSheetEntry`) içeriyor ve `sent` rolü alıyor (simple_hierchical'da
+4/4); VURAN-360'ın üst sayfasındaki 12 blokta pin hiç yok.
 **Blok (sayfa sembolü) dolgusu ayrı ve düzenlenebilir** (kullanıcı isteği:
 "sembol ile blok sembolün iç rengi değiştirilebilir olmalı"; listede "Sayfa
 sembolü (blok) dolgusu"). **Tüm hazır temalarda blok ayırt edilir**

@@ -128,6 +128,28 @@ class TestSheetFill(unittest.TestCase):
         self.assertEqual(c["sheet_background"], "#c0e0ff")
         self.assertEqual(c["component_body"], "#ffffc0")
 
+    def test_extra_fills_follow_and_override(self):
+        """Ek dolgu renkleri: verilmezse izlediği renk, verilirse korunur ve dosyaya yazılır."""
+        sch = themes.parse_pack({"schematic": dict(self.BASE)}, "u")["schematic"]
+        self.assertFalse(set(themes.SCH_EXTRA_KEYS) & set(sch), "verilmeyen ek renk pakete girmez")
+        c = themes.sch_theme_readable(sch)
+        for k, src in themes.SCH_EXTRA_FALLBACK.items():
+            self.assertEqual(c[k], c[src], f"{k} ← {src} (uyarlanmış değer)")
+        # elle verilen dolgu korunur; üstündeki yazı o dolguya karşı da okunur
+        p = themes.parse_pack({"schematic": dict(self.BASE, label_global_background="#202020",
+                                                 sheet_label_background="#ffff80")}, "u")
+        c = themes.sch_theme_readable(p["schematic"])
+        self.assertEqual(c["sheet_label_background"], "#ffff80")
+        self.assertEqual(c["label_global_background"], "#202020")
+        fill = themes._th_rgb(c["label_global_background"])
+        self.assertGreaterEqual(themes._th_contrast(themes._th_rgb(c["label_global"]), fill),
+                                themes._TH_MIN_CONTRAST - 1e-6)
+        out = themes.pack_to_kicad(p)["schematic"]
+        self.assertIn("sheet_label_background", out)
+        # "otomatiğe döndür" = anahtarı silmek → dışa aktarımdan da kalkar
+        p["schematic"].pop("sheet_label_background")
+        self.assertNotIn("sheet_label_background", themes.pack_to_kicad(p)["schematic"])
+
     def test_dark_block_on_light_background(self):
         """Blok dolgusu zeminin öbür tarafında: blok içi yazılar ters yönde düzeltilir."""
         sch = themes.parse_pack({"schematic": dict(self.BASE, sheet_background="#202040")},

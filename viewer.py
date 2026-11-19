@@ -92,7 +92,7 @@ from altium_monkey.altium_schdoc import AltiumSchDoc
 
 # Uygulama sürümü — tek kaynak burası; gui.py buradan import eder.
 # HTML çıktılarında sağ üst köşedeki rozette görünür (build saati yerine).
-APP_VERSION = "2.41.1"
+APP_VERSION = "2.42.0"
 
 # Önerilen minimum altium_monkey sürümü. Bu sürümden öncesinde:
 #   · 2026.6.21 öncesi — STM32 gibi IC'lerde dikey pin adları yatay çiziliyordu.
@@ -888,8 +888,10 @@ def _dl_pt(m, x, y):
 # renge çevirir. "Altium (orijinal)" seçiliyken roller yok sayılır → çizim
 # eskisiyle BİREBİR aynı.
 #
-# Rol adları doğrudan KiCad tema anahtarlarıdır (wire, pin_name, …) + birkaç
-# yardımcı ("graphic_fill", "label_fill"; JS takma ad tablosu çözer).
+# Rol adları doğrudan tema anahtarlarıdır: KiCad'inkiler (wire, pin_name, …) +
+# Altium'un ayrı renklendirdiği dolgular (themes.SCH_EXTRA_KEYS — port / harness /
+# sayfa pini / not dolgusu, direktif). Gömülen temalarda hepsi doludur; JS takma
+# ad tablosu (TH_ALIAS) yalnız emniyet ağıdır.
 #
 # Tema değerleri KiCad 10'un "KiCad Default" teması (kullanıcının kendi
 # %APPDATA%/kicad/10.0/colors/user.json'ı) ve pointhi/kicad-color-schemes
@@ -1117,11 +1119,13 @@ def _dl_role(stack, part, fill="", stroke="", text=None) -> str:
         return simple[tag]
     if tag in ("port", "harn"):
         lbl = "label_global" if tag == "port" else "label_hier"
-        return "label_fill" if part == "f" else lbl
+        if part == "f":
+            return "label_global_background" if tag == "port" else "label_hier_background"
+        return lbl
     if tag == "pwr":
         return "value" if part == "t" else solid("component_body", "component_outline")
     if tag == "sent":
-        return "sheet_background" if part == "f" else "sheet_label"
+        return "sheet_label_background" if part == "f" else "sheet_label"
     if tag == "ssym":
         return "sheet_background" if part == "f" else "sheet"
     if tag == "sheet":
@@ -1138,10 +1142,10 @@ def _dl_role(stack, part, fill="", stroke="", text=None) -> str:
                 return solid("component_body", "component_outline")
             return "component_outline"
         if part == "f":
-            return solid("graphic_fill", "note")
+            return solid("note_background", "note")
         return "note"
     if tag == "note":
-        return "graphic_fill" if part == "f" else "note"
+        return "note_background" if part == "f" else "note"
     return ""
 
 
@@ -9343,7 +9347,8 @@ function pickTheme(st, def, list) {{
   return ok(def) ? def : 'altium';
 }}
 // Temada karşılığı olmayan yardımcı roller → KiCad anahtarı
-const TH_ALIAS = {{ graphic_fill: 'component_body', label_fill: 'background',
+const TH_ALIAS = {{ note_background: 'component_body', label_global_background: 'background',
+                    label_hier_background: 'background', sheet_label_background: 'sheet_background',
                     netclass_flag: 'note', junction: 'wire' }};
 let schTheme = null;
 let thCache = new Map();

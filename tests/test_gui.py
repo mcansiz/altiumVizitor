@@ -134,6 +134,36 @@ class TestGui(unittest.TestCase):
         finally:
             win.close()
 
+    def test_theme_preview_clickable(self):
+        """Şematik önizlemesi listedeki HER rengi gösterir; öğeye tıklamak o rengi açar."""
+        import tempfile
+        from unittest import mock
+        from PyQt5 import QtCore, QtGui, QtTest, QtWidgets
+        import theme_dialog as td
+        with tempfile.TemporaryDirectory() as tmp:
+            dlg = td.ThemeDialog(None, "kicad", "kicad", theme_dir=tmp)
+            try:
+                dlg.resize(1200, 800)
+                dlg.show()
+                self.app.processEvents()
+                pv = dlg.ui["schematic"]["preview"]
+                pv.grab()                       # paintEvent → tıklama bölgeleri
+                keys = {k for _p, k in pv._hits}
+                self.assertEqual([lbl for k, lbl in td.SCH_ROWS if k not in keys], [])
+                # Bağlantı noktasının merkezine tıkla → "Bağlantı noktaları" rengi açılır
+                pos = pv._xf.map(QtCore.QPointF(250, 105)).toPoint()
+                self.assertEqual(pv.item_at(pos), ("junction",))
+                with mock.patch.object(QtWidgets.QMessageBox, "question",
+                                       return_value=QtWidgets.QMessageBox.Yes), \
+                     mock.patch.object(QtWidgets.QColorDialog, "getColor",
+                                       return_value=QtGui.QColor(1, 2, 3)) as gc:
+                    QtTest.QTest.mouseClick(pv, QtCore.Qt.LeftButton, pos=pos)
+                self.assertEqual(gc.call_count, 1)
+                self.assertEqual(td._get(dlg.current_pack("schematic")["schematic"],
+                                         ("junction",)), "#010203")
+            finally:
+                dlg.close()
+
     def test_status_bar_survives_status_tips(self):
         """Alt çubuktaki sürüm bilgisi menü ipucundan sonra kaybolmuyor."""
         from PyQt5 import QtGui, QtWidgets

@@ -235,9 +235,30 @@ def sch_theme_readable(colors: dict) -> dict:
     sb = parse_color(c.get("sheet_background"))
     if not sb or sb[3] < 0.05:                 # saydam blok → ayırt edilen dolgu
         c["sheet_background"] = derive_sheet_fill(c)
+    # Elle verilmiş ek renkler (SCH_EXTRA_KEYS); verilmeyenler EN SONDA, uyarlanmış
+    # renklerden doldurulur (netclass_flag ← uyarlanmış note — eski davranış).
+    explicit = {k for k in SCH_EXTRA_KEYS if norm_color(c.get(k))}
+    return _sch_readable(c, explicit)
+
+
+def sch_resolve_extras(c: dict, explicit=()) -> dict:
+    """@brief Tanımsız ek renkleri (SCH_EXTRA_KEYS) izledikleri renkle doldurur (yerinde).
+
+    @param c Şematik renkleri
+    @param explicit Elle verilmiş (dokunulmayacak) ek anahtarlar
+    @return c
+    """
+    for k in SCH_EXTRA_KEYS:
+        if k not in explicit:
+            c[k] = c.get(SCH_EXTRA_FALLBACK[k])
+    return c
+
+
+def _sch_readable(c, explicit):
+    """@brief sch_theme_readable'ın gövdesi (blok dolgusu türetildikten sonra)."""
     bg = _th_rgb(c["background"])
     if not bg:
-        return c
+        return sch_resolve_extras(c, explicit)
     # Yarı saydam renk (KiCad temalarında gövde dolgusu / not rengi `rgba`
     # olabiliyor — shirokuma): kontrast, zemine karıştırılmış ETKİN renkle
     # ölçülür. Eskiden `_th_rgb` saydamda None verdiğinden tüm uyarlama
@@ -245,14 +266,19 @@ def sch_theme_readable(colors: dict) -> dict:
     body = _th_over(c["component_body"], bg)
     sheet = _th_over(c["sheet_background"], bg)
     if not body or not sheet:
-        return c
+        return sch_resolve_extras(c, explicit)
     darken = _th_lum(bg) > 0.18
-    for k in _TH_ON_BG:
+    # Elle verilmiş dolgu, üstündeki yazının ölçüleceği ek zemindir; verilmemişse
+    # dolgu zaten zemine / gövdeye eşittir (sonuç eskisiyle aynı kalır).
+    extra_bg = {k: _th_over(c[f], bg) for k, f in _TH_ON_EXTRA.items() if f in explicit}
+    keys = _TH_ON_BG + (("netclass_flag",) if "netclass_flag" in explicit else ())
+    for k in keys:
         rgb = _th_over(c.get(k), bg)
         if not rgb:
             continue
         refs = ([bg] + ([body] if k in _TH_ON_BODY else [])
-                + ([sheet] if k in _TH_ON_SHEET else []))
+                + ([sheet] if k in _TH_ON_SHEET else [])
+                + ([extra_bg[k]] if extra_bg.get(k) else []))
         worst = lambda x: min(_th_contrast(x, r) for r in refs)
         if worst(rgb) >= _TH_MIN_CONTRAST:
             continue
@@ -278,7 +304,7 @@ def sch_theme_readable(colors: dict) -> dict:
             if best[0] >= _TH_MIN_CONTRAST:
                 break
         c[k] = "#%02x%02x%02x" % best[1]
-    return c
+    return sch_resolve_extras(c, explicit)
 
 
 def is_dark(color) -> bool:
@@ -362,6 +388,26 @@ SCH_KEYS = (
     "label_local", "label_global", "label_hier", "sheet", "sheet_background",
     "sheet_name", "sheet_filename", "sheet_label", "no_connect", "note", "worksheet",
 )
+# Altium'un ayrı renklendirdiği, KiCad temasında karşılığı olmayan (ya da KiCad'de
+# isteğe bağlı olan) dolgu / işaret renkleri (v2.42.0, kullanıcı isteği: "blok
+# pininin sarı alanı ve genel etiketin zemin rengi değişebilsin"). Tanımlı
+# DEĞİLSE izledikleri rengi alırlar → mevcut temaların görünümü değişmez; tema
+# dosyasına yalnız elle verilmişse yazılır. `note_background` ve
+# `netclass_flag` KiCad'in kendi anahtarlarıdır; diğer üçü KiCad'de yok
+# (KiCad tema dosyasında bilinmeyen anahtarı yok sayar).
+SCH_EXTRA_KEYS = ("label_global_background", "label_hier_background",
+                  "sheet_label_background", "note_background", "netclass_flag")
+SCH_EXTRA_FALLBACK = {
+    "label_global_background": "background",     # port (genel etiket) dolgusu
+    "label_hier_background": "background",       # harness / hiyerarşik etiket dolgusu
+    "sheet_label_background": "sheet_background",  # sayfa pini (sheet entry) dolgusu
+    "note_background": "component_body",         # metin çerçevesi / serbest çizim dolgusu
+    "netclass_flag": "note",                      # direktif (parameter set) / blanket
+}
+# Okunurluk: yazısı bu dolgunun ÜSTÜNDE duran rol (dolgu elle verildiyse ölçülür)
+_TH_ON_EXTRA = {"label_global": "label_global_background",
+                "label_hier": "label_hier_background",
+                "note": "note_background"}
 # Eksik anahtarın yedek zinciri (eski sürüm KiCad temalarında `worksheet` /
 # `sheet_background` yok; elle yazılmış dosyalarda daha fazlası eksik olabilir).
 _SCH_FALLBACK = {
@@ -679,6 +725,10 @@ def _norm_sch(sec):
             c[k] = last
     if not c["sheet_background"]:
         c["sheet_background"] = derive_sheet_fill(c)   # saydam blok → ayırt edilen dolgu
+    for k in SCH_EXTRA_KEYS:                 # ek renkler yalnız dosyada varsa
+        v = norm_color(sec.get(k))
+        if v:
+            c[k] = v
     return c
 
 
@@ -819,6 +869,9 @@ def pack_to_kicad(pack) -> dict:
     if pack.get("schematic"):
         sec = raw.get("schematic") if isinstance(raw.get("schematic"), dict) else {}
         sec.update({k: kicad_color(v) for k, v in pack["schematic"].items() if kicad_color(v)})
+        for k in SCH_EXTRA_KEYS:             # "otomatik"e döndürülmüş ek renk dosyadan da kalkar
+            if not kicad_color(pack["schematic"].get(k)):
+                sec.pop(k, None)
         raw["schematic"] = sec
     if pack.get("board"):
         sec = raw.get("board") if isinstance(raw.get("board"), dict) else {}
